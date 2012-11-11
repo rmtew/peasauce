@@ -942,6 +942,8 @@ def get_operand_string(pc, operand, vars, lookup_symbol=None):
     elif key == "DISPLACEMENT":
         # TODO: This should not fall to this file, but to the user, who relocates and labelises.
         return signed_hex_string(vars["xxx"])
+    elif key in SpecialRegisters:
+        return key
     else:
         return _get_formatted_ea_description(pc, key, vars, lookup_symbol=lookup_symbol)
 

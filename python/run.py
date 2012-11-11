@@ -40,10 +40,15 @@ logger.addHandler(ch)
 reloc_addresses = None
 branch_addresses = None
 disassembly_listctrl = None
-file_metadata_blocks = None
 file_info = None
 symbols_by_address = None
 entrypoint_address = None
+
+file_metadata_addresses = None
+file_metadata_line0 = None
+file_metadata_blocks = None
+file_metadata_dirtyidx = None
+
 
 class DisplayConfiguration(object):
     trailing_line_rts = True
@@ -162,133 +167,129 @@ if DEBUG_ANNOTATE_DISASSEMBLY:
 
 
 def get_file_line(line_idx, column_idx): # Zero-based
-    block_line_countN = 0
-    for block in file_metadata_blocks:
-        block_line_count0 = block_line_countN
-        block_line_countN += block.line_count
-        # If the line falls after this block, skip to the next one.
-        if line_idx >= block_line_countN:
-            continue
-
-        # If the line is the first of the block, check if it is a segment header.
-        leading_line_count = 0
-        if block.idx == 0 and file_info.has_section_headers():
-            if line_idx == block_line_count0:
-                section_header = file_info.get_section_header(block.segment_id)
-                i = section_header.find(" ")
-                if column_idx == LI_INSTRUCTION:
-                    return section_header[0:i]
-                elif column_idx == LI_OPERANDS:
-                    return section_header[i+1:]
-                else:
-                    return ""
-            leading_line_count += 1
-
-        # If the line is the last line in a block, check if it a "between segments" trailing blank line.
-        if line_idx == block_line_countN-1:
-            if block.idx + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
-                return ""
-
-        # Trailing blank lines after code (factor in leading lines).
-        if get_data_type(block.flags) == DATA_TYPE_CODE:
-            if line_idx > block_line_count0 + leading_line_count:
-                return ""
-
-        if get_data_type(block.flags) == DATA_TYPE_CODE:
-            if column_idx == LI_OFFSET:
-                return "%08X" % block.abs_idx
-            elif column_idx == LI_BYTES:
-                data = file_info.get_segment_data(block.segment_id)
-                return "".join([ "%02X" % c for c in data[block.idx:block.idx+block.length] ])
-            elif column_idx == LI_LABEL:
-                label = lookup_address_label(block.abs_idx)
-                if label is None:
-                    return ""
-                return label
-            elif column_idx == LI_INSTRUCTION:
-                return archm68k.get_instruction_string(block.code_match, block.code_match.vars)
+    block, block_idx = lookup_metadata_by_line_count(line_idx)
+    block_line_count0 = file_metadata_line0[block_idx]
+    block_line_countN = block_line_count0 + block.line_count
+    
+    # If the line is the first of the block, check if it is a segment header.
+    leading_line_count = 0
+    if block.idx == 0 and file_info.has_section_headers():
+        if line_idx == block_line_count0:
+            section_header = file_info.get_section_header(block.segment_id)
+            i = section_header.find(" ")
+            if column_idx == LI_INSTRUCTION:
+                return section_header[0:i]
             elif column_idx == LI_OPERANDS:
-                def make_operand_string(block, operand, operand_idx):
-                    operand_string = None
-                    if operand.specification.key == "DISPLACEMENT":
-                        operand_string = lookup_address_label(block.code_match.pc + operand.vars["xxx"])
-                    elif operand.specification.key == "AbsL" or operand.key == "AbsL":
-                        operand_string = lookup_address_label(operand.vars["xxx"])
-                    elif operand_idx == 0 and (operand.specification.key == "Imm" or operand.key == "Imm"):
-                        if len(block.code_match.opcodes) > 1:
-                            operand2 = block.code_match.opcodes[1]
-                            if (operand2.specification.key == "AR" or operand.key == "AR"):
-                                operand_string = lookup_address_label(operand.vars["xxx"])
-                                if operand_string is not None:
-                                    operand_string = "#"+ operand_string
-                    if operand_string is None:
-                        return archm68k.get_operand_string(block.code_match.pc, operand, operand.vars, lookup_symbol=lookup_address_label)
-                    return operand_string
-                opcode_string = ""
-                if len(block.code_match.opcodes) >= 1:
-                    opcode_string += make_operand_string(block, block.code_match.opcodes[0], 0)
-                if len(block.code_match.opcodes) == 2:
-                    opcode_string += ", "+ make_operand_string(block, block.code_match.opcodes[1], 1)
-                return opcode_string
-            elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
-                l = []
-                for o in block.code_match.opcodes:
-                    key = o.specification.key
-                    if o.key is not None and key != o.key:
-                        l.append(o.key)
-                    else:
-                        l.append(key)
-                return block.code_match.specification.key +" "+ ",".join(l)
-        elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
-            # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
-            size_types = []
-            if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
-                size_types.append((4, "L", archm68k._get_long))
-            if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD):
-                size_types.append((2, "W", archm68k._get_word))
-            if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
-                size_types.append((1, "B", archm68k._get_byte))
+                return section_header[i+1:]
+            else:
+                return ""
+        leading_line_count += 1
 
-            unconsumed_byte_count = block.length
-            size_line_countN = block_line_count0 + leading_line_count
-            for num_bytes, size_char, read_func in size_types:
-                size_line_count = unconsumed_byte_count / num_bytes
-                if size_line_count == 0:
-                    continue
-                data_idx0 = block.idx + (block.length - unconsumed_byte_count)
-                unconsumed_byte_count -= size_line_count * num_bytes
-                size_line_count0 = size_line_countN
-                size_line_countN += size_line_count
-                if line_idx < size_line_countN:
-                    data_idx = data_idx0 + (line_idx - size_line_count0) * num_bytes
-                    if column_idx == LI_OFFSET:
-                        return "%08X" % (file_info.get_segment_address(block.segment_id) + data_idx)
-                    elif column_idx == LI_BYTES:
-                        if block.flags & BLOCK_FLAG_ALLOC:
-                            return ""
-                        data = file_info.get_segment_data(block.segment_id)
-                        return "".join([ "%02X" % c for c in data[data_idx:data_idx+num_bytes] ])
-                    elif column_idx == LI_LABEL:
-                        label = lookup_address_label(file_info.get_segment_address(block.segment_id) + data_idx)
-                        if label is None:
-                            return ""
-                        return label
-                    elif column_idx == LI_INSTRUCTION:
-                        name = file_info.get_data_instruction_string(block.segment_id, (block.flags & BLOCK_FLAG_ALLOC) != BLOCK_FLAG_ALLOC)
-                        return name +"."+ size_char
-                    elif column_idx == LI_OPERANDS:
-                        if block.flags & BLOCK_FLAG_ALLOC:
-                            return str(size_line_count)
-                        data = file_info.get_segment_data(block.segment_id)
-                        value = read_func(data, data_idx)[0]
-                        label = None
-                        if size_char == "L":
-                            label = lookup_address_label(value, reloc_only=True)
-                        if label is None:
-                            label = ("$%0"+ str(num_bytes<<1) +"X") % value
-                        return label
-                    elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
-                        return "-"
+    # If the line is the last line in a block, check if it a "between segments" trailing blank line.
+    if line_idx == block_line_countN-1:
+        if block.idx + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
+            return ""
+
+    # Trailing blank lines after code (factor in leading lines).
+    if get_data_type(block.flags) == DATA_TYPE_CODE:
+        if line_idx > block_line_count0 + leading_line_count:
+            return ""
+
+    if get_data_type(block.flags) == DATA_TYPE_CODE:
+        if column_idx == LI_OFFSET:
+            return "%08X" % block.abs_idx
+        elif column_idx == LI_BYTES:
+            data = file_info.get_segment_data(block.segment_id)
+            return "".join([ "%02X" % c for c in data[block.idx:block.idx+block.length] ])
+        elif column_idx == LI_LABEL:
+            label = lookup_address_label(block.abs_idx)
+            if label is None:
+                return ""
+            return label
+        elif column_idx == LI_INSTRUCTION:
+            return archm68k.get_instruction_string(block.code_match, block.code_match.vars)
+        elif column_idx == LI_OPERANDS:
+            def make_operand_string(block, operand, operand_idx):
+                operand_string = None
+                if operand.specification.key == "DISPLACEMENT":
+                    operand_string = lookup_address_label(block.code_match.pc + operand.vars["xxx"])
+                elif operand.specification.key == "AbsL" or operand.key == "AbsL":
+                    operand_string = lookup_address_label(operand.vars["xxx"])
+                elif operand_idx == 0 and (operand.specification.key == "Imm" or operand.key == "Imm"):
+                    if len(block.code_match.opcodes) > 1:
+                        operand2 = block.code_match.opcodes[1]
+                        if (operand2.specification.key == "AR" or operand.key == "AR"):
+                            operand_string = lookup_address_label(operand.vars["xxx"])
+                            if operand_string is not None:
+                                operand_string = "#"+ operand_string
+                if operand_string is None:
+                    return archm68k.get_operand_string(block.code_match.pc, operand, operand.vars, lookup_symbol=lookup_address_label)
+                return operand_string
+            opcode_string = ""
+            if len(block.code_match.opcodes) >= 1:
+                opcode_string += make_operand_string(block, block.code_match.opcodes[0], 0)
+            if len(block.code_match.opcodes) == 2:
+                opcode_string += ", "+ make_operand_string(block, block.code_match.opcodes[1], 1)
+            return opcode_string
+        elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
+            l = []
+            for o in block.code_match.opcodes:
+                key = o.specification.key
+                if o.key is not None and key != o.key:
+                    l.append(o.key)
+                else:
+                    l.append(key)
+            return block.code_match.specification.key +" "+ ",".join(l)
+    elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
+        # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
+        size_types = []
+        if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
+            size_types.append((4, "L", archm68k._get_long))
+        if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD):
+            size_types.append((2, "W", archm68k._get_word))
+        if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
+            size_types.append((1, "B", archm68k._get_byte))
+
+        unconsumed_byte_count = block.length
+        size_line_countN = block_line_count0 + leading_line_count
+        for num_bytes, size_char, read_func in size_types:
+            size_line_count = unconsumed_byte_count / num_bytes
+            if size_line_count == 0:
+                continue
+            data_idx0 = block.idx + (block.length - unconsumed_byte_count)
+            unconsumed_byte_count -= size_line_count * num_bytes
+            size_line_count0 = size_line_countN
+            size_line_countN += size_line_count
+            if line_idx < size_line_countN:
+                data_idx = data_idx0 + (line_idx - size_line_count0) * num_bytes
+                if column_idx == LI_OFFSET:
+                    return "%08X" % (file_info.get_segment_address(block.segment_id) + data_idx)
+                elif column_idx == LI_BYTES:
+                    if block.flags & BLOCK_FLAG_ALLOC:
+                        return ""
+                    data = file_info.get_segment_data(block.segment_id)
+                    return "".join([ "%02X" % c for c in data[data_idx:data_idx+num_bytes] ])
+                elif column_idx == LI_LABEL:
+                    label = lookup_address_label(file_info.get_segment_address(block.segment_id) + data_idx)
+                    if label is None:
+                        return ""
+                    return label
+                elif column_idx == LI_INSTRUCTION:
+                    name = file_info.get_data_instruction_string(block.segment_id, (block.flags & BLOCK_FLAG_ALLOC) != BLOCK_FLAG_ALLOC)
+                    return name +"."+ size_char
+                elif column_idx == LI_OPERANDS:
+                    if block.flags & BLOCK_FLAG_ALLOC:
+                        return str(size_line_count)
+                    data = file_info.get_segment_data(block.segment_id)
+                    value = read_func(data, data_idx)[0]
+                    label = None
+                    if size_char == "L":
+                        label = lookup_address_label(value, reloc_only=True)
+                    if label is None:
+                        label = ("$%0"+ str(num_bytes<<1) +"X") % value
+                    return label
+                elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
+                    return "-"
 
     block_line_count0 = block_line_countN
 
@@ -322,8 +323,39 @@ def insert_branch_address(address, src_abs_idx):
 def insert_symbol(address, name):
     symbols_by_address[address] = name
 
+def insert_metadata_block(insert_idx, block):
+    global file_metadata_dirtyidx, file_metadata_addresses, file_metadata_line0, file_metadata_blocks
+    file_metadata_addresses.insert(insert_idx, block.abs_idx)
+    file_metadata_line0.insert(insert_idx, None)
+    file_metadata_blocks.insert(insert_idx, block)
+    # Update how much of the sorted line number index needs to be recalculated.
+    if file_metadata_dirtyidx is not None and insert_idx < file_metadata_dirtyidx:
+        file_metadata_dirtyidx = insert_idx
+
+def lookup_metadata_by_address(lookup_key):
+    global file_metadata_addresses, file_metadata_blocks
+    lookup_index = bisect.bisect_right(file_metadata_addresses, lookup_key)
+    return file_metadata_blocks[lookup_index-1], lookup_index-1
+
+def lookup_metadata_by_line_count(lookup_key):
+    global file_metadata_dirtyidx, file_metadata_line0, file_metadata_blocks
+    # If there's been a block insertion, update the cumulative line counts (if the key.
+    if file_metadata_dirtyidx is not None:
+        line_count_start = 0
+        if file_metadata_dirtyidx > 0:
+            line_count_start = file_metadata_line0[file_metadata_dirtyidx-1] + file_metadata_blocks[file_metadata_dirtyidx-1].line_count
+        for i in range(file_metadata_dirtyidx, len(file_metadata_line0)):
+            file_metadata_line0[i] = line_count_start
+            line_count_start += file_metadata_blocks[i].line_count
+        file_metadata_dirtyidx = None
+    # This could be skipped if an update was done, and it also checked.
+    lookup_index = bisect.bisect_right(file_metadata_line0, lookup_key)
+    return file_metadata_blocks[lookup_index-1], lookup_index-1
+
+
 def UI_display_file():
-    global disassembly_listctrl, file_metadata_blocks, file_metadata_addresses, reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
+    global file_metadata_dirtyidx, file_metadata_line0, file_metadata_addresses, file_metadata_blocks
+    global disassembly_listctrl, reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
     # Clear the disassembly display.
     disassembly_listctrl.SetItemCount(0)
 
@@ -334,6 +366,8 @@ def UI_display_file():
     # Two lists to help bisect do the searching, as it can't look into the blocks to get the sort value.
     file_metadata_blocks = []
     file_metadata_addresses = []
+    file_metadata_line0 = []
+    file_metadata_dirtyidx = 0
 
     entrypoint_segment_id, entrypoint_offset = file_info.get_entrypoint()
     entrypoint_address = file_info.get_segment_address(entrypoint_segment_id) + entrypoint_offset
@@ -356,6 +390,7 @@ def UI_display_file():
         block.length = data_length
         line_count += calculate_line_count(block)
         file_metadata_addresses.append(block.abs_idx)
+        file_metadata_line0.append(None)
         file_metadata_blocks.append(block)
 
         if segment_length > data_length:
@@ -368,6 +403,7 @@ def UI_display_file():
             block.length = segment_length - data_length
             line_count += calculate_line_count(block)
             file_metadata_addresses.append(block.abs_idx)
+            file_metadata_line0.append(None)
             file_metadata_blocks.append(block)
 
     # Pass 2: Do a data caching pass.
@@ -400,15 +436,17 @@ def UI_display_file():
         del disassembly_offsets[0]
 
         # Identify the block it currently falls within.
-        # bisect sorts based on value, and the list contains blocks..
-        block_idx = bisect.bisect_left(file_metadata_addresses, abs_idx)
-        if block_idx == len(file_metadata_addresses):
-            li = len(file_metadata_addresses)-1
-            lb = file_metadata_blocks[li]
-            print abs_idx, (lb.abs_idx, lb.abs_idx + lb.length)
-        if file_metadata_addresses[block_idx] != abs_idx:
-            block_idx -= 1
-        block = file_metadata_blocks[block_idx]
+        block, block_idx = lookup_metadata_by_address(abs_idx)
+        if False:
+            # bisect sorts based on value, and the list contains blocks..
+            block_idx = bisect.bisect_left(file_metadata_addresses, abs_idx)
+            if block_idx == len(file_metadata_addresses):
+                li = len(file_metadata_addresses)-1
+                lb = file_metadata_blocks[li]
+                print "?? what was this for?", abs_idx, (lb.abs_idx, lb.abs_idx + lb.length)
+            if file_metadata_addresses[block_idx] != abs_idx:
+                block_idx -= 1
+            block = file_metadata_blocks[block_idx]
 
         data = file_info.get_segment_data(block.segment_id)
         data_idx_start = (abs_idx + block.idx) - block.abs_idx
@@ -438,8 +476,7 @@ def UI_display_file():
                 block.segment_id = leading_block.segment_id
                 block.idx = leading_block.idx + leading_block.length
                 block.abs_idx = leading_block.abs_idx + leading_block.length
-                file_metadata_addresses.insert(block_idx+1, block.abs_idx)
-                file_metadata_blocks.insert(block_idx+1, block)
+                insert_metadata_block(block_idx+1, block)
 
             # Insert the new code block.
             set_data_type(block, DATA_TYPE_CODE)
@@ -506,11 +543,9 @@ def UI_display_file():
 
                 # Place the excess length block after the one just processed in the list of blocks that make up the address space.
                 if leading_block != block:
-                    file_metadata_addresses.insert(block_idx+2, trailing_block.abs_idx)
-                    file_metadata_blocks.insert(block_idx+2, trailing_block)
+                    insert_metadata_block(block_idx+2, trailing_block)
                 else:
-                    file_metadata_addresses.insert(block_idx+1, trailing_block.abs_idx)
-                    file_metadata_blocks.insert(block_idx+1, trailing_block)
+                    insert_metadata_block(block_idx+1, trailing_block)
 
                 if instruction_key not in ("RTS", "RTR", "JMP", "BRA"):
                     if trailing_block.abs_idx not in disassembly_checklist:

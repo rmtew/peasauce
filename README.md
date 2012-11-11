@@ -75,6 +75,7 @@ This is intended to be a summarised list of short points that briefly note inten
 * Disassembly: Research assembler syntax for different platforms, to generalise custom output.
 * Disassembly: Choose use of new or old style assembly syntax.
 * File loading: For Amiga, choose use of "DATA, CHIP" or "DATA_C" in section headers.
+* UI: Consider using one block for all consecutive lines of code where only the first has a label.
 * UI: Ala Resource, change the datatype of a block.
 * UI: Ala Resource, change the numeric base of a value.
 * UI: Enable user doing disassembly work, with editing actions.
