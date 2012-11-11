@@ -2,7 +2,7 @@
 
 ## Support
 
-If you need to email me, perhaps to mention your rich royal Nigerian diplomat uncle who needs access to my bank account, my email address is:
+You can email me at:
 
  richard.m.tew@gmail.com
 
