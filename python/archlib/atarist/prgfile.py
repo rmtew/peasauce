@@ -1,0 +1,220 @@
+"""
+    Peasauce - interactive disassembler
+    Copyright (C) 2012  Richard Tew
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+
+"""
+GEMDOS PRG executable files.
+
+The text and data segments seem to be loaded contiguously, given that
+relocation seems to happen within both based on the base address of
+where the text segment is loaded in memory.
+"""
+
+import os
+import sys
+import logging
+
+
+logger = logging.getLogger("loader-atarist")
+
+
+SIZEOF_HEADER = 0x1E - 2 # ??? Documentation differs from reality :-(
+
+MAGIC_WORD = 0x601A
+
+SEGMENT_TEXT    = 1
+SEGMENT_DATA    = 2
+SEGMENT_BSS     = 3
+
+SIZEOF_SYMBOL_ENTRY = 8 + 2 + 4
+
+SYMBOL_DEFINED                  = 0x8000
+SYMBOL_EQUATED                  = 0x4000
+SYMBOL_GLOBAL                   = 0x2000
+SYMBOL_EQUATED_REGISTER         = 0x1000
+SYMBOL_EXTERNAL_REFERENCE       =  0x800
+SYMBOL_DATA_BASED_RELOCATABLE   =  0x400
+SYMBOL_TEXT_BASED_RELOCATABLE   =  0x200
+SYMBOL_BSS_BASED_RELOCATABLE    =  0x100
+
+SYMBOL_SEGMENT_MASK             = SYMBOL_DATA_BASED_RELOCATABLE | SYMBOL_TEXT_BASED_RELOCATABLE | SYMBOL_BSS_BASED_RELOCATABLE
+
+
+def is_accepted_file_type(word1):
+    """ Whether the first word of a potentially loaded file is handled by us. """
+    if word1 == MAGIC_WORD:
+        return True
+    return False
+
+
+class PRGFile(object):
+    # Executable file header field values.
+    _text_segment_size = 0
+    _data_segment_size = 0
+    _bss_segment_size = 0
+    _symbol_table_size = 0
+    _reserved1 = None
+    _reserved2 = None
+    _reserved3 = None
+
+    # Processed file metadata.
+    _hunk_sizes = None
+    _symbol_table_entries = None
+    _fixup_offsets = None
+
+
+def load_file(file_info):
+    with open(file_info.file_path, "rb") as f:
+        return load_prg_file(file_info, f)
+
+def load_prg_file(file_info, f):
+    magic_word = file_info.uint16(f.read(2))
+    if magic_word != MAGIC_WORD:
+        logger.debug("atarist/prgfile.py: _process_file: Unrecognised file.")
+        return False
+
+    prg_file = PRGFile()
+    prg_file._hunk_sizes = []
+
+    # Read the PRG executable file header.
+    prg_file._text_segment_size = file_info.uint32(f.read(4))
+    prg_file._data_segment_size = file_info.uint32(f.read(4))
+    prg_file._bss_segment_size = file_info.uint32(f.read(4))
+    prg_file._symbol_table_size = file_info.uint32(f.read(4))
+    prg_file._reserved1 = file_info.uint32(f.read(4))
+    prg_file._reserved2 = file_info.uint32(f.read(4))
+    prg_file._reserved3 = file_info.uint16(f.read(2)) # GEMDOS reference manual says this should be a longword, but that does not work.
+
+    if f.tell() != SIZEOF_HEADER:
+        logger.debug("Header size mismatch")
+        return False
+
+    # Process the file meta-data.
+    if not _read_symbol_table(file_info, prg_file, f):
+        return False
+
+    if not _read_fixup_information(file_info, prg_file, f):
+        return False
+
+    symbols = []
+    for symbol_name, symbol_type, symbol_value in prg_file._symbol_table_entries:
+        if symbol_type & SYMBOL_SEGMENT_MASK:
+            symbols.append((symbol_value, symbol_name, True))
+
+    # Disassembler segment partitioning.
+    merged_segment_offset = SIZEOF_HEADER
+    merged_segment_size = prg_file._text_segment_size + prg_file._data_segment_size
+    prg_file._hunk_sizes.append((SEGMENT_TEXT, merged_segment_offset, merged_segment_size, merged_segment_size))
+    file_info.add_code_segment(merged_segment_offset, merged_segment_size, merged_segment_size, prg_file._fixup_offsets, symbols)
+
+    if prg_file._bss_segment_size:
+        # Does not contain file data, so no file offset, or file data length.
+        prg_file._hunk_sizes.append((SEGMENT_BSS, 0, 0, prg_file._bss_segment_size))
+        file_info.add_bss_segment(-1, 0, prg_file._bss_segment_size, [], {})
+
+    file_info.set_file_data(prg_file)
+
+    return True
+
+
+def _read_symbol_table(file_info, prg_file, f):
+    file_offset = SIZEOF_HEADER + prg_file._text_segment_size + prg_file._data_segment_size
+    f.seek(file_offset, os.SEEK_SET)
+
+    entry_count = prg_file._symbol_table_size / SIZEOF_SYMBOL_ENTRY
+    if entry_count * SIZEOF_SYMBOL_ENTRY != prg_file._symbol_table_size:
+        logger.debug("Symbol table size mismatch")
+        return False
+
+    l = []
+    while len(l) != entry_count:
+        symbol_name = f.read(8)
+        # Strip unused space (null termination).
+        idx = symbol_name.find("\0")
+        if idx != -1:
+            symbol_name = symbol_name[:idx]
+        symbol_type = file_info.uint16(f.read(2))
+        symbol_value = file_info.uint32(f.read(4))
+        l.append((symbol_name, symbol_type, symbol_value))
+
+    prg_file._symbol_table_entries = l
+    return True
+
+
+def _read_fixup_information(file_info, prg_file, f):
+    file_offset = SIZEOF_HEADER + prg_file._text_segment_size + prg_file._data_segment_size + prg_file._symbol_table_size
+    f.seek(file_offset, os.SEEK_SET)
+
+    # First longword is an offset.  If it is NULL, there are no fixups to make.
+    l = []
+    offset = file_info.uint32(f.read(4))
+    if offset != 0:
+        offsets = [ offset ]
+
+        maximum_offset = prg_file._text_segment_size + prg_file._data_segment_size
+        while 1:
+            byte = file_info.uint8(f.read(1))
+            if byte == 0:
+                break
+            elif byte == 1:
+                offset += 254
+            else:
+                offset += byte
+                if offset < maximum_offset:
+                    offsets.append(offset)
+                else:
+                    logger.debug("Fixup table data unexpected")
+                    return False
+        l.append((0, offsets))
+
+    prg_file._fixup_offsets = l
+    return True
+
+
+def print_summary(file_info):
+    prg_file = file_info.file_data
+
+    print "Text segment size:", prg_file._text_segment_size
+    print "Data segment size:", prg_file._data_segment_size
+    print "BSS segment size:", prg_file._bss_segment_size
+    print "reserved1:", hex(prg_file._reserved1)
+    print "reserved2:", hex(prg_file._reserved2)
+    print "reserved3:", hex(prg_file._reserved3)
+
+    print "# fixups:", sum(len(offsets) for (segment_id, offsets) in prg_file._fixup_offsets)
+
+    print "# symbols:", len(prg_file._symbol_table_entries)
+    if False:
+        # Order the SYMBOL type masks from highest to lowest bits, for visual display.
+        symbol_flags = [
+            (k, v)
+            for (k, v) in globals().items()
+            if k.startswith("SYMBOL_") and k != "SYMBOL_SEGMENT_MASK"
+        ]
+        symbol_flags.sort(lambda a, b: cmp(a[1], b[1]))
+
+        # List all the extracted symbols.
+        for symbol_name, symbol_type, symbol_value in prg_file._symbol_table_entries:
+            s = ""
+            for i, (k, v) in enumerate(symbol_flags):
+                if symbol_type & v:
+                    if len(s) and i > 0:
+                        s += " | "
+                    s += k
+            # if symbol_type & SYMBOL_SEGMENT_MASK == 0:
+            print s, hex(symbol_value), symbol_name
+
