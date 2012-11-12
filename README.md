@@ -12,8 +12,7 @@ If you wish to generally support or encourage the development of this tool, or s
 
 The current primary goal is to handle disassembling Amiga m68000 executables. Support for the wider family of m680x0 instructions, or executables for other platforms that used these chips is within scope, in order to drive better code structure for later expansion to other architectures or platforms.
 
-Using Resource to disassemble within an Amiga emulator is still a wonderful experience, however it has aged.  It is not possible to modify it, and it is also nowhere near as nice as being able to use a proper application in your
-own operating system.
+Using Resource to disassemble within an Amiga emulator is still a wonderful experience, however it has aged.  It is not possible to modify it, and it is also nowhere near as nice as being able to use a proper application in your own operating system.
 
 ## Features
 
@@ -30,22 +29,27 @@ Note that there are limitations, files which include unsupported assembly code o
 
 All files that comprise this are released under the GPLv3 license.
 
-Any source code contributions must be made by the sole author of those
-contributions, and be contributed with dual licensing under both the
-MIT and GPLv3 license.  At some point in the future, I may wish to
-use parts of this in commercial projects, or switch the license of the
-open source project as a whole to the more liberal MIT license.
+Any source code contributions must be made by the sole author of those contributions, and be contributed with dual licensing under both the MIT and GPLv3 license.  At some point in the future, I may wish to use parts of this in commercial projects, or switch the license of the open source project as a whole to the more liberal MIT license.
 
 ## Installation
 
-Currently Peasauce is prototyped in Python.
+Currently Peasauce is prototyped in Python using wxPython to display it's user interface.  The only installation you need to do, is to ensure the following prerequisites are installed on your computer.
 
 1. Download and install [Python 2.7](http://python.org/download/) for your platform.
 2. Download and install [wxPython for Python 2.7](http://www.wxpython.org/download.php) for your platform.
 
 ## Usage
 
-Once you have Peasauce installed, run it's "run.py" Python script.
+With the prerequisites installed, and with the source code that accompanies this file on hand, you should be able to run Peasauce.  Note that you will need either Amiga, X68000 or Atari ST executable files to load into it.  You can obtain many Amiga programs from [aminet.net](http://aminet.net).  Some Amiga programs are archived using now obscure compression programs, but if you also download and install [7zip](www.7-zip.org) you should be able to extract files from within them.
+
+Method 1 (any platform):
+* Enter the "python" directory and run the "run.py" Python script.
+
+Method 2 (Windows):
+* Run "run.bat".
+
+Method 3 (Linux, MacOS X, etc):
+* Edit "run.sh" to be able to find your Python 2.7 executable and run it.
 
 You should be able to use the user interface to:
 * Load and disassemble a new file.
@@ -54,13 +58,15 @@ You should be able to use the user interface to:
 
 ## Future Work
 
-This is intended to be a summarised list of short points that briefly note intended work, or possible future work.
+This is intended to be a summarised list of points that briefly note intended work, or possible future work.
 
 ### Short Term
 
 #### Bugs
 
-* UI: Should split blocks based on known symbols before any disassembly (BSS addresses good example).
+* File loading: Need to track both addresses that were relocated, and addresses at which relocations were made.  This will give more correct labeling.
+* UI: Next code / next data use EnsureVisible which is not good enough.
+* UI: Goto address menu item goes to the start of the block that includes that address.  It needs to calculate the line number for an address and go to that.
 * UI: Should split blocks on address discovery.
 * UI: Address extraction from disassembly match should not happen in UI, as UI should not be m68k specific.
 * UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.
@@ -84,16 +90,14 @@ This is intended to be a summarised list of short points that briefly note inten
 * UI: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
 * UI: Add leading comments that detail file type, processor, entry point offset.. maybe more.
 
-#### Optimisation
-
-* UI: Lots of lines virtually displayed means a slow/sluggish wx UI.
-
 #### Technical Debt
 
 * Coding style: Better error propagation, no exception raising on purpose.
 * Coding style: Make code / system interaction more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * File loading: Clean up file_info.file_data to only store useful information.
+* UI: Rename "block.idx" to "block.segment_offset" or similar.
+* UI: Rename "block.abs_idx" to "block.address" or similar.
 
 ### Medium Term
 

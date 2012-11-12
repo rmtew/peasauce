@@ -45,7 +45,7 @@ symbols_by_address = None
 entrypoint_address = None
 
 file_metadata_addresses = None
-file_metadata_line0 = None
+file_metadata_line0s = None
 file_metadata_blocks = None
 file_metadata_dirtyidx = None
 
@@ -108,7 +108,7 @@ DATA_TYPE_BIT0      = DATA_TYPE_CODE - 1
 DATA_TYPE_BITCOUNT  = _count_bits(DATA_TYPE_LONGWORD)
 DATA_TYPE_BITMASK   = _make_bitmask(DATA_TYPE_BITCOUNT)
 
-""" If the block is not backed by file data. """
+""" Indicates that the block is not backed by file data. """
 BLOCK_FLAG_ALLOC    = 1 << DATA_TYPE_BITCOUNT
 
 
@@ -168,7 +168,7 @@ if DEBUG_ANNOTATE_DISASSEMBLY:
 
 def get_file_line(line_idx, column_idx): # Zero-based
     block, block_idx = lookup_metadata_by_line_count(line_idx)
-    block_line_count0 = file_metadata_line0[block_idx]
+    block_line_count0 = file_metadata_line0s[block_idx]
     block_line_countN = block_line_count0 + block.line_count
     
     # If the line is the first of the block, check if it is a segment header.
@@ -253,13 +253,16 @@ def get_file_line(line_idx, column_idx): # Zero-based
         unconsumed_byte_count = block.length
         size_line_countN = block_line_count0 + leading_line_count
         for num_bytes, size_char, read_func in size_types:
-            size_line_count = unconsumed_byte_count / num_bytes
-            if size_line_count == 0:
+            size_count = unconsumed_byte_count / num_bytes
+            if size_count == 0:
                 continue
             data_idx0 = block.idx + (block.length - unconsumed_byte_count)
-            unconsumed_byte_count -= size_line_count * num_bytes
+            unconsumed_byte_count -= size_count * num_bytes
             size_line_count0 = size_line_countN
-            size_line_countN += size_line_count
+            if block.flags & BLOCK_FLAG_ALLOC:
+                size_line_countN += 1
+            else:
+                size_line_countN += size_count
             if line_idx < size_line_countN:
                 data_idx = data_idx0 + (line_idx - size_line_count0) * num_bytes
                 if column_idx == LI_OFFSET:
@@ -279,7 +282,7 @@ def get_file_line(line_idx, column_idx): # Zero-based
                     return name +"."+ size_char
                 elif column_idx == LI_OPERANDS:
                     if block.flags & BLOCK_FLAG_ALLOC:
-                        return str(size_line_count)
+                        return str(size_count)
                     data = file_info.get_segment_data(block.segment_id)
                     value = read_func(data, data_idx)[0]
                     label = None
@@ -319,14 +322,16 @@ def lookup_address_label(address, reloc_only=False):
 def insert_branch_address(address, src_abs_idx):
     if address not in reloc_addresses:
         branch_addresses.add(address)
+        # This errors because if the block is a code block, it has no match object.
+        # split_block(address)
 
 def insert_symbol(address, name):
     symbols_by_address[address] = name
 
 def insert_metadata_block(insert_idx, block):
-    global file_metadata_dirtyidx, file_metadata_addresses, file_metadata_line0, file_metadata_blocks
+    global file_metadata_dirtyidx, file_metadata_addresses, file_metadata_line0s, file_metadata_blocks
     file_metadata_addresses.insert(insert_idx, block.abs_idx)
-    file_metadata_line0.insert(insert_idx, None)
+    file_metadata_line0s.insert(insert_idx, None)
     file_metadata_blocks.insert(insert_idx, block)
     # Update how much of the sorted line number index needs to be recalculated.
     if file_metadata_dirtyidx is not None and insert_idx < file_metadata_dirtyidx:
@@ -337,24 +342,51 @@ def lookup_metadata_by_address(lookup_key):
     lookup_index = bisect.bisect_right(file_metadata_addresses, lookup_key)
     return file_metadata_blocks[lookup_index-1], lookup_index-1
 
-def lookup_metadata_by_line_count(lookup_key):
-    global file_metadata_dirtyidx, file_metadata_line0, file_metadata_blocks
-    # If there's been a block insertion, update the cumulative line counts (if the key.
+def recalculate_line_count_index():
+    global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_blocks
     if file_metadata_dirtyidx is not None:
         line_count_start = 0
         if file_metadata_dirtyidx > 0:
-            line_count_start = file_metadata_line0[file_metadata_dirtyidx-1] + file_metadata_blocks[file_metadata_dirtyidx-1].line_count
-        for i in range(file_metadata_dirtyidx, len(file_metadata_line0)):
-            file_metadata_line0[i] = line_count_start
+            line_count_start = file_metadata_line0s[file_metadata_dirtyidx-1] + file_metadata_blocks[file_metadata_dirtyidx-1].line_count
+        for i in range(file_metadata_dirtyidx, len(file_metadata_line0s)):
+            file_metadata_line0s[i] = line_count_start
             line_count_start += file_metadata_blocks[i].line_count
         file_metadata_dirtyidx = None
-    # This could be skipped if an update was done, and it also checked.
-    lookup_index = bisect.bisect_right(file_metadata_line0, lookup_key)
+
+def lookup_metadata_by_line_count(lookup_key):
+    global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_blocks
+    # If there's been a block insertion, update the cumulative line counts.
+    recalculate_line_count_index()
+
+    lookup_index = bisect.bisect_right(file_metadata_line0s, lookup_key)
     return file_metadata_blocks[lookup_index-1], lookup_index-1
 
+def split_block(address):
+    block, block_idx = lookup_metadata_by_address(address)
+    if block.abs_idx == address:
+        return None
+
+    # How long the new block will be.
+    excess_length = block.length - (address - block.abs_idx)
+
+    # Truncate the preceding block the address is currently within.
+    block.length -= excess_length
+    calculate_line_count(block)
+
+    # Create a new block for the address we are processing.
+    new_block = SegmentBlock()
+    new_block.flags = block.flags
+    new_block.segment_id = block.segment_id
+    new_block.abs_idx = block.abs_idx + block.length
+    new_block.idx = block.idx + block.length
+    new_block.length = excess_length
+    insert_metadata_block(block_idx+1, new_block)
+    calculate_line_count(new_block)
+
+    return new_block
 
 def UI_display_file():
-    global file_metadata_dirtyidx, file_metadata_line0, file_metadata_addresses, file_metadata_blocks
+    global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_addresses, file_metadata_blocks
     global disassembly_listctrl, reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
     # Clear the disassembly display.
     disassembly_listctrl.SetItemCount(0)
@@ -366,14 +398,13 @@ def UI_display_file():
     # Two lists to help bisect do the searching, as it can't look into the blocks to get the sort value.
     file_metadata_blocks = []
     file_metadata_addresses = []
-    file_metadata_line0 = []
+    file_metadata_line0s = []
     file_metadata_dirtyidx = 0
 
     entrypoint_segment_id, entrypoint_offset = file_info.get_entrypoint()
     entrypoint_address = file_info.get_segment_address(entrypoint_segment_id) + entrypoint_offset
 
-    # Pass 1: Process the segments.
-    line_count = 0
+    # Pass 1: Create a block for each of the segments.
     for segment_id in range(len(file_info.segments)):
         address = file_info.get_segment_address(segment_id)
         data_length = file_info.get_segment_data_length(segment_id)
@@ -388,9 +419,9 @@ def UI_display_file():
         block.idx = 0
         block.abs_idx = address
         block.length = data_length
-        line_count += calculate_line_count(block)
+        calculate_line_count(block)
         file_metadata_addresses.append(block.abs_idx)
-        file_metadata_line0.append(None)
+        file_metadata_line0s.append(None)
         file_metadata_blocks.append(block)
 
         if segment_length > data_length:
@@ -401,9 +432,9 @@ def UI_display_file():
             block.abs_idx = address + data_length
             block.idx = data_length
             block.length = segment_length - data_length
-            line_count += calculate_line_count(block)
+            calculate_line_count(block)
             file_metadata_addresses.append(block.abs_idx)
-            file_metadata_line0.append(None)
+            file_metadata_line0s.append(None)
             file_metadata_blocks.append(block)
 
     # Pass 2: Do a data caching pass.
@@ -423,7 +454,13 @@ def UI_display_file():
             #if code_flag:
             #    insert_branch_address(symbol_address, None)
 
-    # Pass 3: Do a disassembly pass.
+    # Pass 3: Do another block splitting pass.
+    for address in symbols_by_address.iterkeys():
+        split_block(address)
+    for address in reloc_addresses:
+        split_block(address)
+
+    # Pass 4: Do a disassembly pass.
     disassembly_offsets = []
     for address in branch_addresses:
         disassembly_offsets.append((address, None))
@@ -437,16 +474,6 @@ def UI_display_file():
 
         # Identify the block it currently falls within.
         block, block_idx = lookup_metadata_by_address(abs_idx)
-        if False:
-            # bisect sorts based on value, and the list contains blocks..
-            block_idx = bisect.bisect_left(file_metadata_addresses, abs_idx)
-            if block_idx == len(file_metadata_addresses):
-                li = len(file_metadata_addresses)-1
-                lb = file_metadata_blocks[li]
-                print "?? what was this for?", abs_idx, (lb.abs_idx, lb.abs_idx + lb.length)
-            if file_metadata_addresses[block_idx] != abs_idx:
-                block_idx -= 1
-            block = file_metadata_blocks[block_idx]
 
         data = file_info.get_segment_data(block.segment_id)
         data_idx_start = (abs_idx + block.idx) - block.abs_idx
@@ -467,7 +494,7 @@ def UI_display_file():
             if abs_idx - block.abs_idx > 0:
                 # Truncate the current block.
                 leading_block.length = abs_idx - leading_block.abs_idx
-                line_count += calculate_line_count(leading_block)
+                calculate_line_count(leading_block)
                 excess_length -= leading_block.length
 
                 # Insert a new block at the current offset.
@@ -482,7 +509,7 @@ def UI_display_file():
             set_data_type(block, DATA_TYPE_CODE)
             block.code_match = match
             block.length = data_idx_end - data_idx_start
-            line_count += calculate_line_count(block)
+            calculate_line_count(block)
             disassembly_checklist[block.abs_idx] = None
             excess_length -= block.length
 
@@ -539,7 +566,7 @@ def UI_display_file():
                 trailing_block.idx = block.idx + block.length
                 trailing_block.abs_idx = block.abs_idx + block.length
                 trailing_block.length = excess_length
-                line_count += calculate_line_count(trailing_block)
+                calculate_line_count(trailing_block)
 
                 # Place the excess length block after the one just processed in the list of blocks that make up the address space.
                 if leading_block != block:
@@ -553,15 +580,31 @@ def UI_display_file():
         else:
             print "unable to disassemble at", hex(abs_idx), ", added by:", hex(src_abs_idx)
 
+    recalculate_line_count_index()
+    line_count = file_metadata_line0s[-1] + file_metadata_blocks[-1].line_count
     line_count += 2 # blank line, then "end" instruction
     disassembly_listctrl.SetItemCount(line_count)
     
 
-_ID_ = 101010
-WXID_FRAME = _ID_+1
+_ID_ = wx.ID_HIGHEST
+def get_new_id():
+    global _ID_
+    new_id = _ID_
+    _ID_ -= 1
+    return new_id
+
+WXID_FRAME = get_new_id()
+
 WXID_MENU_OPEN = wx.ID_OPEN
 WXID_MENU_EXIT = wx.ID_EXIT
-WXID_MENU_FONT = wx.ID_SAVE # _ID_+2  # Custom ids do not work
+
+WXID_MENU_GOTO_LINE = get_new_id()
+WXID_MENU_GOTO_ADDRESS = get_new_id()
+WXID_MENU_FIND_NEXT_CODE = get_new_id()
+WXID_MENU_FIND_NEXT_DATA = get_new_id()
+
+
+WXID_MENU_FONT = get_new_id()
 
 def UIConfirm(parent, title, msg):
     dlg = wx.MessageDialog(parent, msg, title, wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING)
@@ -634,17 +677,24 @@ class UIFrame(wx.Frame):
         global disassembly_listctrl
         wx.Frame.__init__(self, parent, ID, title, pos, size, style)
 
-        menu1 = wx.Menu()
-        menu1.Append(WXID_MENU_OPEN, "&Open\tCtrl-O", "Open a load file")
-        menu1.AppendSeparator()
-        menu1.Append(WXID_MENU_EXIT, "E&xit", "Terminate the application")
+        file_menu = wx.Menu()
+        file_menu.Append(WXID_MENU_OPEN, "&Open\tCtrl-O", "Open a load file")
+        file_menu.AppendSeparator()
+        file_menu.Append(WXID_MENU_EXIT, "E&xit", "Terminate the application")
 
-        menu2 = wx.Menu()
-        menu2.Append(WXID_MENU_FONT, "Choose font", "Choose a font")
+        search_menu = wx.Menu()
+        search_menu.Append(WXID_MENU_GOTO_LINE, "Goto line", "Move view to a given line number")
+        search_menu.Append(WXID_MENU_GOTO_ADDRESS, "Goto address", "Move view to a given address")
+        search_menu.Append(WXID_MENU_FIND_NEXT_CODE, "Next code", "Jump to the next code block")
+        search_menu.Append(WXID_MENU_FIND_NEXT_DATA, "Next data", "Jump to the next data block")
+
+        settings_menu = wx.Menu()
+        settings_menu.Append(WXID_MENU_FONT, "Choose font", "Choose a font")
 
         menuBar = wx.MenuBar()
-        menuBar.Append(menu1, "&File")
-        menuBar.Append(menu2, "&Settings")
+        menuBar.Append(file_menu, "&File")
+        menuBar.Append(search_menu, "&Search")
+        menuBar.Append(settings_menu, "&Settings")
         self.SetMenuBar(menuBar)
 
         disassembly_listctrl = UIDisassemblyListCtrl(self)
@@ -652,6 +702,10 @@ class UIFrame(wx.Frame):
 
         self.Bind(wx.EVT_MENU,   self.on_file_open_menu, id=WXID_MENU_OPEN)
         self.Bind(wx.EVT_MENU,   self.on_file_exit_menu, id=WXID_MENU_EXIT)
+        self.Bind(wx.EVT_MENU,   self.on_search_goto_line, id=WXID_MENU_GOTO_LINE)
+        self.Bind(wx.EVT_MENU,   self.on_search_goto_address, id=WXID_MENU_GOTO_ADDRESS)
+        self.Bind(wx.EVT_MENU,   self.on_search_next_code, id=WXID_MENU_FIND_NEXT_CODE)
+        self.Bind(wx.EVT_MENU,   self.on_search_next_data, id=WXID_MENU_FIND_NEXT_DATA)
         self.Bind(wx.EVT_MENU,   self.on_settings_font_menu, id=WXID_MENU_FONT)
 
     def on_file_open_menu(self, event):
@@ -678,6 +732,99 @@ class UIFrame(wx.Frame):
         if UIConfirm(self, "Viewing project", "Abandon current work?"):
             self.Close()
             print "closed"
+
+    def request_text(self, title, input_text, decimal=True, hexadecimal=False):
+        class RequestTextDialog(wx.Dialog):
+            def __init__(self, parent):
+                self.value = None
+
+                wx.Dialog.__init__(self, parent, -1, title)
+
+                self.SetAutoLayout(True)
+                fgs = wx.FlexGridSizer(0, 2)
+
+                label = wx.StaticText(self, -1, input_text+ ": ")
+                fgs.Add(label, 0, wx.ALIGN_RIGHT|wx.CENTER)
+
+                self.tc = wx.TextCtrl(self, -1, "")
+                
+                fgs.Add(self.tc)# , validator = TextObjectValidator()))
+
+                buttons = wx.StdDialogButtonSizer() #wx.BoxSizer(wx.HORIZONTAL)
+                b = wx.Button(self, wx.ID_OK, "OK")
+                self.Bind(wx.EVT_BUTTON, self.OnClickOK, b)
+                b.SetDefault()
+                buttons.AddButton(b)
+                buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
+                buttons.Realize()
+
+                border = wx.BoxSizer(wx.VERTICAL)
+                border.Add(fgs, 1, wx.GROW|wx.ALL, 25)
+                border.Add(buttons)
+                self.SetSizer(border)
+                border.Fit(self)
+                self.Layout()
+
+            def OnClickOK(self, event):
+                text_value = self.tc.GetValue().strip()
+                base = 10
+                if hexadecimal:
+                    if text_value[0] == "$":
+                        text_value = "0x"+ text_value[1:]
+                    if text_value[0:2] == "0x":
+                        base = 16
+                try:
+                    print "converting text_value", text_value
+                    self.value = int(text_value, base)
+                    print "converted text_value to", self.value
+                    event.Skip()
+                except ValueError:
+                    pass
+
+        dlg = RequestTextDialog(self)
+        dlg.ShowModal()
+        value = dlg.value
+        dlg.Destroy()
+        return value
+
+    def on_search_goto_line(self, event):
+        global disassembly_listctrl
+        value = self.request_text("Goto line", "Line number", decimal=True)
+        if value < disassembly_listctrl.GetItemCount():
+            disassembly_listctrl.EnsureVisible(value)
+        else:
+            print "ERROR: line number too high"
+
+    def on_search_goto_address(self, event):
+        global disassembly_listctrl
+        value = self.request_text("Goto address", "Address", hexadecimal=True)
+        block, block_idx = lookup_metadata_by_address(value)
+        print "on_search_goto_address", value, block_idx, len(file_metadata_line0s)
+        line_number = file_metadata_line0s[block_idx]
+        disassembly_listctrl.SetItemState(line_number, wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+        disassembly_listctrl.EnsureVisible(line_number)
+
+    def on_search_next_code(self, event):
+        global disassembly_listctrl
+        line_idx = disassembly_listctrl.GetTopItem()
+        block, block_idx = lookup_metadata_by_line_count(line_idx)
+        search_idx = block_idx + 1
+        while search_idx < len(file_metadata_blocks):
+            if get_data_type(file_metadata_blocks[search_idx].flags) == DATA_TYPE_CODE:
+                disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+                break
+            search_idx += 1
+
+    def on_search_next_data(self, event):
+        global disassembly_listctrl
+        line_idx = disassembly_listctrl.GetTopItem()
+        block, block_idx = lookup_metadata_by_line_count(line_idx)
+        search_idx = block_idx + 1
+        while search_idx < len(file_metadata_blocks):
+            if get_data_type(file_metadata_blocks[search_idx].flags) != DATA_TYPE_CODE:
+                disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+                break
+            search_idx += 1
 
     def on_settings_font_menu(self, event):
         data = wx.FontData()
