@@ -64,9 +64,8 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
+* File loading: Blocks the application execution.  Should display some UI progress bar, and give opportunity to cancel, while offloading work to another thread.
 * File loading: Need to track both addresses that were relocated, and addresses at which relocations were made.  This will give more correct labeling.
-* UI: Next code / next data use EnsureVisible which is not good enough.
-* UI: Goto address menu item goes to the start of the block that includes that address.  It needs to calculate the line number for an address and go to that.
 * UI: Should split blocks on address discovery.
 * UI: Address extraction from disassembly match should not happen in UI, as UI should not be m68k specific.
 * UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.

@@ -140,6 +140,9 @@ class FileInfo(object):
         ## HACK END
 
         file_offset = self.get_segment_data_file_offset(segment_id)
+        if file_offset == -1:
+            # This segment has no data.
+            return None
         file_length = self.get_segment_data_length(segment_id)
 
         f = open(self.file_path, "rb")

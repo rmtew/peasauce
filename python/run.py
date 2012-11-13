@@ -24,22 +24,16 @@ import os
 import sys
 import traceback
 
-import wx
 
 import archlib
 from disasmlib import archm68k
 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-logger.addHandler(ch)
 
 
 # CURRENT GLOBAL VARIABLES
 reloc_addresses = None
 branch_addresses = None
-disassembly_listctrl = None
 file_info = None
 symbols_by_address = None
 entrypoint_address = None
@@ -165,6 +159,69 @@ LI_OPERANDS = 4
 if DEBUG_ANNOTATE_DISASSEMBLY:
     LI_ANNOTATIONS = 5
 
+
+def get_line_number_for_address(address):
+    block, block_idx = lookup_metadata_by_address(address)
+    base_address = file_metadata_addresses[block_idx]
+    line_number0 = file_metadata_line0s[block_idx]
+    line_number1 = line_number0 + block.line_count
+    if get_data_type(block.flags) == DATA_TYPE_CODE:
+        return line_number0
+    elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
+        if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
+            size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
+        elif get_data_type(block.flags) == DATA_TYPE_WORD:
+            size_types = [ ("W", 2), ("B", 1) ]
+        elif get_data_type(block.flags) == DATA_TYPE_BYTE:
+            size_types = [ ("B", 1) ]
+
+        line_address0 = base_address
+        line_count0 = line_number0
+        excess_length = block.length
+        for size_char, num_bytes in size_types:
+            size_count = excess_length / num_bytes
+            if size_count > 0:
+                #print size_count, line_number, (line_count0, size_count), line_count0 + size_count
+                num_size_bytes = size_count * num_bytes
+                if num_size_bytes <= excess_length:
+                    return line_count0 + (address - line_address0) / num_bytes
+                excess_length -= size_count * num_bytes
+                line_address0 += num_size_bytes
+                line_count0 += size_count
+
+    return None
+
+def get_address_for_line_number(line_number):
+    block, block_idx = lookup_metadata_by_line_count(line_number)
+    base_line_count = file_metadata_line0s[block_idx]
+    address0 = file_metadata_addresses[block_idx]
+    address1 = address0 + block.length
+    if get_data_type(block.flags) == DATA_TYPE_CODE:
+        return address0
+    elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
+        if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
+            size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
+        elif get_data_type(block.flags) == DATA_TYPE_WORD:
+            size_types = [ ("W", 2), ("B", 1) ]
+        elif get_data_type(block.flags) == DATA_TYPE_BYTE:
+            size_types = [ ("B", 1) ]
+
+        # 
+        line_address0 = address0
+        line_count0 = base_line_count
+        excess_length = block.length
+        for size_char, num_bytes in size_types:
+            size_count = excess_length / num_bytes
+            if size_count > 0:
+                #print size_count, line_number, (line_count0, size_count), line_count0 + size_count
+                if line_number < line_count0 + size_count:
+                    return line_address0 + (line_number - line_count0) * num_bytes
+                num_size_bytes = size_count * num_bytes
+                excess_length -= size_count * num_bytes
+                line_address0 += num_size_bytes
+                line_count0 += size_count
+
+    return None
 
 def get_file_line(line_idx, column_idx): # Zero-based
     block, block_idx = lookup_metadata_by_line_count(line_idx)
@@ -385,11 +442,14 @@ def split_block(address):
 
     return new_block
 
-def UI_display_file():
+def UI_display_file(file_path):
     global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_addresses, file_metadata_blocks
-    global disassembly_listctrl, reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
-    # Clear the disassembly display.
-    disassembly_listctrl.SetItemCount(0)
+    global reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
+    global file_info
+
+    file_info = archlib.load_file(file_path)
+    if file_info is None:
+        return None
 
     reloc_addresses = set()
     branch_addresses = set()
@@ -440,7 +500,7 @@ def UI_display_file():
     # Pass 2: Do a data caching pass.
     for segment_id in range(file_info.get_segment_count()):
         # Basically incorporate known addresses which were relocated.
-        if file_info.get_segment_data_length(segment_id):
+        if file_info.get_segment_data_file_offset(segment_id) != -1:
             file_info.get_segment_data(segment_id)
             reloc_addresses.update(file_info.relocated_addresses_by_segment_id[segment_id])
 
@@ -578,297 +638,39 @@ def UI_display_file():
                     if trailing_block.abs_idx not in disassembly_checklist:
                         disassembly_offsets.insert(0, (trailing_block.abs_idx, abs_idx))
         else:
-            print "unable to disassemble at", hex(abs_idx), ", added by:", hex(src_abs_idx)
+            logger.info("unable to disassemble at %X, added by: %X", abs_idx, src_abs_idx)
 
     recalculate_line_count_index()
     line_count = file_metadata_line0s[-1] + file_metadata_blocks[-1].line_count
     line_count += 2 # blank line, then "end" instruction
-    disassembly_listctrl.SetItemCount(line_count)
+    return line_count
     
 
-_ID_ = wx.ID_HIGHEST
-def get_new_id():
-    global _ID_
-    new_id = _ID_
-    _ID_ -= 1
-    return new_id
+if False:
+        def on_search_next_code(self, event):
+            global disassembly_listctrl
+            line_idx = disassembly_listctrl.GetTopItem()
+            block, block_idx = lookup_metadata_by_line_count(line_idx)
+            search_idx = block_idx + 1
+            while search_idx < len(file_metadata_blocks):
+                if get_data_type(file_metadata_blocks[search_idx].flags) == DATA_TYPE_CODE:
+                    disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+                    break
+                search_idx += 1
 
-WXID_FRAME = get_new_id()
-
-WXID_MENU_OPEN = wx.ID_OPEN
-WXID_MENU_EXIT = wx.ID_EXIT
-
-WXID_MENU_GOTO_LINE = get_new_id()
-WXID_MENU_GOTO_ADDRESS = get_new_id()
-WXID_MENU_FIND_NEXT_CODE = get_new_id()
-WXID_MENU_FIND_NEXT_DATA = get_new_id()
-
-
-WXID_MENU_FONT = get_new_id()
-
-def UIConfirm(parent, title, msg):
-    dlg = wx.MessageDialog(parent, msg, title, wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING)
-    ret = dlg.ShowModal()
-    dlg.Destroy()
-    return ret == wx.YES
-
-class UIDisassemblyListCtrl(wx.ListCtrl):
-    def __init__(self, parent):
-        wx.ListCtrl.__init__(self, parent, -1, style=wx.LC_REPORT|wx.LC_VIRTUAL|wx.LC_HRULES|wx.LC_VRULES)
-
-        self.InsertColumn(LI_OFFSET, "Offset")
-        self.SetColumnWidth(LI_OFFSET, 80)
-        self.InsertColumn(LI_BYTES, "Bytes")
-        self.SetColumnWidth(LI_BYTES, 100)    
-        self.InsertColumn(LI_LABEL, "Label")
-        self.SetColumnWidth(LI_LABEL, 110)
-        self.InsertColumn(LI_INSTRUCTION, "Instruction")
-        self.SetColumnWidth(LI_INSTRUCTION, 110)
-        self.InsertColumn(LI_OPERANDS, "Operands")
-        self.SetColumnWidth(LI_OPERANDS, 175)
-        if DEBUG_ANNOTATE_DISASSEMBLY:
-            self.InsertColumn(LI_ANNOTATIONS, "Annotations")
-            self.SetColumnWidth(LI_ANNOTATIONS, 175)
-
-        self.SetItemCount(0)
-
-        self.attrs = []
-        self.attrs.append(wx.ListItemAttr())
-        attr = wx.ListItemAttr()
-        colour1 = attr.GetTextColour()
-        colour2 = attr.GetBackgroundColour()
-        attr.SetTextColour(colour1)
-        attr.SetBackgroundColour(colour1)
-        self.attrs.append(attr)
-
-        # font_size, font_name = 9, "Courier New"
-        font_size, font_name = 8, "ProFontWindows" # 8 = 0074
-        font_size, font_name = 11, "ProggyTinyTTSZ" # 10 = 0090.5, 11 = 0088
-        font = wx.Font(font_size, 74, 90, 90, False, font_name)
-        self.SetFont(font)
-
-        self.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_item_selected)
-        self.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_item_activated)
-        self.Bind(wx.EVT_LIST_ITEM_DESELECTED, self.on_item_deselected)
-
-    def on_item_selected(self, event):
-        self.currentItem = event.m_itemIndex
-
-    def on_item_activated(self, event):
-        self.currentItem = event.m_itemIndex
-
-    def getColumnText(self, index, col):
-        item = self.GetItem(index, col)
-        return item.GetText()
-
-    def on_item_deselected(self, evt):
-        pass
-
-    def OnGetItemAttr(self, item):
-        return self.attrs[item % 2]
-
-    # Virtual API
-    def OnGetItemText(self, item, col):
-        return get_file_line(item, col)
-
-
-class UIFrame(wx.Frame):
-    def __init__(self, parent, ID, title, pos=wx.DefaultPosition, size=wx.DefaultSize, style=wx.DEFAULT_FRAME_STYLE):
-        global disassembly_listctrl
-        wx.Frame.__init__(self, parent, ID, title, pos, size, style)
-
-        file_menu = wx.Menu()
-        file_menu.Append(WXID_MENU_OPEN, "&Open\tCtrl-O", "Open a load file")
-        file_menu.AppendSeparator()
-        file_menu.Append(WXID_MENU_EXIT, "E&xit", "Terminate the application")
-
-        search_menu = wx.Menu()
-        search_menu.Append(WXID_MENU_GOTO_LINE, "Goto line", "Move view to a given line number")
-        search_menu.Append(WXID_MENU_GOTO_ADDRESS, "Goto address", "Move view to a given address")
-        search_menu.Append(WXID_MENU_FIND_NEXT_CODE, "Next code", "Jump to the next code block")
-        search_menu.Append(WXID_MENU_FIND_NEXT_DATA, "Next data", "Jump to the next data block")
-
-        settings_menu = wx.Menu()
-        settings_menu.Append(WXID_MENU_FONT, "Choose font", "Choose a font")
-
-        menuBar = wx.MenuBar()
-        menuBar.Append(file_menu, "&File")
-        menuBar.Append(search_menu, "&Search")
-        menuBar.Append(settings_menu, "&Settings")
-        self.SetMenuBar(menuBar)
-
-        disassembly_listctrl = UIDisassemblyListCtrl(self)
-        self.current_font = self.GetFont()
-
-        self.Bind(wx.EVT_MENU,   self.on_file_open_menu, id=WXID_MENU_OPEN)
-        self.Bind(wx.EVT_MENU,   self.on_file_exit_menu, id=WXID_MENU_EXIT)
-        self.Bind(wx.EVT_MENU,   self.on_search_goto_line, id=WXID_MENU_GOTO_LINE)
-        self.Bind(wx.EVT_MENU,   self.on_search_goto_address, id=WXID_MENU_GOTO_ADDRESS)
-        self.Bind(wx.EVT_MENU,   self.on_search_next_code, id=WXID_MENU_FIND_NEXT_CODE)
-        self.Bind(wx.EVT_MENU,   self.on_search_next_data, id=WXID_MENU_FIND_NEXT_DATA)
-        self.Bind(wx.EVT_MENU,   self.on_settings_font_menu, id=WXID_MENU_FONT)
-
-    def on_file_open_menu(self, event):
-        dlg = wx.FileDialog(self, message="Choose a file", defaultDir=os.getcwd(),  defaultFile="", wildcard="All files (*.*)|*.*", style=wx.OPEN | wx.CHANGE_DIR)
-        ret = dlg.ShowModal()
-        if ret == wx.ID_OK:
-            file_path = dlg.GetPath()
-            self.set_file_path(file_path)
-
-    def set_file_path(self, file_path):
-        global file_info
-        #x, y = os.path.split(file_path)
-        # self.SetName("File: "+ y)
-
-        file_info = archlib.load_file(file_path)
-        if file_info is None:
-            print "run.py is exiting"
-            sys.exit(1)
-
-        UI_display_file()
-        #sys.exit(1)
-
-    def on_file_exit_menu(self, event):
-        if UIConfirm(self, "Viewing project", "Abandon current work?"):
-            self.Close()
-            print "closed"
-
-    def request_text(self, title, input_text, decimal=True, hexadecimal=False):
-        class RequestTextDialog(wx.Dialog):
-            def __init__(self, parent):
-                self.value = None
-
-                wx.Dialog.__init__(self, parent, -1, title)
-
-                self.SetAutoLayout(True)
-                fgs = wx.FlexGridSizer(0, 2)
-
-                label = wx.StaticText(self, -1, input_text+ ": ")
-                fgs.Add(label, 0, wx.ALIGN_RIGHT|wx.CENTER)
-
-                self.tc = wx.TextCtrl(self, -1, "")
-                
-                fgs.Add(self.tc)# , validator = TextObjectValidator()))
-
-                buttons = wx.StdDialogButtonSizer() #wx.BoxSizer(wx.HORIZONTAL)
-                b = wx.Button(self, wx.ID_OK, "OK")
-                self.Bind(wx.EVT_BUTTON, self.OnClickOK, b)
-                b.SetDefault()
-                buttons.AddButton(b)
-                buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
-                buttons.Realize()
-
-                border = wx.BoxSizer(wx.VERTICAL)
-                border.Add(fgs, 1, wx.GROW|wx.ALL, 25)
-                border.Add(buttons)
-                self.SetSizer(border)
-                border.Fit(self)
-                self.Layout()
-
-            def OnClickOK(self, event):
-                text_value = self.tc.GetValue().strip()
-                base = 10
-                if hexadecimal:
-                    if text_value[0] == "$":
-                        text_value = "0x"+ text_value[1:]
-                    if text_value[0:2] == "0x":
-                        base = 16
-                try:
-                    print "converting text_value", text_value
-                    self.value = int(text_value, base)
-                    print "converted text_value to", self.value
-                    event.Skip()
-                except ValueError:
-                    pass
-
-        dlg = RequestTextDialog(self)
-        dlg.ShowModal()
-        value = dlg.value
-        dlg.Destroy()
-        return value
-
-    def on_search_goto_line(self, event):
-        global disassembly_listctrl
-        value = self.request_text("Goto line", "Line number", decimal=True)
-        if value < disassembly_listctrl.GetItemCount():
-            disassembly_listctrl.EnsureVisible(value)
-        else:
-            print "ERROR: line number too high"
-
-    def on_search_goto_address(self, event):
-        global disassembly_listctrl
-        value = self.request_text("Goto address", "Address", hexadecimal=True)
-        block, block_idx = lookup_metadata_by_address(value)
-        print "on_search_goto_address", value, block_idx, len(file_metadata_line0s)
-        line_number = file_metadata_line0s[block_idx]
-        disassembly_listctrl.SetItemState(line_number, wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
-        disassembly_listctrl.EnsureVisible(line_number)
-
-    def on_search_next_code(self, event):
-        global disassembly_listctrl
-        line_idx = disassembly_listctrl.GetTopItem()
-        block, block_idx = lookup_metadata_by_line_count(line_idx)
-        search_idx = block_idx + 1
-        while search_idx < len(file_metadata_blocks):
-            if get_data_type(file_metadata_blocks[search_idx].flags) == DATA_TYPE_CODE:
-                disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
-                break
-            search_idx += 1
-
-    def on_search_next_data(self, event):
-        global disassembly_listctrl
-        line_idx = disassembly_listctrl.GetTopItem()
-        block, block_idx = lookup_metadata_by_line_count(line_idx)
-        search_idx = block_idx + 1
-        while search_idx < len(file_metadata_blocks):
-            if get_data_type(file_metadata_blocks[search_idx].flags) != DATA_TYPE_CODE:
-                disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
-                break
-            search_idx += 1
-
-    def on_settings_font_menu(self, event):
-        data = wx.FontData()
-        data.EnableEffects(True)
-        data.SetInitialFont(self.current_font)
-
-        dlg = wx.FontDialog(self, data)
-        
-        if dlg.ShowModal() == wx.ID_OK:
-            data = dlg.GetFontData()
-            font = data.GetChosenFont()
-            print font.GetPointSize()
-            print font.GetFamily()
-            print font.GetStyle()
-            print font.GetWeight()
-            print font.GetFaceName()
-            disassembly_listctrl.SetFont(font)
-            print font.GetNativeFontInfoDesc()
-
-class UIApp(wx.App):
-    filePath = None
-
-    def __init__(self, *args, **kwargs):
-        if "file_path" in kwargs:
-            self.file_path = kwargs.pop("file_path")
-        wx.App.__init__(self, *args, **kwargs)
-
-    def OnInit(self):
-        frame = UIFrame(None, WXID_FRAME, "", size=(800, 600))
-        frame.Show(True)
-        self.SetTopWindow(frame)
-        if self.file_path:
-            frame.set_file_path(self.file_path)
-        return True
-
-def run(file_path):
-    global app, disasm_list_widget
-
-    app = UIApp(redirect=False, file_path=file_path)
-    app.MainLoop()
-
+        def on_search_next_data(self, event):
+            global disassembly_listctrl
+            line_idx = disassembly_listctrl.GetTopItem()
+            block, block_idx = lookup_metadata_by_line_count(line_idx)
+            search_idx = block_idx + 1
+            while search_idx < len(file_metadata_blocks):
+                if get_data_type(file_metadata_blocks[search_idx].flags) != DATA_TYPE_CODE:
+                    disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
+                    break
+                search_idx += 1
 
 if __name__ == "__main__":
-    file_path = None
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-    run(file_path)
+    logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    logger.addHandler(ch)

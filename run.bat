@@ -1,1 +1,1 @@
-c:\python27\python.exe python\run.py
+c:\python27\python.exe python\qtui.py
