@@ -280,6 +280,7 @@ class MainWindow(QtGui.QMainWindow):
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.symbols_model = create_table_model(self, [ ("Symbol", str), ("Address", int), ])
         self.symbols_table = create_table_widget(self.symbols_model)
+        self.symbols_table.setSortingEnabled(True)
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
@@ -347,6 +348,9 @@ class MainWindow(QtGui.QMainWindow):
         if not len(file_path):
             return
 
+        self.attempt_file_open(file_path)
+
+    def attempt_file_open(self, file_path):
         # An attempt will be made to load an existing file.
         self.file_path = file_path
 
@@ -427,8 +431,8 @@ class MainWindow(QtGui.QMainWindow):
             model.setData(model.index(row_index, 1, QtCore.QModelIndex()), symbol_address)
             row_index += 1
 
-        self.segments_table.resizeColumnsToContents()
-        self.segments_table.horizontalHeader().setStretchLastSection(True)
+        self.symbols_table.resizeColumnsToContents()
+        self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
     def on_file_quit_menu(self):
         if self.show_confirmation_dialog("Quit..", "Are you sure you wish to quit?"):
@@ -470,17 +474,14 @@ class MainWindow(QtGui.QMainWindow):
                 self._settings = {}
         return self._settings.get(setting_name, default_value)
 
-    def _disassembly_event_new_symbol(self, address, label):
-        return
-        model = self.segments_model
-        for symbol_address, symbol_label in disassembly.symbols_by_address.iteritems():
-            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-            model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), symbol_label)
-            model.setData(model.index(segment_id, 1, QtCore.QModelIndex()), symbol_address)
+    def _disassembly_event_new_symbol(self, symbol_address, symbol_label):
+        model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
+        model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), symbol_label)
+        model.setData(model.index(segment_id, 1, QtCore.QModelIndex()), symbol_address)
 
-        self.segments_table.resizeColumnsToContents()
-        self.segments_table.horizontalHeader().setStretchLastSection(True)
-        
+        self.symbols_table.resizeColumnsToContents()
+        self.symbols_table.horizontalHeader().setStretchLastSection(True)
+
 
 
 def _initialise_logging(window):
@@ -515,14 +516,29 @@ def _initialise_logging(window):
     logger.addHandler(handler)
 
 
+def _arg_file_load(file_path):
+    global window
+    t = QtCore.QTimer()
+    t.setSingleShot(True)
+    # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
+    t.timeout.connect(lambda: window.attempt_file_open(file_path) or t is not None)
+    t.start(50)
+
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
-    app_font = QtGui.QApplication.font()
 
     window = MainWindow()
     # The window needs to be created so we can connect to its signal.
     _initialise_logging(window)
     window.show()
+
+    # Do our own argument handling.  The documentation for QApplication says that
+    # QT will remove it's own arguments from argc, but this does not apply when
+    # it is used in PySide.
+    if len(sys.argv) > 1:
+        s = sys.argv[-1]
+        if s[0] != "-":
+            _arg_file_load(s)
 
     sys.exit(app.exec_())
 
