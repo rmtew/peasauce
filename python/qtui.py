@@ -33,7 +33,7 @@ import time
 
 from PySide import QtCore, QtGui
 
-import run
+import disassembly
 import archlib
 
 
@@ -110,7 +110,7 @@ class CustomItemModel2(QtCore.QAbstractItemModel):
         self.endInsertRows()
 
     def rowCount(self, parent):
-        return run.get_line_count()
+        return disassembly.get_line_count()
 
     def columnCount(self, parent):
         return self.column_count
@@ -136,7 +136,7 @@ class CustomItemModel2(QtCore.QAbstractItemModel):
             return None
 
         column, row = index.column(), index.row()
-        return run.get_file_line(row, column)
+        return disassembly.get_file_line(row, column)
 
     def parent(self, index):
         return QtCore.QModelIndex()
@@ -326,7 +326,7 @@ class MainWindow(QtGui.QMainWindow):
     def reset_state(self):
         """ Called to clear out all state related to loaded data. """
         self.file_path = None
-        run.set_symbol_insert_func(None)
+        disassembly.set_symbol_insert_func(None)
 
     def show_confirmation_dialog(self, title, message):
         reply = QtGui.QMessageBox.question(self, title, message, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
@@ -358,7 +358,7 @@ class MainWindow(QtGui.QMainWindow):
         progressDialog.setMinimumDuration(1)
 
         self.thread.result.connect(self.on_file_processed_signal)
-        self.thread.add_work(run.UI_display_file, file_path)
+        self.thread.add_work(disassembly.UI_display_file, file_path)
 
         while self.file_path is not None:
             progressDialog.setValue(0)
@@ -390,22 +390,22 @@ class MainWindow(QtGui.QMainWindow):
  
         # Populate the segments dockable window with the loaded segment information.
         model = self.segments_model
-        for segment_id in range(len(run.file_info.segments)):
+        for segment_id in range(len(disassembly.file_info.segments)):
             model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
             
-            segment_type = run.file_info.get_segment_type(segment_id)
+            segment_type = disassembly.file_info.get_segment_type(segment_id)
             if segment_type == archlib.SEGMENT_TYPE_CODE:
                 segment_type = "code"
             elif segment_type == archlib.SEGMENT_TYPE_DATA:
                 segment_type = "data"
             elif segment_type == archlib.SEGMENT_TYPE_BSS:
                 segment_type = "bss"
-            length = run.file_info.get_segment_length(segment_id)
-            data_length = run.file_info.get_segment_data_length(segment_id)
-            if run.file_info.get_segment_data_file_offset(segment_id) == -1:
+            length = disassembly.file_info.get_segment_length(segment_id)
+            data_length = disassembly.file_info.get_segment_data_length(segment_id)
+            if disassembly.file_info.get_segment_data_file_offset(segment_id) == -1:
                 data_length = "-"
-            reloc_count = len(run.file_info.relocations_by_segment_id.get(segment_id, []))
-            symbol_count = len(run.file_info.symbols_by_segment_id.get(segment_id, []))
+            reloc_count = len(disassembly.file_info.relocations_by_segment_id.get(segment_id, []))
+            symbol_count = len(disassembly.file_info.symbols_by_segment_id.get(segment_id, []))
 
             model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
             for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
@@ -417,11 +417,11 @@ class MainWindow(QtGui.QMainWindow):
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
-        run.set_symbol_insert_func(self._disassembly_event_new_symbol)
+        disassembly.set_symbol_insert_func(self._disassembly_event_new_symbol)
 
         model = self.symbols_model
         row_index = 0
-        for symbol_address, symbol_label in run.symbols_by_address.iteritems():
+        for symbol_address, symbol_label in disassembly.symbols_by_address.iteritems():
             model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
             model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
             model.setData(model.index(row_index, 1, QtCore.QModelIndex()), symbol_address)
@@ -438,7 +438,7 @@ class MainWindow(QtGui.QMainWindow):
         line_idx = self.list_table.currentIndex().row()
         if line_idx == -1:
             line_idx = 0
-        address = run.get_address_for_line_number(line_idx)
+        address = disassembly.get_address_for_line_number(line_idx)
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -447,7 +447,7 @@ class MainWindow(QtGui.QMainWindow):
             else:
                 new_address = int(text)
             if new_address is not None:
-                new_line_idx = run.get_line_number_for_address(new_address)
+                new_line_idx = disassembly.get_line_number_for_address(new_address)
                 self.list_table.selectRow(new_line_idx)
 
     def on_settings_choose_font_menu(self):
@@ -473,7 +473,7 @@ class MainWindow(QtGui.QMainWindow):
     def _disassembly_event_new_symbol(self, address, label):
         return
         model = self.segments_model
-        for symbol_address, symbol_label in run.symbols_by_address.iteritems():
+        for symbol_address, symbol_label in disassembly.symbols_by_address.iteritems():
             model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
             model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), symbol_label)
             model.setData(model.index(segment_id, 1, QtCore.QModelIndex()), symbol_address)
