@@ -40,6 +40,7 @@ def load_file(file_path):
     for system in get_systems():
         file_info = FileInfo(system, file_path)
         if system.load_file(file_info):
+            file_info.event_loading_complete()
             return file_info
 
 
@@ -66,8 +67,22 @@ class FileInfo(object):
         self.segments = []
         self.relocations_by_segment_id = {}
         self.symbols_by_segment_id = {}
-        self.relocated_addresses_by_segment_id = {}
+
+        """ The addresses at which values changed / relocated were located. """
+        self.relocatable_addresses = set()
+        """ The address values which were changed / relocated. """
+        self.relocated_addresses = set()
+        """ ... """
+
         self.entrypoint = 0, 0
+
+    def event_loading_complete(self):
+        # While this does cache the segment data, it more importantly causes the
+        # relocation information to be processed and stored for use by the
+        # disassembly logic.
+        for segment_id in range(self.get_segment_count()):
+            if self.get_segment_data_file_offset(segment_id) != -1:
+                self.get_segment_data(segment_id)
 
     ## Query..
 
@@ -93,7 +108,6 @@ class FileInfo(object):
 
     def add_segment(self, segment_type, file_offset, data_length, segment_length, relocations, symbols):
         segment_id = len(self.segments)
-        self.relocated_addresses_by_segment_id[segment_id] = set()
         self.segments.append((segment_type, file_offset, data_length, segment_length))
         self.relocations_by_segment_id[segment_id] = relocations
         self.symbols_by_segment_id[segment_id] = symbols
@@ -154,14 +168,16 @@ class FileInfo(object):
         data = bytearray(data)
 
         # Generic longword-based relocation.
-        relocations = self.relocations_by_segment_id.get(segment_id, [])
-        for target_segment_id, local_offsets in relocations:
+        local_address = self.get_segment_address(segment_id)
+        relocation_offsets = self.relocations_by_segment_id.get(segment_id, [])
+        for target_segment_id, local_offsets in relocation_offsets:
             target_address = self.get_segment_address(target_segment_id)
             for local_offset in local_offsets:
                 value = self.uint32_value(data[local_offset:local_offset+4])
                 address = value + target_address
-                if address not in self.relocated_addresses_by_segment_id[segment_id]:
-                    self.relocated_addresses_by_segment_id[segment_id].add(address)
+                if address not in self.relocated_addresses:
+                    self.relocated_addresses.add(address)
+                self.relocatable_addresses.add(local_address + local_offset)
                 data[local_offset:local_offset+4] = self.uint32_bytes(address)
         ## HACK START
         self._sdc[segment_id] = data

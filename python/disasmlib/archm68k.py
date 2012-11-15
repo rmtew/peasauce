@@ -731,7 +731,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             try:
                 value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
             except Exception:
-                print M.specification.key, T.vars
+                print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
                 raise
             if value is None: # Disassembly failure.
                 logger.error("Failed to fetch EA/Imm data")
@@ -947,3 +947,49 @@ def get_operand_string(pc, operand, vars, lookup_symbol=None):
     else:
         return _get_formatted_ea_description(pc, key, vars, lookup_symbol=lookup_symbol)
 
+def get_match_addresses(match):
+    ret = []
+    # Is it an instruction that exits (RTS, RTR)?
+    # Is it an instruction that conditionally branches (Bcc, Dbcc)?
+    # Is it an instruction that branches and returns (JSR, BSR)?
+    # Is it an instruction that jumps (BRA, JMP)?
+    # Given a branch/jump address, have we seen it before?
+    # Given a branch/jump address, should it be queued?
+    # Given a branch/jump address, should it be done next?
+    address = None
+    instruction_key = match.specification.key[:3]
+    if instruction_key in ("RTS", "RTR"):
+        pass
+    elif instruction_key in ("JMP", "BRA"):
+        if match.opcodes[0].key == "AbsL":
+            address = match.opcodes[0].vars["xxx"]
+        elif match.opcodes[0].specification.key == "DISPLACEMENT":
+            address = match.pc + match.opcodes[0].vars["xxx"]
+    elif instruction_key == "JSR":
+        if match.opcodes[0].key == "AbsL":
+            address = match.opcodes[0].vars["xxx"]
+    elif instruction_key == "BSR":
+        address = match.pc + match.opcodes[0].vars["xxx"]
+    elif instruction_key in ("Bcc", "DBc"):
+        opcode_idx = 0 if instruction_key == "Bcc" else 1
+        address = match.pc + match.opcodes[opcode_idx].vars["xxx"]
+
+    if address is not None:
+        ret.append((address, True))
+
+    # Locate any general addressing modes which infer labels.
+    for opcode in match.opcodes:
+        if opcode.key == "PCid16":
+            address = match.pc + _signed_value("W", opcode.vars["D16"])
+            ret.append((address, False))
+        elif opcode.key == "PCiId8":
+            address = match.pc + _signed_value("W", opcode.vars["D8"])
+            ret.append((address, False))
+        elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
+            logger.error("Unhandled opcode EA modde (680x0?): %s", opcode.key)
+
+    return ret
+
+def is_final_instruction(match):
+    instruction_key = match.specification.key[:3]
+    return instruction_key in ("RTS", "RTR", "JMP", "BRA")

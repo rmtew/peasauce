@@ -36,14 +36,14 @@ Any source code contributions must be made by the sole author of those contribut
 Currently Peasauce is prototyped in Python using wxPython to display it's user interface.  The only installation you need to do, is to ensure the following prerequisites are installed on your computer.
 
 1. Download and install [Python 2.7](http://python.org/download/) for your platform.
-2. Download and install [wxPython for Python 2.7](http://www.wxpython.org/download.php) for your platform.
+2. Download and install [PySide for Python 2.7](http://www.pyside.org/) for your platform.
 
 ## Usage
 
 With the prerequisites installed, and with the source code that accompanies this file on hand, you should be able to run Peasauce.  Note that you will need either Amiga, X68000 or Atari ST executable files to load into it.  You can obtain many Amiga programs from [aminet.net](http://aminet.net).  Some Amiga programs are archived using now obscure compression programs, but if you also download and install [7zip](www.7-zip.org) you should be able to extract files from within them.
 
 Method 1 (any platform):
-* Enter the "python" directory and run the "run.py" Python script.
+* Enter the "python" directory and run the "qtui.py" Python script.
 
 Method 2 (Windows):
 * Run "run.bat".
@@ -60,19 +60,21 @@ You should be able to use the user interface to:
 
 This is intended to be a summarised list of points that briefly note intended work, or possible future work.
 
-### Short Term
+### Short Term Tasks
 
 #### Bugs
 
-* File loading: Blocks the application execution.  Should display some UI progress bar, and give opportunity to cancel, while offloading work to another thread.
-* File loading: Need to track both addresses that were relocated, and addresses at which relocations were made.  This will give more correct labeling.
-* UI: Should split blocks on address discovery.
+* Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
+* "run.py": This is no longer run, and should be renamed to something like "disassembly.py".
+* UI: Error log lines should be coloured red.
+* UI: Should split blocks on all address discovery.
 * UI: Address extraction from disassembly match should not happen in UI, as UI should not be m68k specific.
 * UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.
 * UI: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
 
 #### Functionality
 
+* Metadata: Track what addresses are referred to by other addresses to allow jumping around the source.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
 * Disassembly: Jump table discovery / processing.
@@ -85,7 +87,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 * UI: Ala Resource, change the numeric base of a value.
 * UI: Enable user doing disassembly work, with editing actions.
 * UI: Export source code.
-* UI: Research a UI toolkit that better suits an editing interface.
 * UI: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
 * UI: Add leading comments that detail file type, processor, entry point offset.. maybe more.
 
@@ -95,10 +96,8 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Coding style: Make code / system interaction more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * File loading: Clean up file_info.file_data to only store useful information.
-* UI: Rename "block.idx" to "block.segment_offset" or similar.
-* UI: Rename "block.abs_idx" to "block.address" or similar.
 
-### Medium Term
+### Medium Term Tasks
 
 #### Functionality
 
@@ -107,7 +106,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Decompilation: Look into IRs.  LLVM?
 * Disassembly: Handle more / differentiate between different M680x0 instructions.
 
-### Long Term
+### Long Term Tasks
 
 #### Functionality
 

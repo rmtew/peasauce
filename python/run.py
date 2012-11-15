@@ -32,20 +32,20 @@ logger = logging.getLogger()
 
 
 # CURRENT GLOBAL VARIABLES
-reloc_addresses = None
 branch_addresses = None
 file_info = None
 symbols_by_address = None
-entrypoint_address = None
 
 file_metadata_addresses = None
 file_metadata_line0s = None
 file_metadata_blocks = None
 file_metadata_dirtyidx = None
 
+END_INSTRUCTION_LINES = 2
+
 
 class DisplayConfiguration(object):
-    trailing_line_rts = True
+    trailing_line_exit = True
     trailing_line_branch = True
     trailing_line_trap = True
 
@@ -55,9 +55,9 @@ class SegmentBlock(object):
     """ The number of this segment in the file. """
     segment_id = None
     """ The offset of this block in its segment. """
-    idx = None
+    segment_offset = None
     """ All segments appear as one contiguous address space.  This is the offset of this block in that space. """
-    abs_idx = None
+    address = None
     """ The number of bytes data that this block contains. """
     length = None
     """ The data type of this block (DATA_TYPE_*) and more """
@@ -93,31 +93,38 @@ def set_data_type(block, data_type):
     block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
 
 
-DATA_TYPE_CODE      = 1
-DATA_TYPE_ASCII     = 2
-DATA_TYPE_BYTE      = 3
-DATA_TYPE_WORD      = 4
-DATA_TYPE_LONGWORD  = 5
-DATA_TYPE_BIT0      = DATA_TYPE_CODE - 1
-DATA_TYPE_BITCOUNT  = _count_bits(DATA_TYPE_LONGWORD)
-DATA_TYPE_BITMASK   = _make_bitmask(DATA_TYPE_BITCOUNT)
+DATA_TYPE_CODE          = 1
+DATA_TYPE_ASCII         = 2
+DATA_TYPE_BYTE          = 3
+DATA_TYPE_WORD          = 4
+DATA_TYPE_LONGWORD      = 5
+DATA_TYPE_BIT0          = DATA_TYPE_CODE - 1
+DATA_TYPE_BITCOUNT      = _count_bits(DATA_TYPE_LONGWORD)
+DATA_TYPE_BITMASK       = _make_bitmask(DATA_TYPE_BITCOUNT)
 
 """ Indicates that the block is not backed by file data. """
-BLOCK_FLAG_ALLOC    = 1 << DATA_TYPE_BITCOUNT
+BLOCK_FLAG_ALLOC        = 1 << (DATA_TYPE_BITCOUNT+0)
+
+""" Indicates that the block has been processed. """
+BLOCK_FLAG_PROCESSED    = 1 << (DATA_TYPE_BITCOUNT+1)
+
+
+""" Used to map block data type to a character used in the label generation. """
+char_by_data_type = { DATA_TYPE_CODE: "C", DATA_TYPE_ASCII: "A", DATA_TYPE_BYTE: "B", DATA_TYPE_WORD: "W", DATA_TYPE_LONGWORD: "L" }
 
 
 def calculate_line_count(block):
     old_line_count = block.line_count
     block.line_count = 0
-    if block.idx == 0 and file_info.has_section_headers():
+    if block.segment_offset == 0 and file_info.has_section_headers():
         block.line_count += 1 # HUNK HEADER (SECTION ...)
     if get_data_type(block.flags) == DATA_TYPE_CODE:
         block.line_count += 1
-        if display_configuration.trailing_line_rts and block.code_match.specification.key == "RTS":
+        if display_configuration.trailing_line_exit and archm68k.is_final_instruction(block.code_match):
             block.line_count += 1
         elif display_configuration.trailing_line_trap and block.code_match.specification.key == "TRAP":
             block.line_count += 1
-        elif display_configuration.trailing_line_branch and block.code_match.specification.key in ("Bcc", "BRA", "DBcc", "JMP"):
+        elif display_configuration.trailing_line_branch and block.code_match.specification.key in ("Bcc", "DBcc",):
             block.line_count += 1
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
@@ -147,7 +154,7 @@ def calculate_line_count(block):
         return block.line_count - old_line_count
 
     # Last block in a segment gets a trailing line, if it is not the last segment.
-    if block.idx + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
+    if block.segment_offset + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
         block.line_count += 1 # SEGMENT FOOTER (blank line)
     return block.line_count - old_line_count
 
@@ -223,6 +230,11 @@ def get_address_for_line_number(line_number):
 
     return None
 
+def get_line_count():
+    if file_metadata_line0s is None:
+        return 0
+    return file_metadata_line0s[-1] + file_metadata_blocks[-1].line_count + END_INSTRUCTION_LINES
+
 def get_file_line(line_idx, column_idx): # Zero-based
     block, block_idx = lookup_metadata_by_line_count(line_idx)
     block_line_count0 = file_metadata_line0s[block_idx]
@@ -230,7 +242,7 @@ def get_file_line(line_idx, column_idx): # Zero-based
     
     # If the line is the first of the block, check if it is a segment header.
     leading_line_count = 0
-    if block.idx == 0 and file_info.has_section_headers():
+    if block.segment_offset == 0 and file_info.has_section_headers():
         if line_idx == block_line_count0:
             section_header = file_info.get_section_header(block.segment_id)
             i = section_header.find(" ")
@@ -244,7 +256,7 @@ def get_file_line(line_idx, column_idx): # Zero-based
 
     # If the line is the last line in a block, check if it a "between segments" trailing blank line.
     if line_idx == block_line_countN-1:
-        if block.idx + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
+        if block.segment_offset + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
             return ""
 
     # Trailing blank lines after code (factor in leading lines).
@@ -254,12 +266,12 @@ def get_file_line(line_idx, column_idx): # Zero-based
 
     if get_data_type(block.flags) == DATA_TYPE_CODE:
         if column_idx == LI_OFFSET:
-            return "%08X" % block.abs_idx
+            return "%08X" % block.address
         elif column_idx == LI_BYTES:
             data = file_info.get_segment_data(block.segment_id)
-            return "".join([ "%02X" % c for c in data[block.idx:block.idx+block.length] ])
+            return "".join([ "%02X" % c for c in data[block.segment_offset:block.segment_offset+block.length] ])
         elif column_idx == LI_LABEL:
-            label = lookup_address_label(block.abs_idx)
+            label = lookup_address_label(block.address)
             if label is None:
                 return ""
             return label
@@ -268,11 +280,12 @@ def get_file_line(line_idx, column_idx): # Zero-based
         elif column_idx == LI_OPERANDS:
             def make_operand_string(block, operand, operand_idx):
                 operand_string = None
-                if operand.specification.key == "DISPLACEMENT":
+                if block.code_match.specification.key[0:4] != "LINK" and operand.specification.key == "DISPLACEMENT":
                     operand_string = lookup_address_label(block.code_match.pc + operand.vars["xxx"])
                 elif operand.specification.key == "AbsL" or operand.key == "AbsL":
                     operand_string = lookup_address_label(operand.vars["xxx"])
                 elif operand_idx == 0 and (operand.specification.key == "Imm" or operand.key == "Imm"):
+                    # e.g. MOVEA.L #vvv, A0 ?
                     if len(block.code_match.opcodes) > 1:
                         operand2 = block.code_match.opcodes[1]
                         if (operand2.specification.key == "AR" or operand.key == "AR"):
@@ -313,7 +326,7 @@ def get_file_line(line_idx, column_idx): # Zero-based
             size_count = unconsumed_byte_count / num_bytes
             if size_count == 0:
                 continue
-            data_idx0 = block.idx + (block.length - unconsumed_byte_count)
+            data_idx0 = block.segment_offset + (block.length - unconsumed_byte_count)
             unconsumed_byte_count -= size_count * num_bytes
             size_line_count0 = size_line_countN
             if block.flags & BLOCK_FLAG_ALLOC:
@@ -343,8 +356,8 @@ def get_file_line(line_idx, column_idx): # Zero-based
                     data = file_info.get_segment_data(block.segment_id)
                     value = read_func(data, data_idx)[0]
                     label = None
-                    if size_char == "L":
-                        label = lookup_address_label(value, reloc_only=True)
+                    if size_char == "L" and value in file_info.relocatable_addresses:
+                        label = lookup_address_label(value)
                     if label is None:
                         label = ("$%0"+ str(num_bytes<<1) +"X") % value
                     return label
@@ -363,31 +376,32 @@ def get_file_line(line_idx, column_idx): # Zero-based
             return "END"
         return ""
 
-def lookup_address_label(address, reloc_only=False):
-    format_string = "lbL%06X"
+def lookup_address_label(address):
     if address in symbols_by_address:
         return symbols_by_address[address]
-    if address in reloc_addresses:
+
+    format_string = "lbL%06X"
+    if address in branch_addresses: # How to symbolize this?
         return format_string % address
-    if not reloc_only:
-        # Fake an entrypoint label.
-        if address == entrypoint_address:
-            return format_string % address
-        if address in branch_addresses:
-            return format_string % address
 
 def insert_branch_address(address, src_abs_idx):
-    if address not in reloc_addresses:
+    if address not in file_info.relocated_addresses:
         branch_addresses.add(address)
         # This errors because if the block is a code block, it has no match object.
         # split_block(address)
 
+_symbol_insert_func = None
+def set_symbol_insert_func(f):
+    global _symbol_insert_func
+    _symbol_insert_func = f
+
 def insert_symbol(address, name):
     symbols_by_address[address] = name
+    if _symbol_insert_func: _symbol_insert_func(address, name)
 
 def insert_metadata_block(insert_idx, block):
     global file_metadata_dirtyidx, file_metadata_addresses, file_metadata_line0s, file_metadata_blocks
-    file_metadata_addresses.insert(insert_idx, block.abs_idx)
+    file_metadata_addresses.insert(insert_idx, block.address)
     file_metadata_line0s.insert(insert_idx, None)
     file_metadata_blocks.insert(insert_idx, block)
     # Update how much of the sorted line number index needs to be recalculated.
@@ -420,11 +434,11 @@ def lookup_metadata_by_line_count(lookup_key):
 
 def split_block(address):
     block, block_idx = lookup_metadata_by_address(address)
-    if block.abs_idx == address:
+    if block.address == address:
         return None
 
     # How long the new block will be.
-    excess_length = block.length - (address - block.abs_idx)
+    excess_length = block.length - (address - block.address)
 
     # Truncate the preceding block the address is currently within.
     block.length -= excess_length
@@ -434,8 +448,8 @@ def split_block(address):
     new_block = SegmentBlock()
     new_block.flags = block.flags
     new_block.segment_id = block.segment_id
-    new_block.abs_idx = block.abs_idx + block.length
-    new_block.idx = block.idx + block.length
+    new_block.address = block.address + block.length
+    new_block.segment_offset = block.segment_offset + block.length
     new_block.length = excess_length
     insert_metadata_block(block_idx+1, new_block)
     calculate_line_count(new_block)
@@ -444,14 +458,13 @@ def split_block(address):
 
 def UI_display_file(file_path):
     global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_addresses, file_metadata_blocks
-    global reloc_addresses, branch_addresses, symbols_by_address, entrypoint_address
+    global branch_addresses, symbols_by_address
     global file_info
 
     file_info = archlib.load_file(file_path)
     if file_info is None:
-        return None
+        return 0
 
-    reloc_addresses = set()
     branch_addresses = set()
     symbols_by_address = {}
 
@@ -476,11 +489,11 @@ def UI_display_file(file_path):
         set_data_type(block, DATA_TYPE_LONGWORD)
         block.segment_id = segment_id
 
-        block.idx = 0
-        block.abs_idx = address
+        block.segment_offset = 0
+        block.address = address
         block.length = data_length
         calculate_line_count(block)
-        file_metadata_addresses.append(block.abs_idx)
+        file_metadata_addresses.append(block.address)
         file_metadata_line0s.append(None)
         file_metadata_blocks.append(block)
 
@@ -489,61 +502,55 @@ def UI_display_file(file_path):
             block.flags |= BLOCK_FLAG_ALLOC
             set_data_type(block, DATA_TYPE_LONGWORD)
             block.segment_id = segment_id
-            block.abs_idx = address + data_length
-            block.idx = data_length
+            block.address = address + data_length
+            block.segment_offset = data_length
             block.length = segment_length - data_length
             calculate_line_count(block)
-            file_metadata_addresses.append(block.abs_idx)
+            file_metadata_addresses.append(block.address)
             file_metadata_line0s.append(None)
             file_metadata_blocks.append(block)
 
-    # Pass 2: Do a data caching pass.
-    for segment_id in range(file_info.get_segment_count()):
-        # Basically incorporate known addresses which were relocated.
-        if file_info.get_segment_data_file_offset(segment_id) != -1:
-            file_info.get_segment_data(segment_id)
-            reloc_addresses.update(file_info.relocated_addresses_by_segment_id[segment_id])
+    # Pass 2: Stuff.
 
-        # Incorporate known symbols.
+    # Incorporate known symbols.
+    for segment_id in range(file_info.get_segment_count()):
         symbols = file_info.symbols_by_segment_id[segment_id]
         address = file_info.get_segment_address(segment_id)
         for symbol_offset, symbol_name, code_flag in symbols:
-            symbol_address = address + symbol_offset
-            insert_symbol(symbol_address, symbol_name)
-            # TODO: This needs a fix mentioned at the top of the file.
+            insert_symbol(address + symbol_offset, symbol_name)
+            # TODO: This causes errors when the code is actually in the bss, or non-file backed memory.
             #if code_flag:
             #    insert_branch_address(symbol_address, None)
 
     # Pass 3: Do another block splitting pass.
     for address in symbols_by_address.iterkeys():
         split_block(address)
-    for address in reloc_addresses:
+    for address in file_info.relocated_addresses:
         split_block(address)
 
     # Pass 4: Do a disassembly pass.
-    disassembly_offsets = []
+    disassembly_offsets = [ (entrypoint_address, None) ]
     for address in branch_addresses:
-        disassembly_offsets.append((address, None))
-    if entrypoint_address not in branch_addresses:
-        disassembly_offsets.insert(0, (entrypoint_address, None))
+        if address != entrypoint_address:
+            disassembly_offsets.append((address, None))
 
     disassembly_checklist = {}
     while len(disassembly_offsets):
-        abs_idx, src_abs_idx = disassembly_offsets[0]
+        address, src_abs_idx = disassembly_offsets[0]
         del disassembly_offsets[0]
 
         # Identify the block it currently falls within.
-        block, block_idx = lookup_metadata_by_address(abs_idx)
+        block, block_idx = lookup_metadata_by_address(address)
 
         data = file_info.get_segment_data(block.segment_id)
-        data_idx_start = (abs_idx + block.idx) - block.abs_idx
+        data_idx_start = (address + block.segment_offset) - block.address
         try:
-            if block.abs_idx & 1:
+            if block.address & 1:
                 raise Exception("misaligned disassembly attempt")
-            match, data_idx_end = archm68k.disassemble_one_line(data, data_idx_start, abs_idx)
+            match, data_idx_end = archm68k.disassemble_one_line(data, data_idx_start, address)
         except Exception:
             # The block should already be data.  Just exit and it should be handled correctly.
-            print "Pass 2 exception", block.segment_id, "here", hex(abs_idx), "last", src_abs_idx and hex(src_abs_idx) or src_abs_idx
+            print "Pass 2 exception", block.segment_id, "here", hex(address), "last", src_abs_idx and hex(src_abs_idx) or src_abs_idx
             traceback.print_exc()
             break
 
@@ -551,9 +558,9 @@ def UI_display_file(file_path):
             excess_length = block.length
             leading_block = block
 
-            if abs_idx - block.abs_idx > 0:
+            if address - block.address > 0:
                 # Truncate the current block.
-                leading_block.length = abs_idx - leading_block.abs_idx
+                leading_block.length = address - leading_block.address
                 calculate_line_count(leading_block)
                 excess_length -= leading_block.length
 
@@ -561,61 +568,24 @@ def UI_display_file(file_path):
                 block = SegmentBlock()
                 block.flags = leading_block.flags
                 block.segment_id = leading_block.segment_id
-                block.idx = leading_block.idx + leading_block.length
-                block.abs_idx = leading_block.abs_idx + leading_block.length
+                block.segment_offset = leading_block.segment_offset + leading_block.length
+                block.address = leading_block.address + leading_block.length
                 insert_metadata_block(block_idx+1, block)
 
             # Insert the new code block.
             set_data_type(block, DATA_TYPE_CODE)
+            block.flags |= BLOCK_FLAG_PROCESSED
             block.code_match = match
             block.length = data_idx_end - data_idx_start
             calculate_line_count(block)
-            disassembly_checklist[block.abs_idx] = None
+            disassembly_checklist[block.address] = None
             excess_length -= block.length
 
             # Extract any addresses which are referred to, for later use.
-            if get_data_type(block.flags) == DATA_TYPE_CODE:
-                # Is it an instruction that exits (RTS, RTR)?
-                # Is it an instruction that conditionally branches (Bcc, Dbcc)?
-                # Is it an instruction that branches and returns (JSR, BSR)?
-                # Is it an instruction that jumps (BRA, JMP)?
-                # Given a branch/jump address, have we seen it before?
-                # Given a branch/jump address, should it be queued?
-                # Given a branch/jump address, should it be done next?
-                address = None
-                instruction_key = match.specification.key[:3]
-                if instruction_key in ("RTS", "RTR"):
-                    pass
-                elif instruction_key in ("JMP", "BRA"):
-                    if match.opcodes[0].key == "AbsL":
-                        address = match.opcodes[0].vars["xxx"]
-                    elif match.opcodes[0].specification.key == "DISPLACEMENT":
-                        address = match.pc + match.opcodes[0].vars["xxx"]
-                elif instruction_key == "JSR":
-                    if match.opcodes[0].key == "AbsL":
-                        address = match.opcodes[0].vars["xxx"]
-                elif instruction_key == "BSR":
-                    address = match.pc + match.opcodes[0].vars["xxx"]
-                elif instruction_key in ("Bcc", "DBc"):
-                    opcode_idx = 0 if instruction_key == "Bcc" else 1
-                    address = match.pc + match.opcodes[opcode_idx].vars["xxx"]
-
-                if address is not None:
-                    if address not in disassembly_checklist:
-                        disassembly_offsets.insert(0, (address, abs_idx))
-                    insert_branch_address(address, abs_idx)
-
-                # Locate any general addressing modes which infer labels.
-                for opcode in match.opcodes:
-                    if opcode.key == "PCid16":
-                        address = match.pc + archm68k._signed_value("W", opcode.vars["D16"])
-                        insert_branch_address(address, abs_idx)
-                    elif opcode.key == "PCiId8":
-                        address = match.pc + archm68k._signed_value("W", opcode.vars["D8"])
-                        insert_branch_address(address, abs_idx)
-                    elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
-                        print hex(abs_idx), opcode.key
-                        raise RuntimeError("Not handled 680x0?") # TODO: Support later?
+            for match_address, is_code in archm68k.get_match_addresses(match):
+                if is_code and match_address not in disassembly_checklist:
+                    disassembly_offsets.insert(0, (match_address, address))
+                insert_branch_address(match_address, address)
 
             # Ready any remaining block space for further disassembly.
             if excess_length:
@@ -623,8 +593,8 @@ def UI_display_file(file_path):
                 trailing_block.segment_id = block.segment_id
                 trailing_block.flags = block.flags
                 set_data_type(trailing_block, DATA_TYPE_LONGWORD)
-                trailing_block.idx = block.idx + block.length
-                trailing_block.abs_idx = block.abs_idx + block.length
+                trailing_block.segment_offset = block.segment_offset + block.length
+                trailing_block.address = block.address + block.length
                 trailing_block.length = excess_length
                 calculate_line_count(trailing_block)
 
@@ -634,15 +604,26 @@ def UI_display_file(file_path):
                 else:
                     insert_metadata_block(block_idx+1, trailing_block)
 
-                if instruction_key not in ("RTS", "RTR", "JMP", "BRA"):
-                    if trailing_block.abs_idx not in disassembly_checklist:
-                        disassembly_offsets.insert(0, (trailing_block.abs_idx, abs_idx))
+                if not archm68k.is_final_instruction(match):
+                    if trailing_block.address not in disassembly_checklist:
+                        disassembly_offsets.insert(0, (trailing_block.address, address))
         else:
-            logger.info("unable to disassemble at %X, added by: %X", abs_idx, src_abs_idx)
+            logger.info("unable to disassemble at %X, added by: %X", address, src_abs_idx)
+
+    for address in file_info.relocated_addresses:
+        if address not in symbols_by_address:
+            block, block_idx = lookup_metadata_by_address(address)
+            if block.address != address:
+                logger.error("Tried to label a relocated address without a block: %X", address)
+                continue
+            insert_symbol(address, "lb"+ char_by_data_type[get_data_type(block.flags)] + ("%06X" % address))
+
+    if entrypoint_address not in symbols_by_address:
+        insert_symbol(entrypoint_address, "ENTRYPOINT")
 
     recalculate_line_count_index()
     line_count = file_metadata_line0s[-1] + file_metadata_blocks[-1].line_count
-    line_count += 2 # blank line, then "end" instruction
+    line_count += END_INSTRUCTION_LINES # blank line, then "end" instruction
     return line_count
     
 

@@ -22,12 +22,6 @@ http://doc.qt.digia.com/4.6/richtext-html-subset.html
 http://qt-project.org/faq/answer/how_can_i_programatically_find_out_which_rows_items_are_visible_in_my_view
 http://qt-project.org/wiki/Signals_and_Slots_in_PySide
 
-Possibility for less programming overhead with later dynamic row insertion (e.g. add full line comment / change datatype):
-
-CustomItemModel.data() is called to get the text to display in all table cells, as they are refreshed.  It
-should be possible to never set the values for all the cells, and to just give them through data() on
-demand.  This should be better for dynamic row insertion, perhaps?
-
 """
 
 
@@ -45,23 +39,120 @@ import archlib
 
 SETTINGS_FILE = "settings.pikl"
 
-# Nasty global variable that caches persisted setting values.
-settings = None
+
+class WorkThread(QtCore.QThread):
+    result = QtCore.Signal(int)
+
+    def __init__(self, parent=None):
+        super(WorkThread, self).__init__(parent)
+
+        self.condition = QtCore.QWaitCondition()
+        self.mutex = QtCore.QMutex()
+
+        self.quit = False
+        self.work_data = None
+
+    def __del__(self):
+        self.stop()
+
+    def stop(self):
+        self.mutex.lock()
+        self.quit = True
+        self.work_data = None
+        self.condition.wakeOne()
+        self.mutex.unlock()
+        self.wait()
+
+    def add_work(self, _callable, *_args, **_kwargs):
+        self.mutex.lock()
+        self.work_data = _callable, _args, _kwargs
+ 
+        if not self.isRunning():
+            self.start()
+        else:
+            self.condition.wakeOne()
+        self.mutex.unlock()
+
+    def run(self):
+        self.mutex.lock()
+        work_data = self.work_data
+        self.work_data = None
+        self.mutex.unlock()
+
+        while not self.quit:
+            result = work_data[0](*work_data[1], **work_data[2])
+            work_data = None
+
+            self.mutex.lock()
+            self.result.emit(result)
+            self.condition.wait(self.mutex)
+            work_data = self.work_data
+            self.work_data = None
+            self.mutex.unlock()
 
 
-if False:
-    class CustomTableView(QtGui.QTableView):
-        def __init__(self, parent=None):
-            super(CustomTableView, self).__init__(parent)
+class CustomItemModel2(QtCore.QAbstractItemModel):
+    _header_font = None
 
-            # May start as None.
-            self.selected_row_index = None
+    def __init__(self, rows, columns, parent):
+        self.column_count = columns
 
-        def currentChanged(self, currentIndex, previousIndex):
-            self.selected_row_index = currentIndex.row()
-            print "self.selected_row_index", self.selected_row_index
-            # Is this necessary?
-            super(CustomTableView, self).currentChanged(currentIndex, previousIndex)
+        super(CustomItemModel2, self).__init__(parent)
+
+        self.column_alignments = [ QtCore.Qt.AlignLeft ] * self.column_count
+        self.header_data = {}
+
+    def set_header_font(self, font):
+        self._header_font = font
+
+    def refresh(self, parent):
+        self.beginInsertRows(parent, 0, self.rowCount(parent))
+        self.endInsertRows()
+
+    def rowCount(self, parent):
+        return run.get_line_count()
+
+    def columnCount(self, parent):
+        return self.column_count
+
+    def setHeaderData(self, section, orientation, data):
+        self.header_data[(section, orientation)] = data
+
+    def headerData(self, section, orientation, role):
+        if role == QtCore.Qt.DisplayRole:
+            # e.g. section = column_index, orientation = QtCore.Qt.Horizontal
+            return self.header_data.get((section, orientation))
+        elif role == QtCore.Qt.FontRole:
+            return self._header_font
+
+    def data(self, index, role):
+        if not index.isValid():
+            return None
+
+        if role == QtCore.Qt.TextAlignmentRole:
+            column = index.column()
+            return self.column_alignments[column]
+        elif role != QtCore.Qt.DisplayRole:
+            return None
+
+        column, row = index.column(), index.row()
+        return run.get_file_line(row, column)
+
+    def parent(self, index):
+        return QtCore.QModelIndex()
+
+    def index(self, row, column, parent):
+        if not self.hasIndex(row, column, parent):
+            return QtCore.QModelIndex()
+
+        return self.createIndex(row, column)
+
+    if False:
+        def flags(self, index):
+            if not index.isValid():
+                return QtCore.Qt.NoItemFlags
+
+            return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
 
 
 class CustomItemModel(QtGui.QStandardItemModel):
@@ -74,18 +165,20 @@ class CustomItemModel(QtGui.QStandardItemModel):
         column, row = index.column(), index.row()
         if role == QtCore.Qt.TextAlignmentRole:
             return self.column_alignments[column]
-            if column > 0:
-                return QtCore.Qt.AlignLeft
-            else:
-                return QtCore.Qt.AlignRight
         return super(CustomItemModel, self).data(index, role)
 
 
-def create_table_model(parent, column_names):
+def create_table_model(parent, columns, _class=None):
     # Need to subclass QtGui.QStandardItemModel to get custom column alignment.
-    model = CustomItemModel(0, len(column_names), parent)
-    for i, column_name in enumerate(column_names):    
+    if _class is None:
+        _class = CustomItemModel
+    model = _class(0, len(columns), parent)
+    for i, (column_name, column_type) in enumerate(columns):
         model.setHeaderData(i, QtCore.Qt.Horizontal, column_name)
+        if column_type is int:
+            model.column_alignments[i] = QtCore.Qt.AlignRight
+        else:
+            model.column_alignments[i] = QtCore.Qt.AlignLeft
     return model
 
 def create_table_widget(model):
@@ -110,71 +203,96 @@ def create_table_widget(model):
     return table
 
 
-# Encapsulate all the widgets that make up the main widget.
-class MainWidget(QtGui.QWidget):
-    def __init__(self, parent=None):
-        super(MainWidget, self).__init__(parent)
-
-        self.model = create_table_model(self, [ "Address", "Data", "Label", "Instruction", "Operands", "Extra" ])
-        self.model.column_alignments = [ QtCore.Qt.AlignRight, QtCore.Qt.AlignLeft,  QtCore.Qt.AlignLeft, QtCore.Qt.AlignLeft, QtCore.Qt.AlignLeft, QtCore.Qt.AlignLeft ]
-        self.table = create_table_widget(self.model)
-
-        layout = QtGui.QGridLayout()
-        layout.addWidget(self.table, 0, 0)
-        self.setLayout(layout)
-
 
 class MainWindow(QtGui.QMainWindow):
+    _settings = None
+
     numberPopulated = QtCore.Signal(int)
+    log_signal = QtCore.Signal(tuple)
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        self.thread = WorkThread()
+
+        ## GENERATE THE UI
+
         self.setWindowTitle("PeaSauce")
 
-        self.mainWidget = MainWidget(self)
-        self.setCentralWidget(self.mainWidget)
+        self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=CustomItemModel2)
+        self.list_model.column_alignments[0] = QtCore.Qt.AlignRight
+        self.list_table = create_table_widget(self.list_model)
+
+        self.setCentralWidget(self.list_table)
 
         self.create_menus()
         self.create_dock_windows()
 
-        self.font_info = get_setting("font-info")
+        # Override the default behaviour of using the same font for the table header, that the table itself uses.
+        # TODO: Maybe rethink this, as it looks a bit disparate to use different fonts for both.
+        default_header_font = QtGui.QApplication.font(self.list_table.horizontalHeader())
+        self.list_model.set_header_font(default_header_font)
+
+        ## RESTORE SAVED SETTINGS
+
+        # Restore the user selected font for the table view.
+        self.font_info = self._get_setting("font-info")
         if self.font_info is not None:
             font = QtGui.QFont()
             if font.fromString(self.font_info):
-                self.set_font_for_all_widgets(font)
+                self.list_table.setFont(font)
 
-    if False:
-        def updateLog(self, number):
-            self.logViewer.append("%d items added." % number)
+        # Restore the layout of the main window and the dock windows.
+        window_geometry = self._get_setting("window-geometry")
+        if window_geometry is not None:
+            self.restoreGeometry(window_geometry)
+
+        ## INITIALISE APPLICATION STATE
+
+        # State related to having something loaded.
+        self.file_path = None
+
+    def closeEvent(self, event):
+        """ Intercept the window close event and anything which needs to happen first. """
+        # If we do not stop the thread, we see the following noise in the console:
+        # "QThread: Destroyed while thread is still running"
+        self.thread.stop()
+        self.thread.wait()
+
+        # Persist window layout.
+        self._set_setting("window-geometry", self.saveGeometry())
+
+        # Let the window close.
+        event.accept()
 
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
-        self.log_model = create_table_model(self, [ "Timestamp", "System", "Description", ])
-        self.log_model.column_alignments = [ QtCore.Qt.AlignLeft, QtCore.Qt.AlignLeft, QtCore.Qt.AlignLeft ]
+        self.log_model = create_table_model(self, [ ("Timestamp", str), ("System", str), ("Description", str), ])
         self.log_table = create_table_widget(self.log_model)
         self.log_table.setAlternatingRowColors(True)
         dock.setWidget(self.log_table)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-log")
 
         dock = QtGui.QDockWidget("Symbols", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.symbols_model = create_table_model(self, [ "Symbol", ])
+        self.symbols_model = create_table_model(self, [ ("Symbol", str), ("Address", int), ])
         self.symbols_table = create_table_widget(self.symbols_model)
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-symbols")
 
         dock = QtGui.QDockWidget("Segments", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.segments_model = create_table_model(self, [ "#", "Type", "Alloc  Size", "Disk Size", ])
-        self.segments_model.column_alignments = [ QtCore.Qt.AlignRight, QtCore.Qt.AlignLeft, QtCore.Qt.AlignRight, QtCore.Qt.AlignRight,  ]
+        self.segments_model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
         self.segments_table = create_table_widget(self.segments_model)
         dock.setWidget(self.segments_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-segments")
 
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open ...", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.on_file_open_menu)
@@ -195,6 +313,21 @@ class MainWindow(QtGui.QMainWindow):
         self.settings_menu = self.menuBar().addMenu("Settings")
         self.settings_menu.addAction(self.choose_font_action)
 
+    def reset_all(self):
+        self.reset_ui()
+        self.reset_state()
+
+    def reset_ui(self):
+        for model in (self.list_model, self.symbols_model, self.segments_model, self.log_model):
+            if model.rowCount():
+                model.removeRows(0, model.rowCount(), QtCore.QModelIndex())
+        self.file_path = None
+
+    def reset_state(self):
+        """ Called to clear out all state related to loaded data. """
+        self.file_path = None
+        run.set_symbol_insert_func(None)
+
     def show_confirmation_dialog(self, title, message):
         reply = QtGui.QMessageBox.question(self, title, message, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
         return reply == QtGui.QMessageBox.Ok
@@ -203,65 +336,111 @@ class MainWindow(QtGui.QMainWindow):
         QtGui.QMessageBox.information(self, title, message)
 
     def on_file_open_menu(self):
+        if self.file_path is not None:
+            if not self.show_confirmation_dialog("Abandon work?", "You have existing work loaded, do you wish to abandon it?"):
+                return
+            self.reset_all()
+
+        # Request the user select a file.
         options = QtGui.QFileDialog.Options()
         file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self, "Select a file to disassemble", options=options)
-        if len(file_path):
-            line_count = run.UI_display_file(file_path)
-            if line_count is None:
-                self.show_information_dialog("Unable to open file", "The file does not appear to be a supported executable file format.")
-                return
+        if not len(file_path):
+            return
 
-            ## Clear out any existing loaded state.
-            # TODO: This should probably be put in a better place with a confirmation dialog?
-            for model in (self.mainWidget.model, self.symbols_model, self.segments_model):
-                if model.rowCount():
-                    model.removeRows(0, model.rowCount(), QtCore.QModelIndex())
+        # An attempt will be made to load an existing file.
+        self.file_path = file_path
 
-            ## Populate the disassembly view with the loaded data.
-            model = self.mainWidget.model
-            model.insertRows(model.rowCount(), line_count, QtCore.QModelIndex())
-            for row_index in range(line_count):
-                for column_index in range(6):
-                    text = run.get_file_line(row_index, column_index)
-                    model.setData(model.index(row_index, column_index, QtCore.QModelIndex()), text)
+        # Display a modal dialog.
+        progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
+        progressDialog.setCancelButtonText("&Cancel")
+        progressDialog.setRange(0, 100)
+        progressDialog.setWindowTitle("Loading a File")
+        progressDialog.setMinimumDuration(1)
 
-            ## Populate the segments dockable window with the loaded segment information.
-            model = self.segments_model
-            for segment_id in range(len(run.file_info.segments)):
-                model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-                
-                segment_type = run.file_info.get_segment_type(segment_id)
-                if segment_type == archlib.SEGMENT_TYPE_CODE:
-                    segment_type = "code"
-                elif segment_type == archlib.SEGMENT_TYPE_DATA:
-                    segment_type = "data"
-                elif segment_type == archlib.SEGMENT_TYPE_BSS:
-                    segment_type = "bss"
-                length = run.file_info.get_segment_length(segment_id)
-                data_length = run.file_info.get_segment_data_length(segment_id)
-                if run.file_info.get_segment_data_file_offset(segment_id) == -1:
-                    data_length = "-"
+        self.thread.result.connect(self.on_file_processed_signal)
+        self.thread.add_work(run.UI_display_file, file_path)
 
-                model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
-                for i, column_value in enumerate((segment_type, length, data_length)):
-                    model.setData(model.index(segment_id, i+1, QtCore.QModelIndex()), column_value)
-            self.segments_table.resizeColumnsToContents()
-            self.segments_table.horizontalHeader().setStretchLastSection(True)
+        while self.file_path is not None:
+            progressDialog.setValue(0)
+            progressDialog.setLabelText("Some disassembly stuff")
+            QtGui.qApp.processEvents()
+            if progressDialog.wasCanceled():
+                self.reset_state()
+                break
+
+        progressDialog.close()
+
+    def on_file_processed_signal(self, line_count):
+        self.progressDialog.close()
+        self.thread.result.disconnect(self.on_file_processed_signal)
+        # This isn't really good enough, as long loading files may send mixed signals.
+        if self.file_path is None:
+            return
+
+        if line_count == 0:
+            self.reset_state()
+            self.show_information_dialog("Unable to open file", "The file does not appear to be a supported executable file format.")
+            return
+
+        ## Populate the disassembly view with the loaded data.
+        model = self.list_model
+        model.refresh(QtCore.QModelIndex())
+
+        ## SEGMENTS
+ 
+        # Populate the segments dockable window with the loaded segment information.
+        model = self.segments_model
+        for segment_id in range(len(run.file_info.segments)):
+            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
+            
+            segment_type = run.file_info.get_segment_type(segment_id)
+            if segment_type == archlib.SEGMENT_TYPE_CODE:
+                segment_type = "code"
+            elif segment_type == archlib.SEGMENT_TYPE_DATA:
+                segment_type = "data"
+            elif segment_type == archlib.SEGMENT_TYPE_BSS:
+                segment_type = "bss"
+            length = run.file_info.get_segment_length(segment_id)
+            data_length = run.file_info.get_segment_data_length(segment_id)
+            if run.file_info.get_segment_data_file_offset(segment_id) == -1:
+                data_length = "-"
+            reloc_count = len(run.file_info.relocations_by_segment_id.get(segment_id, []))
+            symbol_count = len(run.file_info.symbols_by_segment_id.get(segment_id, []))
+
+            model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
+            for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
+                model.setData(model.index(segment_id, i+1, QtCore.QModelIndex()), column_value)
+
+        self.segments_table.resizeColumnsToContents()
+        self.segments_table.horizontalHeader().setStretchLastSection(True)
+
+        ## SYMBOLS
+
+        # Register for further symbol events (only add for now).
+        run.set_symbol_insert_func(self._disassembly_event_new_symbol)
+
+        model = self.symbols_model
+        row_index = 0
+        for symbol_address, symbol_label in run.symbols_by_address.iteritems():
+            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
+            model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
+            model.setData(model.index(row_index, 1, QtCore.QModelIndex()), symbol_address)
+            row_index += 1
+
+        self.segments_table.resizeColumnsToContents()
+        self.segments_table.horizontalHeader().setStretchLastSection(True)
 
     def on_file_quit_menu(self):
         if self.show_confirmation_dialog("Quit..", "Are you sure you wish to quit?"):
             self.close()
 
     def on_search_goto_address_menu(self):
-        line_idx = self.mainWidget.table.currentIndex().row()
-        # block, block_idx = run.lookup_metadata_by_line_count(line_idx)
-        print "got line_idx", line_idx
+        line_idx = self.list_table.currentIndex().row()
         if line_idx == -1:
             line_idx = 0
         address = run.get_address_for_line_number(line_idx)
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
-            print "GOT LABEL", text
             new_address = None
             if text.startswith("0x") or text.startswith("$"):
                 new_address = int(text, 16)
@@ -269,56 +448,64 @@ class MainWindow(QtGui.QMainWindow):
                 new_address = int(text)
             if new_address is not None:
                 new_line_idx = run.get_line_number_for_address(new_address)
-                print "got new line number", new_line_idx
-                self.mainWidget.table.selectRow(new_line_idx)
-
+                self.list_table.selectRow(new_line_idx)
 
     def on_settings_choose_font_menu(self):
-        # For now just change the font that the table view is using.
         font, ok = QtGui.QFontDialog.getFont(QtGui.QFont("Courier New", 10), self)
         if font and ok:
-            self.set_font_for_all_widgets(font)
-            set_setting("font-info", font.toString())
+            self.list_table.setFont(font)
+            self._set_setting("font-info", font.toString())
 
-    def set_font_for_all_widgets(self, font):
-        self.mainWidget.table.setFont(font)
-        self.log_table.setFont(font)
-        self.symbols_table.setFont(font)
-        self.segments_table.setFont(font)
+    def _set_setting(self, setting_name, setting_value):
+        self._settings[setting_name] = setting_value
+        with open(SETTINGS_FILE, "wb") as f:
+            cPickle.dump(self._settings, f)
+
+    def _get_setting(self, setting_name, default_value=None):
+        if self._settings is None:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, "rb") as f:
+                    self._settings = cPickle.load(f)
+            else:
+                self._settings = {}
+        return self._settings.get(setting_name, default_value)
+
+    def _disassembly_event_new_symbol(self, address, label):
+        return
+        model = self.segments_model
+        for symbol_address, symbol_label in run.symbols_by_address.iteritems():
+            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
+            model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), symbol_label)
+            model.setData(model.index(segment_id, 1, QtCore.QModelIndex()), symbol_address)
+
+        self.segments_table.resizeColumnsToContents()
+        self.segments_table.horizontalHeader().setStretchLastSection(True)
+        
 
 
-def set_setting(setting_name, setting_value):
-    global settings
-    settings[setting_name] = setting_value
-    with open(SETTINGS_FILE, "wb") as f:
-        cPickle.dump(settings, f)
+def _initialise_logging(window):
+    def _ui_thread_logging(t):
+        global window
+        timestamp, logger_name, message = t
+        table = window.log_table
+        model = window.log_model
+        row_index = model.rowCount()
+        model.insertRows(row_index, 1, QtCore.QModelIndex())
+        model.setData(model.index(row_index, 0, QtCore.QModelIndex()), time.ctime(timestamp))
+        model.setData(model.index(row_index, 1, QtCore.QModelIndex()), logger_name)
+        model.setData(model.index(row_index, 2, QtCore.QModelIndex()), message)
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        #table.scrollTo(model.index(row_index, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtBottom)
+        table.scrollToBottom()
 
-def get_setting(setting_name, default_value=None):
-    global settings
-    if settings is None:
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, "rb") as f:
-                settings = cPickle.load(f)
-        else:
-            settings = {}
-    return settings.get(setting_name, default_value)
+    window.log_signal.connect(_ui_thread_logging)
 
-def _initialise_logging():
     class LogHandler(logging.Handler):
         def emit(self, record):
-            global window
             msg = self.format(record)
-
-            table = window.log_table
-            model = window.log_model
-            row_index = model.rowCount()
-            model.insertRows(row_index, 1, QtCore.QModelIndex())
-            model.setData(model.index(row_index, 0, QtCore.QModelIndex()), time.ctime(record.created))
-            model.setData(model.index(row_index, 1, QtCore.QModelIndex()), record.name)
-            model.setData(model.index(row_index, 2, QtCore.QModelIndex()), msg)
-            table.resizeColumnsToContents()
-            table.horizontalHeader().setStretchLastSection(True)
-            table.scrollTo(model.index(row_index, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtBottom)
+            # These logging events may be happening in the worker thread, ensure they only get displayed in the UI thread.
+            window.log_signal.emit((record.created, record.name, msg))
 
     handler = LogHandler()
     handler.setLevel(logging.DEBUG)
@@ -329,11 +516,12 @@ def _initialise_logging():
 
 
 if __name__ == '__main__':
-    _initialise_logging()
-
     app = QtGui.QApplication(sys.argv)
+    app_font = QtGui.QApplication.font()
 
     window = MainWindow()
+    # The window needs to be created so we can connect to its signal.
+    _initialise_logging(window)
     window.show()
 
     sys.exit(app.exec_())
