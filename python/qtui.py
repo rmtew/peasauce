@@ -91,13 +91,13 @@ class WorkThread(QtCore.QThread):
             self.mutex.unlock()
 
 
-class CustomItemModel2(QtCore.QAbstractItemModel):
+class DisassemblyItemModel(QtCore.QAbstractItemModel):
     _header_font = None
 
     def __init__(self, rows, columns, parent):
         self.column_count = columns
 
-        super(CustomItemModel2, self).__init__(parent)
+        super(DisassemblyItemModel, self).__init__(parent)
 
         self.column_alignments = [ QtCore.Qt.AlignLeft ] * self.column_count
         self.header_data = {}
@@ -219,7 +219,7 @@ class MainWindow(QtGui.QMainWindow):
 
         self.setWindowTitle("PeaSauce")
 
-        self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=CustomItemModel2)
+        self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
         self.list_model.column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self.list_model)
 
@@ -268,9 +268,9 @@ class MainWindow(QtGui.QMainWindow):
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
-        self.log_model = create_table_model(self, [ ("Timestamp", str), ("System", str), ("Description", str), ])
+        self.log_model = create_table_model(self, [ ("Time", str), ("Level", str), ("System", str), ("Description", str), ])
         self.log_table = create_table_widget(self.log_model)
-        self.log_table.setAlternatingRowColors(True)
+        self.log_table.setAlternatingRowColors(True) # Non-standard
         dock.setWidget(self.log_table)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
@@ -280,7 +280,7 @@ class MainWindow(QtGui.QMainWindow):
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.symbols_model = create_table_model(self, [ ("Symbol", str), ("Address", int), ])
         self.symbols_table = create_table_widget(self.symbols_model)
-        self.symbols_table.setSortingEnabled(True)
+        self.symbols_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
@@ -296,10 +296,10 @@ class MainWindow(QtGui.QMainWindow):
         dock.setObjectName("dock-segments")
 
     def create_menus(self):
-        self.open_action = QtGui.QAction("&Open ...", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.on_file_open_menu)
-        self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.on_file_quit_menu)
-        self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.on_search_goto_address_menu)
-        self.choose_font_action = QtGui.QAction("Select font", self, statusTip="Change the font", triggered=self.on_settings_choose_font_menu)
+        self.open_action = QtGui.QAction("&Open ...", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
+        self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
+        self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
+        self.choose_font_action = QtGui.QAction("Select font", self, statusTip="Change the font", triggered=self.menu_settings_choose_font)
 
         self.file_menu = self.menuBar().addMenu("&File")
         self.file_menu.addAction(self.open_action)
@@ -333,12 +333,10 @@ class MainWindow(QtGui.QMainWindow):
         reply = QtGui.QMessageBox.question(self, title, message, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
         return reply == QtGui.QMessageBox.Ok
 
-    def show_information_dialog(self, title, message):
-        QtGui.QMessageBox.information(self, title, message)
-
-    def on_file_open_menu(self):
+    def menu_file_open(self):
         if self.file_path is not None:
-            if not self.show_confirmation_dialog("Abandon work?", "You have existing work loaded, do you wish to abandon it?"):
+            ret = QtGui.QMessageBox.question(self, "Abandon work?", "You have existing work loaded, do you wish to abandon it?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
+            if ret != QtGui.QMessageBox.Ok:
                 return
             self.reset_all()
 
@@ -348,9 +346,49 @@ class MainWindow(QtGui.QMainWindow):
         if not len(file_path):
             return
 
-        self.attempt_file_open(file_path)
+        self.attempt_open_file(file_path)
 
-    def attempt_file_open(self, file_path):
+    def menu_file_quit(self):
+        if QtGui.QMessageBox.question(self, "Quit..", "Are you sure you wish to quit?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel):
+            self.close()
+
+    def menu_search_goto_address(self):
+        line_idx = self.list_table.currentIndex().row()
+        if line_idx == -1:
+            line_idx = 0
+        address = disassembly.get_address_for_line_number(line_idx)
+        text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
+        if ok and text != '':
+            new_address = None
+            if text.startswith("0x") or text.startswith("$"):
+                new_address = int(text, 16)
+            else:
+                new_address = int(text)
+            if new_address is not None:
+                new_line_idx = disassembly.get_line_number_for_address(new_address)
+                self.list_table.selectRow(new_line_idx)
+
+    def menu_settings_choose_font(self):
+        font, ok = QtGui.QFontDialog.getFont(QtGui.QFont("Courier New", 10), self)
+        if font and ok:
+            self.list_table.setFont(font)
+            self._set_setting("font-info", font.toString())
+
+    def _set_setting(self, setting_name, setting_value):
+        self._settings[setting_name] = setting_value
+        with open(SETTINGS_FILE, "wb") as f:
+            cPickle.dump(self._settings, f)
+
+    def _get_setting(self, setting_name, default_value=None):
+        if self._settings is None:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, "rb") as f:
+                    self._settings = cPickle.load(f)
+            else:
+                self._settings = {}
+        return self._settings.get(setting_name, default_value)
+
+    def attempt_open_file(self, file_path):
         # An attempt will be made to load an existing file.
         self.file_path = file_path
 
@@ -361,7 +399,7 @@ class MainWindow(QtGui.QMainWindow):
         progressDialog.setWindowTitle("Loading a File")
         progressDialog.setMinimumDuration(1)
 
-        self.thread.result.connect(self.on_file_processed_signal)
+        self.thread.result.connect(self.attempt_display_file)
         self.thread.add_work(disassembly.UI_display_file, file_path)
 
         while self.file_path is not None:
@@ -374,16 +412,16 @@ class MainWindow(QtGui.QMainWindow):
 
         progressDialog.close()
 
-    def on_file_processed_signal(self, line_count):
+    def attempt_display_file(self, line_count):
         self.progressDialog.close()
-        self.thread.result.disconnect(self.on_file_processed_signal)
+        self.thread.result.disconnect(self.attempt_display_file)
         # This isn't really good enough, as long loading files may send mixed signals.
         if self.file_path is None:
             return
 
         if line_count == 0:
             self.reset_state()
-            self.show_information_dialog("Unable to open file", "The file does not appear to be a supported executable file format.")
+            QtGui.QMessageBox.information(self, "Unable to open file", "The file does not appear to be a supported executable file format.")
             return
 
         ## Populate the disassembly view with the loaded data.
@@ -421,80 +459,47 @@ class MainWindow(QtGui.QMainWindow):
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
-        disassembly.set_symbol_insert_func(self._disassembly_event_new_symbol)
+        disassembly.set_symbol_insert_func(self.disassembly_symbol_added)
 
         model = self.symbols_model
+        model.insertRows(model.rowCount(), len(disassembly.symbols_by_address), QtCore.QModelIndex())
         row_index = 0
         for symbol_address, symbol_label in disassembly.symbols_by_address.iteritems():
-            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-            model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
-            model.setData(model.index(row_index, 1, QtCore.QModelIndex()), symbol_address)
+            self._add_symbol_to_model(symbol_address, symbol_label, row_index)
             row_index += 1
 
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
-    def on_file_quit_menu(self):
-        if self.show_confirmation_dialog("Quit..", "Are you sure you wish to quit?"):
-            self.close()
-
-    def on_search_goto_address_menu(self):
-        line_idx = self.list_table.currentIndex().row()
-        if line_idx == -1:
-            line_idx = 0
-        address = disassembly.get_address_for_line_number(line_idx)
-        text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
-        if ok and text != '':
-            new_address = None
-            if text.startswith("0x") or text.startswith("$"):
-                new_address = int(text, 16)
-            else:
-                new_address = int(text)
-            if new_address is not None:
-                new_line_idx = disassembly.get_line_number_for_address(new_address)
-                self.list_table.selectRow(new_line_idx)
-
-    def on_settings_choose_font_menu(self):
-        font, ok = QtGui.QFontDialog.getFont(QtGui.QFont("Courier New", 10), self)
-        if font and ok:
-            self.list_table.setFont(font)
-            self._set_setting("font-info", font.toString())
-
-    def _set_setting(self, setting_name, setting_value):
-        self._settings[setting_name] = setting_value
-        with open(SETTINGS_FILE, "wb") as f:
-            cPickle.dump(self._settings, f)
-
-    def _get_setting(self, setting_name, default_value=None):
-        if self._settings is None:
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, "rb") as f:
-                    self._settings = cPickle.load(f)
-            else:
-                self._settings = {}
-        return self._settings.get(setting_name, default_value)
-
-    def _disassembly_event_new_symbol(self, symbol_address, symbol_label):
+    def disassembly_symbol_added(self, symbol_address, symbol_label):
+        model = self.symbols_model
         model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-        model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), symbol_label)
-        model.setData(model.index(segment_id, 1, QtCore.QModelIndex()), symbol_address)
+        self._add_symbol_to_model(symbol_address, symbol_label)
 
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
+
+    def _add_symbol_to_model(self, symbol_address, symbol_label, row_index=None):
+        model = self.symbols_model
+        if row_index is None:
+            row_index = model.rowCount()-1
+        model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
+        model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
 
 
 
 def _initialise_logging(window):
     def _ui_thread_logging(t):
         global window
-        timestamp, logger_name, message = t
+        timestamp, level_name, logger_name, message = t
         table = window.log_table
         model = window.log_model
         row_index = model.rowCount()
         model.insertRows(row_index, 1, QtCore.QModelIndex())
         model.setData(model.index(row_index, 0, QtCore.QModelIndex()), time.ctime(timestamp))
-        model.setData(model.index(row_index, 1, QtCore.QModelIndex()), logger_name)
-        model.setData(model.index(row_index, 2, QtCore.QModelIndex()), message)
+        model.setData(model.index(row_index, 1, QtCore.QModelIndex()), level_name)
+        model.setData(model.index(row_index, 2, QtCore.QModelIndex()), logger_name)
+        model.setData(model.index(row_index, 3, QtCore.QModelIndex()), message)
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
         #table.scrollTo(model.index(row_index, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtBottom)
@@ -506,7 +511,7 @@ def _initialise_logging(window):
         def emit(self, record):
             msg = self.format(record)
             # These logging events may be happening in the worker thread, ensure they only get displayed in the UI thread.
-            window.log_signal.emit((record.created, record.name, msg))
+            window.log_signal.emit((record.created, record.levelname, record.name, msg))
 
     handler = LogHandler()
     handler.setLevel(logging.DEBUG)
@@ -515,14 +520,6 @@ def _initialise_logging(window):
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
 
-
-def _arg_file_load(file_path):
-    global window
-    t = QtCore.QTimer()
-    t.setSingleShot(True)
-    # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
-    t.timeout.connect(lambda: window.attempt_file_open(file_path) or t is not None)
-    t.start(50)
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
@@ -535,10 +532,16 @@ if __name__ == '__main__':
     # Do our own argument handling.  The documentation for QApplication says that
     # QT will remove it's own arguments from argc, but this does not apply when
     # it is used in PySide.
-    if len(sys.argv) > 1:
-        s = sys.argv[-1]
-        if s[0] != "-":
-            _arg_file_load(s)
+    def _arg_file_load():
+        if len(sys.argv) > 1:
+            s = sys.argv[-1]
+            if s[0] != "-":
+                t = QtCore.QTimer()
+                t.setSingleShot(True)
+                # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
+                t.timeout.connect(lambda: window.attempt_open_file(s) or t is not None)
+                t.start(50)
+    _arg_file_load()
 
     sys.exit(app.exec_())
 

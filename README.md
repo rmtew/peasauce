@@ -65,10 +65,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Bugs
 
 * Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
-* "run.py": This is no longer run, and should be renamed to something like "disassembly.py".
-* UI: Error log lines should be coloured red.
 * UI: Should split blocks on all address discovery.
-* UI: Address extraction from disassembly match should not happen in UI, as UI should not be m68k specific.
 * UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.
 * UI: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
 
@@ -93,7 +90,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Technical Debt
 
 * Coding style: Better error propagation, no exception raising on purpose.
-* Coding style: Make code / system interaction more straightforward.
+* Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * File loading: Clean up file_info.file_data to only store useful information.
 

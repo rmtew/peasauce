@@ -627,28 +627,6 @@ def UI_display_file(file_path):
     return line_count
     
 
-if False:
-        def on_search_next_code(self, event):
-            global disassembly_listctrl
-            line_idx = disassembly_listctrl.GetTopItem()
-            block, block_idx = lookup_metadata_by_line_count(line_idx)
-            search_idx = block_idx + 1
-            while search_idx < len(file_metadata_blocks):
-                if get_data_type(file_metadata_blocks[search_idx].flags) == DATA_TYPE_CODE:
-                    disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
-                    break
-                search_idx += 1
-
-        def on_search_next_data(self, event):
-            global disassembly_listctrl
-            line_idx = disassembly_listctrl.GetTopItem()
-            block, block_idx = lookup_metadata_by_line_count(line_idx)
-            search_idx = block_idx + 1
-            while search_idx < len(file_metadata_blocks):
-                if get_data_type(file_metadata_blocks[search_idx].flags) != DATA_TYPE_CODE:
-                    disassembly_listctrl.SetItemState(file_metadata_line0s[search_idx], wx.LIST_STATE_SELECTED, wx.LIST_STATE_SELECTED)
-                    break
-                search_idx += 1
 
 if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
