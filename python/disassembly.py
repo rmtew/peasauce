@@ -62,8 +62,8 @@ class SegmentBlock(object):
     length = None
     """ The data type of this block (DATA_TYPE_*) and more """
     flags = 0
-    """ DATA_TYPE_CODE: Match metadata. """
-    code_match = None
+    """ DATA_TYPE_CODE: [ line0_match, ... lineN_match ]. """
+    line_data = None
     """ Calculated number of lines. """
     line_count = 0
 
@@ -108,24 +108,33 @@ BLOCK_FLAG_ALLOC        = 1 << (DATA_TYPE_BITCOUNT+0)
 """ Indicates that the block has been processed. """
 BLOCK_FLAG_PROCESSED    = 1 << (DATA_TYPE_BITCOUNT+1)
 
+""" The mask for the flags to preserve if the block is split. """
+BLOCK_SPLIT_BITMASK     = BLOCK_FLAG_ALLOC | DATA_TYPE_BITMASK
 
 """ Used to map block data type to a character used in the label generation. """
 char_by_data_type = { DATA_TYPE_CODE: "C", DATA_TYPE_ASCII: "A", DATA_TYPE_BYTE: "B", DATA_TYPE_WORD: "W", DATA_TYPE_LONGWORD: "L" }
 
+def calculate_block_leading_line_count(block):
+    if block.segment_offset == 0 and file_info.has_section_headers():
+        return 1
+    return 0
+
+def calculate_match_line_count(match):
+    line_count = 1
+    if display_configuration.trailing_line_exit and archm68k.is_final_instruction(match):
+        line_count += 1
+    elif display_configuration.trailing_line_trap and match.specification.key == "TRAP":
+        line_count += 1
+    elif display_configuration.trailing_line_branch and match.specification.key in ("Bcc", "DBcc",):
+        line_count += 1
+    return line_count
 
 def calculate_line_count(block):
     old_line_count = block.line_count
-    block.line_count = 0
-    if block.segment_offset == 0 and file_info.has_section_headers():
-        block.line_count += 1 # HUNK HEADER (SECTION ...)
+    block.line_count = calculate_block_leading_line_count(block)
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        block.line_count += 1
-        if display_configuration.trailing_line_exit and archm68k.is_final_instruction(block.code_match):
-            block.line_count += 1
-        elif display_configuration.trailing_line_trap and block.code_match.specification.key == "TRAP":
-            block.line_count += 1
-        elif display_configuration.trailing_line_branch and block.code_match.specification.key in ("Bcc", "DBcc",):
-            block.line_count += 1
+        for match in block.line_data:
+            block.line_count += calculate_match_line_count(match)
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
@@ -172,8 +181,20 @@ def get_line_number_for_address(address):
     base_address = file_metadata_addresses[block_idx]
     line_number0 = file_metadata_line0s[block_idx]
     line_number1 = line_number0 + block.line_count
+
+    # Account for leading lines.
+    line_number0 += calculate_block_leading_line_count(block)
+
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        return line_number0
+        bytes_used = 0
+        line_number = line_number0
+        for match in block.line_data:
+            if base_address + bytes_used == address:
+                return line_number
+            bytes_used += match.num_bytes
+            line_number += calculate_match_line_count(match)
+        logger.error("Miscounted lines for block")
+        raise RuntimeError("xxx")
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
             size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
@@ -200,11 +221,19 @@ def get_line_number_for_address(address):
 
 def get_address_for_line_number(line_number):
     block, block_idx = lookup_metadata_by_line_count(line_number)
-    base_line_count = file_metadata_line0s[block_idx]
+    base_line_count = file_metadata_line0s[block_idx] + calculate_block_leading_line_count(block)
     address0 = file_metadata_addresses[block_idx]
     address1 = address0 + block.length
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        return address0
+        bytes_used = 0
+        line_count = base_line_count
+        for match in block.line_data:
+            if line_count == line_number:
+                return address0 + bytes_used
+            bytes_used += match.num_bytes
+            line_count += calculate_match_line_count(match)
+        logger.error("Miscounted address for block ()")
+        raise RuntimeError("xxx")
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
             size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
@@ -259,57 +288,68 @@ def get_file_line(line_idx, column_idx): # Zero-based
         if block.segment_offset + block.length == file_info.get_segment_length(block.segment_id) and block.segment_id < file_info.get_segment_count()-1:
             return ""
 
-    # Trailing blank lines after code (factor in leading lines).
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        if line_idx > block_line_count0 + leading_line_count:
+        # block, block_idx = lookup_metadata_by_line_count(line_idx)
+        # block_line_count0 = file_metadata_line0s[block_idx]
+        bytes_used = 0
+        line_count = block_line_count0 + leading_line_count
+        line_match = None
+        for match in block.line_data:
+            if line_count == line_idx:
+                line_match = match
+                break
+            bytes_used += match.num_bytes
+            line_count += calculate_match_line_count(match)
+        else:
+            # Trailing blank lines.
             return ""
+        address = block.address + bytes_used
 
-    if get_data_type(block.flags) == DATA_TYPE_CODE:
         if column_idx == LI_OFFSET:
-            return "%08X" % block.address
+            return "%08X" % address
         elif column_idx == LI_BYTES:
             data = file_info.get_segment_data(block.segment_id)
-            return "".join([ "%02X" % c for c in data[block.segment_offset:block.segment_offset+block.length] ])
+            return "".join([ "%02X" % c for c in data[block.segment_offset+bytes_used:block.segment_offset+block.length-bytes_used] ])
         elif column_idx == LI_LABEL:
-            label = lookup_address_label(block.address)
+            label = lookup_address_label(address)
             if label is None:
                 return ""
             return label
         elif column_idx == LI_INSTRUCTION:
-            return archm68k.get_instruction_string(block.code_match, block.code_match.vars)
+            return archm68k.get_instruction_string(line_match, line_match.vars)
         elif column_idx == LI_OPERANDS:
-            def make_operand_string(block, operand, operand_idx):
+            def make_operand_string(match, operand, operand_idx):
                 operand_string = None
-                if block.code_match.specification.key[0:4] != "LINK" and operand.specification.key == "DISPLACEMENT":
-                    operand_string = lookup_address_label(block.code_match.pc + operand.vars["xxx"])
+                if match.specification.key[0:4] != "LINK" and operand.specification.key == "DISPLACEMENT":
+                    operand_string = lookup_address_label(match.pc + operand.vars["xxx"])
                 elif operand.specification.key == "AbsL" or operand.key == "AbsL":
                     operand_string = lookup_address_label(operand.vars["xxx"])
                 elif operand_idx == 0 and (operand.specification.key == "Imm" or operand.key == "Imm"):
                     # e.g. MOVEA.L #vvv, A0 ?
-                    if len(block.code_match.opcodes) > 1:
-                        operand2 = block.code_match.opcodes[1]
+                    if len(match.opcodes) > 1:
+                        operand2 = match.opcodes[1]
                         if (operand2.specification.key == "AR" or operand.key == "AR"):
                             operand_string = lookup_address_label(operand.vars["xxx"])
                             if operand_string is not None:
                                 operand_string = "#"+ operand_string
                 if operand_string is None:
-                    return archm68k.get_operand_string(block.code_match.pc, operand, operand.vars, lookup_symbol=lookup_address_label)
+                    return archm68k.get_operand_string(match.pc, operand, operand.vars, lookup_symbol=lookup_address_label)
                 return operand_string
             opcode_string = ""
-            if len(block.code_match.opcodes) >= 1:
-                opcode_string += make_operand_string(block, block.code_match.opcodes[0], 0)
-            if len(block.code_match.opcodes) == 2:
-                opcode_string += ", "+ make_operand_string(block, block.code_match.opcodes[1], 1)
+            if len(line_match.opcodes) >= 1:
+                opcode_string += make_operand_string(line_match, line_match.opcodes[0], 0)
+            if len(line_match.opcodes) == 2:
+                opcode_string += ", "+ make_operand_string(line_match, line_match.opcodes[1], 1)
             return opcode_string
         elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
             l = []
-            for o in block.code_match.opcodes:
+            for o in line_match.opcodes:
                 key = o.specification.key
                 if o.key is not None and key != o.key:
                     l.append(o.key)
                 else:
                     l.append(key)
-            return block.code_match.specification.key +" "+ ",".join(l)
+            return line_match.specification.key +" "+ ",".join(l)
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
         size_types = []
@@ -442,19 +482,29 @@ def split_block(address):
 
     # Truncate the preceding block the address is currently within.
     block.length -= excess_length
-    calculate_line_count(block)
 
     # Create a new block for the address we are processing.
     new_block = SegmentBlock()
-    new_block.flags = block.flags
+    new_block.flags = block.flags & BLOCK_SPLIT_BITMASK
     new_block.segment_id = block.segment_id
     new_block.address = block.address + block.length
     new_block.segment_offset = block.segment_offset + block.length
     new_block.length = excess_length
     insert_metadata_block(block_idx+1, new_block)
+
+    if get_data_type(block.flags) == DATA_TYPE_CODE:
+        num_bytes = 0
+        for i, match in enumerate(block.line_data):
+            if num_bytes == block.length:
+                break
+            num_bytes += match.num_bytes
+        new_block.line_data = block.line_data[i:]
+        block.line_data[i:] = []
+
+    calculate_line_count(block)
     calculate_line_count(new_block)
 
-    return new_block
+    return new_block, block_idx+1
 
 def UI_display_file(file_path):
     global file_metadata_dirtyidx, file_metadata_line0s, file_metadata_addresses, file_metadata_blocks
@@ -529,86 +579,73 @@ def UI_display_file(file_path):
         split_block(address)
 
     # Pass 4: Do a disassembly pass.
-    disassembly_offsets = [ (entrypoint_address, None) ]
+    disassembly_offsets = [ entrypoint_address ]
     for address in branch_addresses:
         if address != entrypoint_address:
-            disassembly_offsets.append((address, None))
+            disassembly_offsets.append(address)
 
     disassembly_checklist = {}
     while len(disassembly_offsets):
-        address, src_abs_idx = disassembly_offsets[0]
-        del disassembly_offsets[0]
+        address = disassembly_offsets.pop()
+        #logger.debug("Processing address: %X", address)
 
-        # Identify the block it currently falls within.
         block, block_idx = lookup_metadata_by_address(address)
+        if address - block.address > 0:
+            # The middle of an existing block.
+            if get_data_type(block.flags) == DATA_TYPE_CODE:
+                # Code blocks are just split (if address is valid) and that's it.
+                if address & 1 == 0:
+                    split_block(address)
+                continue
+            # Split a block off at the processing point.
+            new_block, block_idx = split_block(address)
+            new_block.flags |= block.flags & BLOCK_FLAG_PROCESSED
+            block = new_block
 
-        data = file_info.get_segment_data(block.segment_id)
-        data_idx_start = (address + block.segment_offset) - block.address
-        try:
-            if block.address & 1:
-                raise Exception("misaligned disassembly attempt")
-            match, data_idx_end = archm68k.disassemble_one_line(data, data_idx_start, address)
-        except Exception:
-            # The block should already be data.  Just exit and it should be handled correctly.
-            print "Pass 2 exception", block.segment_id, "here", hex(address), "last", src_abs_idx and hex(src_abs_idx) or src_abs_idx
-            traceback.print_exc()
-            break
+        if block.flags & BLOCK_FLAG_PROCESSED:
+            #logger.debug("Address already processed: %X", address)
+            continue
 
-        if match is not None:
-            excess_length = block.length
-            leading_block = block
+        block.flags |= BLOCK_FLAG_PROCESSED
 
-            if address - block.address > 0:
-                # Truncate the current block.
-                leading_block.length = address - leading_block.address
-                calculate_line_count(leading_block)
-                excess_length -= leading_block.length
+        bytes_consumed = 0
+        line_data = []
+        found_terminating_instruction = False
+        while bytes_consumed < block.length:
+            data = file_info.get_segment_data(block.segment_id)
+            data_offset_start = block.segment_offset + bytes_consumed
+            match, data_offset_end = archm68k.disassemble_one_line(data, data_offset_start, address + bytes_consumed)
+            bytes_matched = data_offset_end - data_offset_start
+            if match is None or bytes_consumed + bytes_matched > block.length:
+                logger.error("unable to disassemble at %X (started at %X)", address + bytes_consumed, address)
+                break
+            line_data.append(match)
+            bytes_consumed += bytes_matched
+            found_terminating_instruction = archm68k.is_final_instruction(match)
+            if found_terminating_instruction:
+                break
 
-                # Insert a new block at the current offset.
-                block = SegmentBlock()
-                block.flags = leading_block.flags
-                block.segment_id = leading_block.segment_id
-                block.segment_offset = leading_block.segment_offset + leading_block.length
-                block.address = leading_block.address + leading_block.length
-                insert_metadata_block(block_idx+1, block)
+        if len(line_data) == 0:
+            continue
 
-            # Insert the new code block.
-            set_data_type(block, DATA_TYPE_CODE)
-            block.flags |= BLOCK_FLAG_PROCESSED
-            block.code_match = match
-            block.length = data_idx_end - data_idx_start
-            calculate_line_count(block)
-            disassembly_checklist[block.address] = None
-            excess_length -= block.length
+        # Discard any unprocessed block.
+        if bytes_consumed < block.length:
+            trailing_block, trailing_block_idx = split_block(address + bytes_consumed)
+            set_data_type(trailing_block, DATA_TYPE_LONGWORD)
+            if not found_terminating_instruction:
+                trailing_block.flags |= BLOCK_FLAG_PROCESSED
 
-            # Extract any addresses which are referred to, for later use.
+        set_data_type(block, DATA_TYPE_CODE)
+        block.line_data = line_data
+        calculate_line_count(block)
+        disassembly_checklist[block.address] = None
+
+        # Extract any addresses which are referred to, for later use.
+        for match in line_data:
             for match_address, is_code in archm68k.get_match_addresses(match):
                 if is_code and match_address not in disassembly_checklist:
-                    disassembly_offsets.insert(0, (match_address, address))
+                    disassembly_offsets.insert(0, match_address)
                 insert_branch_address(match_address, address)
-
-            # Ready any remaining block space for further disassembly.
-            if excess_length:
-                trailing_block = SegmentBlock()
-                trailing_block.segment_id = block.segment_id
-                trailing_block.flags = block.flags
-                set_data_type(trailing_block, DATA_TYPE_LONGWORD)
-                trailing_block.segment_offset = block.segment_offset + block.length
-                trailing_block.address = block.address + block.length
-                trailing_block.length = excess_length
-                calculate_line_count(trailing_block)
-
-                # Place the excess length block after the one just processed in the list of blocks that make up the address space.
-                if leading_block != block:
-                    insert_metadata_block(block_idx+2, trailing_block)
-                else:
-                    insert_metadata_block(block_idx+1, trailing_block)
-
-                if not archm68k.is_final_instruction(match):
-                    if trailing_block.address not in disassembly_checklist:
-                        disassembly_offsets.insert(0, (trailing_block.address, address))
-        else:
-            logger.info("unable to disassemble at %X, added by: %X", address, src_abs_idx)
 
     for address in file_info.relocated_addresses:
         if address not in symbols_by_address:
@@ -626,7 +663,6 @@ def UI_display_file(file_path):
     line_count += END_INSTRUCTION_LINES # blank line, then "end" instruction
     return line_count
     
-
 
 if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)

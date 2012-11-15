@@ -562,6 +562,7 @@ class Match(object):
     data_words = None
     opcodes = None
     vars = None
+    num_bytes = None
 
 class MatchOpcode(object):
     key = None # Overrides the one in the spec
@@ -903,6 +904,7 @@ def disassemble_one_line(data, data_idx, data_abs_idx):
         data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
         if data_idx is None: # Disassembly failure.
             return None, idx0
+    M.num_bytes = data_idx - idx0
     return M, data_idx
 
 def get_instruction_string(instruction, vars):
