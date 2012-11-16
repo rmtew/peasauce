@@ -999,3 +999,7 @@ def get_match_addresses(match, extra=False):
 def is_final_instruction(match):
     instruction_key = match.specification.key[:3]
     return instruction_key in ("RTS", "RTR", "JMP", "BRA")
+
+def is_big_endian():
+    return True
+

@@ -297,7 +297,7 @@ class MainWindow(QtGui.QMainWindow):
         dock.setWidget(self.log_table)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
-        dock.setObjectName("dock-log")
+        dock.setObjectName("dock-log") # State/geometry persistence requirement.
 
         dock = QtGui.QDockWidget("Symbols", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
@@ -307,7 +307,7 @@ class MainWindow(QtGui.QMainWindow):
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
-        dock.setObjectName("dock-symbols")
+        dock.setObjectName("dock-symbols") # State/geometry persistence requirement.
 
         dock = QtGui.QDockWidget("Segments", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
@@ -316,7 +316,7 @@ class MainWindow(QtGui.QMainWindow):
         dock.setWidget(self.segments_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
-        dock.setObjectName("dock-segments")
+        dock.setObjectName("dock-segments") # State/geometry persistence requirement.
 
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
@@ -492,12 +492,6 @@ class MainWindow(QtGui.QMainWindow):
         return self._settings.get(setting_name, default_value)
 
     def attempt_open_file(self, file_path):
-        try:
-            return self._attempt_open_file(file_path)
-        except Exception:
-            traceback.print_exc()
-
-    def _attempt_open_file(self, file_path):
         # An attempt will be made to load an existing file.
         self.program_state = STATE_LOADING
         self.file_path = file_path
@@ -516,8 +510,8 @@ class MainWindow(QtGui.QMainWindow):
         self.thread.add_work(disassembly.load_file, file_path)
 
         # Initialise the dialog status.
-        progressDialog.setValue(0)
-        progressDialog.setLabelText("...")
+        progressDialog.setValue(20)
+        progressDialog.setLabelText("Disassembling..")
 
         # Register to hear if the cancel button is pressed.
         def canceled():
@@ -532,12 +526,6 @@ class MainWindow(QtGui.QMainWindow):
             QtGui.qApp.processEvents()
 
     def attempt_display_file(self, result):
-        try:
-            return self._attempt_display_file(result)
-        except Exception:
-            traceback.print_exc()
-
-    def _attempt_display_file(self, result):
         # This isn't really good enough, as long loading files may send mixed signals.
         if self.file_path is None:
             return

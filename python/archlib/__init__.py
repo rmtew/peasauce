@@ -20,6 +20,8 @@ import os
 import logging
 import struct
 
+import disasmlib
+
 import amiga
 import atarist
 import human68k
@@ -54,13 +56,15 @@ SI_DATA_LENGTH = 2
 SI_LENGTH = 3
 
 
+
 class FileInfo(object):
     """ The custom system data for the loaded file. """
     file_data = None
 
     def __init__(self, system, file_path):
         self.system = system
-        self._endian_char = [ "<", ">" ][system.is_big_endian()]
+
+        self._endian_char = [ "<", ">" ][system.big_endian]
 
         self.file_path = file_path
 
@@ -200,19 +204,19 @@ class FileInfo(object):
     ## Data access related operations.
 
     def uint16_value(self, bytes):
-        if self.system.is_big_endian():
+        if self.system.big_endian:
             return (bytes[0] << 8) + bytes[1]
         else:
             return (bytes[1] << 8) + bytes[0]
 
     def uint32_value(self, bytes):
-        if self.system.is_big_endian():
+        if self.system.big_endian:
             return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]
         else:
             return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]
 
     def uint32_bytes(self, v):
-        if self.system.is_big_endian():
+        if self.system.big_endian:
             return [ (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF ]
         else:
             return [ v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF ]

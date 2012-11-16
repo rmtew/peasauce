@@ -20,8 +20,10 @@ from . import xfile
 
 
 class System(object):
-    def is_big_endian(self):
-        return True
+    big_endian = True
+
+    def get_arch_name(self):
+        return "m68k"
 
     def load_file(self, file_info):
         return xfile.load_file(file_info)

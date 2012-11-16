@@ -62,11 +62,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 ### Short Term Tasks
 
-- Right cursor key moves view to label of selected line's operand.  Current address goes on viewed stack.
-- Left cursor key takes top address from viewed stack and moves view back to it.
-- Hitting enter on a line with a label allows the user to rename it.
-- Added save menu entry and Ctrl-S hotkey to allow the user to save the source code.
-
 #### Bugs
 
 * Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
@@ -77,7 +72,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 * Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
 * UI: Ala Resource, change the datatype of a block.
-* UI: Ala Resource, edit values.
+* UI: Ala Resource, edit/override values.
 * UI: Ala Resource, change the numeric base of a value.
 * Disassembly: Collect together program disassembly data for saving and loading, ala .RS files.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
@@ -99,6 +94,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
 * Disassembly: Lots of repeated loops looking for lines by address or address by lines.
 * File loading: Clean up file_info.file_data to only store useful information.
+* File loading: Endian should come from 
 
 ### Medium Term Tasks
 

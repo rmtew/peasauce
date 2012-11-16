@@ -15,3 +15,22 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+
+def get_api(arch_name):
+    if arch_name == "m68k":
+        import archm68k as module
+
+    api_func_names = [
+        "is_final_instruction",
+        "get_match_addresses",
+        "get_instruction_string",
+        "get_operand_string",
+        "disassemble_one_line",
+    ]
+
+    api = []
+    for func_name in api_func_names:
+        func = getattr(module, func_name)
+        api.append((func_name, func))
+    return api
