@@ -949,7 +949,7 @@ def get_operand_string(pc, operand, vars, lookup_symbol=None):
     else:
         return _get_formatted_ea_description(pc, key, vars, lookup_symbol=lookup_symbol)
 
-def get_match_addresses(match):
+def get_match_addresses(match, extra=False):
     ret = []
     # Is it an instruction that exits (RTS, RTR)?
     # Is it an instruction that conditionally branches (Bcc, Dbcc)?
@@ -987,6 +987,10 @@ def get_match_addresses(match):
         elif opcode.key == "PCiId8":
             address = match.pc + _signed_value("W", opcode.vars["D8"])
             ret.append((address, False))
+        elif extra and opcode.key == "AbsL":
+            address = opcode.vars["xxx"]
+            if (address, True) not in ret:
+                ret.append((address, False))
         elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
             logger.error("Unhandled opcode EA modde (680x0?): %s", opcode.key)
 

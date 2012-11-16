@@ -72,8 +72,8 @@ class FileInfo(object):
         self.relocatable_addresses = set()
         """ The address values which were changed / relocated. """
         self.relocated_addresses = set()
-        """ ... """
 
+        """ The segment id and offset in that segment of the program entrypoint. """
         self.entrypoint = 0, 0
 
     def event_loading_complete(self):

@@ -62,16 +62,25 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 ### Short Term Tasks
 
+- Right cursor key moves view to label of selected line's operand.  Current address goes on viewed stack.
+- Left cursor key takes top address from viewed stack and moves view back to it.
+- Hitting enter on a line with a label allows the user to rename it.
+- Added save menu entry and Ctrl-S hotkey to allow the user to save the source code.
+
 #### Bugs
 
 * Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
-* UI: Should split blocks on all address discovery.
 * UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.
 * UI: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
 
 #### Functionality
 
-* Metadata: Track what addresses are referred to by other addresses to allow jumping around the source.
+* Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
+* UI: Ala Resource, change the datatype of a block.
+* UI: Ala Resource, edit values.
+* UI: Ala Resource, change the numeric base of a value.
+* Disassembly: Collect together program disassembly data for saving and loading, ala .RS files.
+* Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
 * Disassembly: Jump table discovery / processing.
@@ -79,11 +88,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Disassembly: Research assembler syntax for different platforms, to generalise custom output.
 * Disassembly: Choose use of new or old style assembly syntax.
 * File loading: For Amiga, choose use of "DATA, CHIP" or "DATA_C" in section headers.
-* UI: Consider using one block for all consecutive lines of code where only the first has a label.
-* UI: Ala Resource, change the datatype of a block.
-* UI: Ala Resource, change the numeric base of a value.
-* UI: Enable user doing disassembly work, with editing actions.
-* UI: Export source code.
 * UI: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
 * UI: Add leading comments that detail file type, processor, entry point offset.. maybe more.
 
@@ -92,6 +96,8 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Coding style: Better error propagation, no exception raising on purpose.
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
+* Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
+* Disassembly: Lots of repeated loops looking for lines by address or address by lines.
 * File loading: Clean up file_info.file_data to only store useful information.
 
 ### Medium Term Tasks
