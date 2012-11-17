@@ -51,7 +51,7 @@ import struct
 import logging
 
 
-logger = logging.getLogger("disassembler-M68K")
+logger = logging.getLogger("disassembler-m68k")
 
 
 def memoize(function):

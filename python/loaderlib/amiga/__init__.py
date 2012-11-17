@@ -26,8 +26,8 @@ class System(object):
     def get_arch_name(self):
         return "m68k"
 
-    def load_file(self, file_info):
-        return hunkfile.load_file(file_info)
+    def load_file(self, file_info, data_types):
+        return hunkfile.load_file(file_info, data_types)
 
     def print_summary(self, file_info):
         hunkfile.print_summary(file_info)

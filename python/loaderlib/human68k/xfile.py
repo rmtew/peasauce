@@ -87,43 +87,43 @@ class XFile(object):
     _symbol_table_entries = None
 
 
-def load_file(file_info):
+def load_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
-        return load_x_file(file_info, f)
+        return load_x_file(file_info, data_types, f)
 
-def load_x_file(file_info, f):
-    magic_word = file_info.uint16(f.read(2))
+def load_x_file(file_info, data_types, f):
+    magic_word = data_types.uint16(f.read(2))
     if magic_word != MAGIC_WORD:
         logger.debug("human68k/xfile.py: _process_file: Unrecognised file.")
         return False
 
     data = XFile()
-    data._reserved1 = file_info.uint8(f.read(1))
-    data._loadmode = file_info.uint8(f.read(1))
-    data._base_address = file_info.uint32(f.read(4))
-    data._entry_offset = file_info.uint32(f.read(4))
-    data._text_segment_size = file_info.uint32(f.read(4))
-    data._data_segment_size = file_info.uint32(f.read(4))
-    data._bss_segment_size = file_info.uint32(f.read(4))
-    data._relocation_table_size = file_info.uint32(f.read(4))
-    data._symbol_table_size = file_info.uint32(f.read(4))
-    data._debug_line_size = file_info.uint32(f.read(4))
-    data._debug_symbol_size = file_info.uint32(f.read(4))
-    data._debug_string_size = file_info.uint32(f.read(4))
-    data._reserved2 = file_info.uint32(f.read(4))
-    data._reserved3 = file_info.uint32(f.read(4))
-    data._reserved4 = file_info.uint32(f.read(4))
-    data._reserved5 = file_info.uint32(f.read(4))
-    data._bindlist_offset = file_info.uint32(f.read(4))
+    data._reserved1 = data_types.uint8(f.read(1))
+    data._loadmode = data_types.uint8(f.read(1))
+    data._base_address = data_types.uint32(f.read(4))
+    data._entry_offset = data_types.uint32(f.read(4))
+    data._text_segment_size = data_types.uint32(f.read(4))
+    data._data_segment_size = data_types.uint32(f.read(4))
+    data._bss_segment_size = data_types.uint32(f.read(4))
+    data._relocation_table_size = data_types.uint32(f.read(4))
+    data._symbol_table_size = data_types.uint32(f.read(4))
+    data._debug_line_size = data_types.uint32(f.read(4))
+    data._debug_symbol_size = data_types.uint32(f.read(4))
+    data._debug_string_size = data_types.uint32(f.read(4))
+    data._reserved2 = data_types.uint32(f.read(4))
+    data._reserved3 = data_types.uint32(f.read(4))
+    data._reserved4 = data_types.uint32(f.read(4))
+    data._reserved5 = data_types.uint32(f.read(4))
+    data._bindlist_offset = data_types.uint32(f.read(4))
 
     if f.tell() != SIZEOF_HEADER:
         logger.debug("Header size mismatch, is %d, expected %d", f.tell(), SIZEOF_HEADER)
         return False
 
-    if not _read_relocation_table(file_info, data, f):
+    if not _read_relocation_table(file_info, data_types, data, f):
         return False
 
-    if not _read_symbol_table(file_info, data, f):
+    if not _read_symbol_table(file_info, data_types, data, f):
         return False
 
     symbols = []
@@ -146,11 +146,11 @@ def load_x_file(file_info, f):
     return True
 
 
-def _read_relocation_table(file_info, data, f):
+def _read_relocation_table(file_info, data_types, data, f):
     file_offset = SIZEOF_HEADER + data._text_segment_size + data._data_segment_size
     f.seek(file_offset, os.SEEK_SET)
 
-    offset = file_info.uint16(f.read(2))
+    offset = data_types.uint16(f.read(2))
     bytes_read = 2
 
     l = []
@@ -158,10 +158,10 @@ def _read_relocation_table(file_info, data, f):
 
     maximum_offset = data._text_segment_size + data._data_segment_size
     while bytes_read < data._relocation_table_size:
-        value = file_info.uint16(f.read(2))
+        value = data_types.uint16(f.read(2))
         bytes_read += 2
         if value == 1:
-            offset += file_info.uint32(f.read(4))
+            offset += data_types.uint32(f.read(4))
             bytes_read += 2
         else:
             offset += value
@@ -177,7 +177,7 @@ def _read_relocation_table(file_info, data, f):
 
 SIZEOF_SYMBOL_ENTRY = 1 + 1 + 4
 
-def _read_symbol_table(file_info, data, f):
+def _read_symbol_table(file_info, data_types, data, f):
     file_offset = SIZEOF_HEADER + data._text_segment_size + data._data_segment_size + data._relocation_table_size
     f.seek(file_offset, os.SEEK_SET)
     
@@ -189,8 +189,8 @@ def _read_symbol_table(file_info, data, f):
     l = []
     bytes_read = 0
     while bytes_read < data._symbol_table_size:
-        xdef_type = file_info.uint16(f.read(2))
-        offset = file_info.uint32(f.read(4))
+        xdef_type = data_types.uint16(f.read(2))
+        offset = data_types.uint32(f.read(4))
         bytes_read += SIZEOF_SYMBOL_ENTRY
 
         name = ""

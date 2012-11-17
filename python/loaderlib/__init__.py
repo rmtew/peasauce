@@ -25,7 +25,7 @@ import atarist
 import human68k
 
 
-logger = logging.getLogger("archlib")
+logger = logging.getLogger("loader")
 
 
 def get_systems():
@@ -38,10 +38,10 @@ def get_systems():
 
 def load_file(file_path):
     for system in get_systems():
+        data_types = DataTypes(system.big_endian)
         file_info = FileInfo(system, file_path)
-        if system.load_file(file_info):
-            file_info.event_loading_complete()
-            return file_info
+        if system.load_file(file_info, data_types):
+            return file_info, data_types
 
 
 SEGMENT_TYPE_CODE = 1
@@ -52,6 +52,126 @@ SI_TYPE = 0
 SI_FILE_OFFSET = 1
 SI_DATA_LENGTH = 2
 SI_LENGTH = 3
+SI_ADDRESS = 4
+SI_CACHED_DATA = 5
+SIZEOF_SI = 6
+
+
+def get_segment_type(segments, segment_id):
+    return segments[segment_id][SI_TYPE]
+
+def get_segment_data_file_offset(segments, segment_id):
+    return segments[segment_id][SI_FILE_OFFSET]
+
+def get_segment_data_length(segments, segment_id):
+    return segments[segment_id][SI_DATA_LENGTH]
+
+def get_segment_length(segments, segment_id):
+    return segments[segment_id][SI_LENGTH]
+
+def get_segment_address(segments, segment_id):
+    return segments[segment_id][SI_ADDRESS]
+
+def get_segment_data(segments, segment_id):
+    return segments[segment_id][SI_CACHED_DATA]
+
+def is_segment_type_code(segments, segment_id):
+    return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_CODE
+
+def is_segment_type_data(segments, segment_id):
+    return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_DATA
+
+def is_segment_type_bss(segments, segment_id):
+    return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_BSS
+
+def cache_segment_data(file_path, segments):
+    for segment_id in range(len(segments)):
+        data = None
+        file_offset = get_segment_data_file_offset(segments, segment_id)
+        # No data for segments that have no data..
+        if file_offset != -1:
+            file_length = get_segment_data_length(segments, segment_id)
+
+            f = open(file_path, "rb")
+            f.seek(file_offset, os.SEEK_SET)
+            file_data = f.read(file_length)
+            if len(file_data) == file_length:
+                data = bytearray(file_data)
+            else:
+                logger.error("Unable to cache segment %d data, got %d bytes, wanted %d", segment_id, len(file_data), file_length)
+        segments[segment_id][SI_CACHED_DATA] = data
+
+def relocate_segment_data(segments, data_types, relocations, relocatable_addresses, relocated_addresses):
+    for segment_id in range(len(segments)):
+        # Generic longword-based relocation.
+        data = get_segment_data(segments, segment_id)
+        local_address = get_segment_address(segments, segment_id)
+        for target_segment_id, local_offsets in relocations[segment_id]:
+            target_address = get_segment_address(segments, target_segment_id)
+            for local_offset in local_offsets:
+                value = data_types.uint32_value(data[local_offset:local_offset+4])
+                address = value + target_address
+                if relocated_addresses is not None:
+                    if address not in relocated_addresses:
+                        relocated_addresses.add(address)
+                if relocatable_addresses is not None:
+                    relocatable_addresses.add(local_address + local_offset)
+                data[local_offset:local_offset+4] = data_types.uint32_bytes(address)
+
+
+class DataTypes(object):
+    def __init__(self, big_endian):
+        self.big_endian = big_endian
+        self._endian_char = [ "<", ">" ][big_endian]
+
+    ## Data access related operations.
+
+    def uint8_value(self, bytes, idx=None):
+        if idx:
+            bytes = bytes[idx:idx+1]
+        return bytes[0]
+
+    def uint16_value(self, bytes, idx=None):
+        if idx:
+            bytes = bytes[idx:idx+2]
+        if self.big_endian:
+            return (bytes[0] << 8) + bytes[1]
+        else:
+            return (bytes[1] << 8) + bytes[0]
+
+    def uint32_value(self, bytes, idx=None):
+        if idx:
+            bytes = bytes[idx:idx+4]
+        if self.big_endian:
+            return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]
+        else:
+            return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]
+
+    def uint32_bytes(self, v):
+        if self.big_endian:
+            return [ (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF ]
+        else:
+            return [ v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF ]
+
+    # String to value.
+
+    def uint16(self, s):
+        return struct.unpack(self._endian_char +"H", s)[0]
+
+    def int16(self, s):
+        return struct.unpack(self._endian_char +"h", s)[0]
+
+    def uint32(self, s):
+        return struct.unpack(self._endian_char +"I", s)[0]
+
+    def int32(self, s):
+        return struct.unpack(self._endian_char +"i", s)[0]
+
+    def uint8(self, s):
+        return struct.unpack(self._endian_char +"B", s)[0]
+
+    def int8(self, s):
+        return struct.unpack(self._endian_char +"b", s)[0]
 
 
 
@@ -62,29 +182,15 @@ class FileInfo(object):
     def __init__(self, system, file_path):
         self.system = system
 
-        self._endian_char = [ "<", ">" ][system.big_endian]
-
         self.file_path = file_path
 
         self.segments = []
-        self.relocations_by_segment_id = {}
-        self.symbols_by_segment_id = {}
-
-        """ The addresses at which values changed / relocated were located. """
-        self.relocatable_addresses = set()
-        """ The address values which were changed / relocated. """
-        self.relocated_addresses = set()
+        self.relocations_by_segment_id = []
+        self.symbols_by_segment_id = []
 
         """ The segment id and offset in that segment of the program entrypoint. """
-        self.entrypoint = 0, 0
-
-    def event_loading_complete(self):
-        # While this does cache the segment data, it more importantly causes the
-        # relocation information to be processed and stored for use by the
-        # disassembly logic.
-        for segment_id in range(self.get_segment_count()):
-            if self.get_segment_data_file_offset(segment_id) != -1:
-                self.get_segment_data(segment_id)
+        self.entrypoint_segment_id = 0
+        self.entrypoint_offset = 0
 
     ## Query..
 
@@ -110,83 +216,29 @@ class FileInfo(object):
 
     def add_segment(self, segment_type, file_offset, data_length, segment_length, relocations, symbols):
         segment_id = len(self.segments)
-        self.segments.append((segment_type, file_offset, data_length, segment_length))
-        self.relocations_by_segment_id[segment_id] = relocations
-        self.symbols_by_segment_id[segment_id] = symbols
+        segment_address = 0
+        if segment_id > 0:
+            segment_address = get_segment_address(self.segments, segment_id-1) + get_segment_length(self.segments, segment_id-1)
+        segment = [ None ] * SIZEOF_SI
+        segment[SI_TYPE] = segment_type
+        segment[SI_FILE_OFFSET] = file_offset
+        segment[SI_DATA_LENGTH] = data_length
+        segment[SI_LENGTH] = segment_length
+        segment[SI_ADDRESS] = segment_address
+        segment[SI_CACHED_DATA] = None
+        self.segments.append(segment)
+
+        self.relocations_by_segment_id.append(relocations)
+        self.symbols_by_segment_id.append(symbols)
 
     def set_entrypoint(self, segment_id, offset):
-        self.entrypoint = segment_id, offset
+        self.entrypoint_segment_id = segment_id
+        self.entrypoint_offset = offset
 
     def get_entrypoint(self):
         return self.entrypoint
 
     ## Segment querying related operations
-
-    def get_segment_address(self, segment_id):
-        """ Get the address the segment was loaded to in memory. """
-        address = 0
-        for i in range(len(self.segments)):
-            if i == segment_id:
-                break
-            address += self.get_segment_length(i)
-        return address
-
-    def get_segment_type(self, segment_id):
-        return self.segments[segment_id][SI_TYPE]
-
-    def get_segment_data_file_offset(self, segment_id):
-        return self.segments[segment_id][SI_FILE_OFFSET]
-
-    def get_segment_data_length(self, segment_id):
-        return self.segments[segment_id][SI_DATA_LENGTH]
-
-    def get_segment_length(self, segment_id):
-        return self.segments[segment_id][SI_LENGTH]
-
-    def get_segment_count(self):
-        return len(self.segments)
-
-    def get_segment_data(self, segment_id):
-        ## HACK START
-        # Cache loaded file data, as it speeds things up significantly.
-        if not hasattr(self, "_sdc"):
-            self._sdc = {}
-        if segment_id in self._sdc:
-            return self._sdc[segment_id]
-        ## HACK END
-
-        file_offset = self.get_segment_data_file_offset(segment_id)
-        if file_offset == -1:
-            # This segment has no data.
-            return None
-        file_length = self.get_segment_data_length(segment_id)
-
-        f = open(self.file_path, "rb")
-        f.seek(file_offset, os.SEEK_SET)
-        data = f.read(file_length)
-        if len(data) != file_length:
-            return None
-
-        data = bytearray(data)
-
-        # Generic longword-based relocation.
-        local_address = self.get_segment_address(segment_id)
-        relocation_offsets = self.relocations_by_segment_id.get(segment_id, [])
-        for target_segment_id, local_offsets in relocation_offsets:
-            target_address = self.get_segment_address(target_segment_id)
-            for local_offset in local_offsets:
-                value = self.uint32_value(data[local_offset:local_offset+4])
-                address = value + target_address
-                if address not in self.relocated_addresses:
-                    self.relocated_addresses.add(address)
-                self.relocatable_addresses.add(local_address + local_offset)
-                data[local_offset:local_offset+4] = self.uint32_bytes(address)
-        ## HACK START
-        self._sdc[segment_id] = data
-        ## HACK END
-        return data
-
-    ## 
 
     def has_section_headers(self):
         return self.system.has_section_headers()
@@ -195,47 +247,6 @@ class FileInfo(object):
         return self.system.get_section_header(self, segment_id)
 
     def get_data_instruction_string(self, segment_id, with_file_data):
-        segment_type = self.get_segment_type(segment_id)
+        segment_type = get_segment_type(self.segments, segment_id)
         is_bss_segment = segment_type == SEGMENT_TYPE_BSS
         return self.system.get_data_instruction_string(is_bss_segment, with_file_data)
-
-    ## Data access related operations.
-
-    def uint16_value(self, bytes):
-        if self.system.big_endian:
-            return (bytes[0] << 8) + bytes[1]
-        else:
-            return (bytes[1] << 8) + bytes[0]
-
-    def uint32_value(self, bytes):
-        if self.system.big_endian:
-            return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]
-        else:
-            return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]
-
-    def uint32_bytes(self, v):
-        if self.system.big_endian:
-            return [ (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF ]
-        else:
-            return [ v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF ]
-
-    # String to value.
-
-    def uint16(self, s):
-        return struct.unpack(self._endian_char +"H", s)[0]
-
-    def int16(self, s):
-        return struct.unpack(self._endian_char +"h", s)[0]
-
-    def uint32(self, s):
-        return struct.unpack(self._endian_char +"I", s)[0]
-
-    def int32(self, s):
-        return struct.unpack(self._endian_char +"i", s)[0]
-
-    def uint8(self, s):
-        return struct.unpack(self._endian_char +"B", s)[0]
-
-    def int8(self, s):
-        return struct.unpack(self._endian_char +"b", s)[0]
-

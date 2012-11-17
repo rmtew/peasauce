@@ -28,7 +28,7 @@ import traceback
 import loaderlib
 import disassemblylib
 
-logger = logging.getLogger("disassembly")
+logger = logging.getLogger("core")
 
 
 END_INSTRUCTION_LINES = 2
@@ -167,7 +167,8 @@ def calculate_line_count(program_data, block):
         return block.line_count - old_line_count
 
     # Last block in a segment gets a trailing line, if it is not the last segment.
-    if block.segment_offset + block.length == program_data.file_info.get_segment_length(block.segment_id) and block.segment_id < program_data.file_info.get_segment_count()-1:
+    segments = program_data.loader_segments
+    if block.segment_offset + block.length == loaderlib.get_segment_length(segments, block.segment_id) and block.segment_id < len(segments)-1:
         block.line_count += 1 # SEGMENT FOOTER (blank line)
     return block.line_count - old_line_count
 
@@ -243,8 +244,10 @@ def get_address_for_line_number(program_data, line_number):
     address1 = address0 + block.length
 
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        address, match = get_code_block_info_for_line_number(program_data, line_number)
-        return address
+        result = get_code_block_info_for_line_number(program_data, line_number)
+        if result is not None:
+            address, match = result
+            return address
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
             size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
@@ -301,9 +304,11 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                 return ""
         leading_line_count += 1
 
+    segments = program_data.loader_segments
+
     # If the line is the last line in a block, check if it a "between segments" trailing blank line.
     if line_idx == block_line_countN-1:
-        if block.segment_offset + block.length == program_data.file_info.get_segment_length(block.segment_id) and block.segment_id < program_data.file_info.get_segment_count()-1:
+        if block.segment_offset + block.length == loaderlib.get_segment_length(segments, block.segment_id) and block.segment_id < len(segments)-1:
             return ""
 
     if get_data_type(block.flags) == DATA_TYPE_CODE:
@@ -324,7 +329,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         if column_idx == LI_OFFSET:
             return "%08X" % address
         elif column_idx == LI_BYTES:
-            data = program_data.file_info.get_segment_data(block.segment_id)
+            data = loaderlib.get_segment_data(segments, block.segment_id)
             data_offset = block.segment_offset+bytes_used
             return "".join([ "%02X" % c for c in data[data_offset:data_offset+line_match.num_bytes] ])
         elif column_idx == LI_LABEL:
@@ -371,11 +376,11 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
         size_types = []
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
-            size_types.append((4, "L", archm68k._get_long))
+            size_types.append((4, "L", program_data.data_types.uint32_value))
         if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD):
-            size_types.append((2, "W", archm68k._get_word))
+            size_types.append((2, "W", program_data.data_types.uint16_value))
         if get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
-            size_types.append((1, "B", archm68k._get_byte))
+            size_types.append((1, "B", program_data.data_types.uint8_value))
 
         unconsumed_byte_count = block.length
         size_line_countN = block_line_count0 + leading_line_count
@@ -393,14 +398,14 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
             if line_idx < size_line_countN:
                 data_idx = data_idx0 + (line_idx - size_line_count0) * num_bytes
                 if column_idx == LI_OFFSET:
-                    return "%08X" % (program_data.file_info.get_segment_address(block.segment_id) + data_idx)
+                    return "%08X" % (loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
                 elif column_idx == LI_BYTES:
                     if block.flags & BLOCK_FLAG_ALLOC:
                         return ""
-                    data = program_data.file_info.get_segment_data(block.segment_id)
+                    data = loaderlib.get_segment_data(segments, block.segment_id)
                     return "".join([ "%02X" % c for c in data[data_idx:data_idx+num_bytes] ])
                 elif column_idx == LI_LABEL:
-                    label = get_symbol_for_address(program_data, program_data.file_info.get_segment_address(block.segment_id) + data_idx)
+                    label = get_symbol_for_address(program_data, loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
                     if label is None:
                         return ""
                     return label
@@ -410,10 +415,10 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                 elif column_idx == LI_OPERANDS:
                     if block.flags & BLOCK_FLAG_ALLOC:
                         return str(size_count)
-                    data = program_data.file_info.get_segment_data(block.segment_id)
-                    value = read_func(data, data_idx)[0]
+                    data = loaderlib.get_segment_data(segments, block.segment_id)
+                    value = read_func(data, data_idx)
                     label = None
-                    if size_char == "L" and value in program_data.file_info.relocatable_addresses:
+                    if size_char == "L" and value in program_data.loader_relocatable_addresses:
                         label = get_symbol_for_address(program_data, value)
                     if label is None:
                         label = ("$%0"+ str(num_bytes<<1) +"X") % value
@@ -435,7 +440,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
 
 
 def insert_branch_address(program_data, address, src_abs_idx):
-    if address not in program_data.file_info.relocated_addresses:
+    if address not in program_data.loader_relocated_addresses:
         program_data.branch_addresses.add(address)
         # This errors because if the block is a code block, it has no match object.
         # split_block(address)
@@ -523,19 +528,38 @@ class ProgramData(object):
         # Local:
         self.branch_addresses = set()
         self.symbols_by_address = {}
+        "List of blocks ordered by ascending address."
         self.blocks = []
+        "List of ascending block addresses (used by bisect for address based lookups)."
         self.block_addresses = []
+        "List of ascending block first line numbers (used by bisect for line number based lookups)."
         self.block_line0s = []
+        "If list of first line numbers need recalculating, this is the entry to start at."
         self.block_line0s_dirtyidx = 0
-        # Disasmlib:
+
+        # disassemblylib:
+        "Identifies which architecture the file has been identified as belonging to."
         self.dis_name = None
-        # Archlib:
-        self.file_path = None
+
+        # loaderlib:
+        "The file name of the original loaded file."
+        self.file_name = None
+        "The size of the original loaded file on disk."
+        self.file_size = None
+        "When file data is not stored within saved work, this allows verification of substitute files."
+        self.file_checksum = None
+        "When saved work is to be independently loadable without original file, we include the required data."
+        self.loader_segments = []
+        self.loader_relocated_addresses = set()
+        self.loader_relocatable_addresses = set()
+        self.loader_entrypoint_segment_id = None
+        self.loader_entrypoint_offset = None
 
         ## Non-persisted state.
         # Local:
         self.symbol_insert_func = None
-        # Disasmlib:
+
+        # disassemblylib:
         self.dis_is_final_instruction_func = None
         self.dis_get_match_addresses_func = None
         self.dis_get_instruction_string_func = None
@@ -543,16 +567,30 @@ class ProgramData(object):
         self.dis_disassemble_one_line_func = None
         self.dis_big_endian = None
 
+        # loaderlib:
+        self.file_path = None
+        self.data_types = None
+
 
 def load_file(file_path):
-    program_data = ProgramData()
-
-    file_info = loaderlib.load_file(file_path)
-    if file_info is None:
+    result = loaderlib.load_file(file_path)
+    if result is None:
         return None, 0
 
-    program_data.file_info = file_info
+    file_info, data_types = result
+
+    program_data = ProgramData()
     program_data.file_path = file_path
+
+    # Extract useful information from file loading process.
+    program_data.file_info = file_info
+    program_data.data_types = data_types
+
+    program_data.loader_entrypoint_segment_id = file_info.entrypoint_segment_id
+    program_data.loader_entrypoint_offset = file_info.entrypoint_offset
+    segments = program_data.loader_segments = file_info.segments
+    loaderlib.cache_segment_data(file_path, segments)
+    loaderlib.relocate_segment_data(segments, data_types, file_info.relocations_by_segment_id, program_data.loader_relocatable_addresses, program_data.loader_relocated_addresses)
 
     # Set up the disassembly API.
     arch_name = file_info.system.get_arch_name()
@@ -560,17 +598,16 @@ def load_file(file_path):
         setattr(program_data, "dis_"+ func_name +"_func", func)
 
     # Start disassembling.
-    entrypoint_segment_id, entrypoint_offset = program_data.file_info.get_entrypoint()
-    entrypoint_address = program_data.file_info.get_segment_address(entrypoint_segment_id) + entrypoint_offset
+    entrypoint_address = loaderlib.get_segment_address(segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
 
     # Pass 1: Create a block for each of the segments.
-    for segment_id in range(len(program_data.file_info.segments)):
-        address = program_data.file_info.get_segment_address(segment_id)
-        data_length = program_data.file_info.get_segment_data_length(segment_id)
-        segment_length = program_data.file_info.get_segment_length(segment_id)
+    for segment_id in range(len(segments)):
+        address = loaderlib.get_segment_address(segments, segment_id)
+        data_length = loaderlib.get_segment_data_length(segments, segment_id)
+        segment_length = loaderlib.get_segment_length(segments, segment_id)
 
         block = SegmentBlock()
-        if program_data.file_info.get_segment_type(segment_id) == loaderlib.SEGMENT_TYPE_BSS:
+        if loaderlib.is_segment_type_bss(segments, segment_id):
             block.flags |= BLOCK_FLAG_ALLOC
         set_data_type(block, DATA_TYPE_LONGWORD)
         block.segment_id = segment_id
@@ -599,16 +636,16 @@ def load_file(file_path):
     # Pass 2: Stuff.
 
     # Incorporate known symbols.
-    for segment_id in range(program_data.file_info.get_segment_count()):
-        symbols = program_data.file_info.symbols_by_segment_id[segment_id]
-        address = program_data.file_info.get_segment_address(segment_id)
+    for segment_id in range(len(segments)):
+        symbols = file_info.symbols_by_segment_id[segment_id]
+        address = loaderlib.get_segment_address(segments, segment_id)
         for symbol_offset, symbol_name, code_flag in symbols:
             insert_symbol(program_data, address + symbol_offset, symbol_name)
 
     # Pass 3: Do another block splitting pass.
     for address in program_data.symbols_by_address.iterkeys():
         split_block(program_data, address)
-    for address in program_data.file_info.relocated_addresses:
+    for address in program_data.loader_relocated_addresses:
         split_block(program_data, address)
 
     # Pass 4: Do a disassembly pass.
@@ -645,7 +682,7 @@ def load_file(file_path):
         line_data = []
         found_terminating_instruction = False
         while bytes_consumed < block.length:
-            data = program_data.file_info.get_segment_data(block.segment_id)
+            data = loaderlib.get_segment_data(segments, block.segment_id)
             data_offset_start = block.segment_offset + bytes_consumed
             match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, address + bytes_consumed)
             bytes_matched = data_offset_end - data_offset_start
@@ -680,7 +717,7 @@ def load_file(file_path):
                     disassembly_offsets.insert(0, match_address)
                 insert_branch_address(program_data, match_address, address)
 
-    for address in program_data.file_info.relocated_addresses:
+    for address in program_data.loader_relocated_addresses:
         if address not in program_data.symbols_by_address:
             block, block_idx = lookup_block_by_address(program_data, address)
             if block.address != address:

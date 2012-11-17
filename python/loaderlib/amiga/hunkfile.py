@@ -74,9 +74,9 @@ class HunkFile(object):
     _hunk_segments = None
 
 
-def load_file(file_info):
+def load_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
-        return _process_file(file_info, f)
+        return _process_file(file_info, data_types, f)
 
 def get_hunk_type(data, segment_id):
     return data._hunk_segments[segment_id][0]
@@ -84,10 +84,10 @@ def get_hunk_type(data, segment_id):
 def get_hunk_memory_flags(data, segment_id):
     return data._header_segments[segment_id][0]
 
-def _process_file(file_info, f):
+def _process_file(file_info, data_types, f):
     data = HunkFile()
 
-    hunk_id = file_info.uint32(f.read(4))
+    hunk_id = data_types.uint32(f.read(4))
     if hunk_id != HUNK_HEADER:
         logger.debug("amiga/hunkfile.py: _process_file: Unrecognised file.")
         return False
@@ -98,16 +98,16 @@ def _process_file(file_info, f):
     f.seek(file_offset, os.SEEK_SET)
 
     # OS actually fails loading executables if this doesn't just read a NULL longword.
-    data._resident_library_names = _read_hunk_strings(file_info, f)
+    data._resident_library_names = _read_hunk_strings(file_info, data_types, f)
 
-    data._header_table_size = file_info.uint32(f.read(4))
-    data._first_hunk_slot = file_info.uint32(f.read(4))
-    data._last_hunk_slot = file_info.uint32(f.read(4))
+    data._header_table_size = data_types.uint32(f.read(4))
+    data._first_hunk_slot = data_types.uint32(f.read(4))
+    data._last_hunk_slot = data_types.uint32(f.read(4))
 
     l = []
     segment_count = data._header_table_size
     while segment_count:
-        slot_long = file_info.uint32(f.read(4))
+        slot_long = data_types.uint32(f.read(4))
         hunk_memory_flags = slot_long & 0xE0000000
         hunk_segment_length = (slot_long & 0x3FFFFFFF) * 4
         l.append((hunk_memory_flags, hunk_segment_length))
@@ -117,11 +117,11 @@ def _process_file(file_info, f):
     # Read in segments.
     l = []
     while f.tell() != file_length:
-        longword = file_info.uint32(f.read(4))
+        longword = data_types.uint32(f.read(4))
         # This should be the same as the header segment slot.  The header slot is what is used for the allocations, in any case.
         segment_memory_flags = longword & 0xE0000000
         segment_hunk_id = longword & 0x3FFFFFFF
-        data_length = file_info.uint32(f.read(4)) * 4
+        data_length = data_types.uint32(f.read(4)) * 4
 
         if segment_hunk_id == HUNK_CODE or segment_hunk_id == HUNK_DATA:
             data_offset = f.tell()
@@ -133,36 +133,36 @@ def _process_file(file_info, f):
             return False
 
         relocations = []
-        hunk_id = file_info.uint32(f.read(4))
+        hunk_id = data_types.uint32(f.read(4))
         while hunk_id != HUNK_END:
             if hunk_id == HUNK_RELOC32:
-                offset_count = file_info.uint32(f.read(4))
+                offset_count = data_types.uint32(f.read(4))
                 while offset_count > 0:
-                    target_hunk_id = file_info.uint32(f.read(4))
+                    target_hunk_id = data_types.uint32(f.read(4))
                     offsets = []
                     while offset_count > 0:
-                        local_offset = file_info.uint32(f.read(4))
+                        local_offset = data_types.uint32(f.read(4))
                         offsets.append(local_offset)
                         offset_count -= 1
-                    offset_count = file_info.uint32(f.read(4))
+                    offset_count = data_types.uint32(f.read(4))
                     relocations.append((target_hunk_id, offsets))
             elif hunk_id in (HUNK_DREL32, HUNK_RELOC32SHORT, HUNK_ABSRELOC16):
-                offset_count = file_info.uint16(f.read(2))
+                offset_count = data_types.uint16(f.read(2))
                 while offset_count > 0:
-                    target_hunk_id = file_info.uint16(f.read(2))
+                    target_hunk_id = data_types.uint16(f.read(2))
                     offsets = []
                     while offset_count > 0:
-                        local_offset = file_info.uint16(f.read(2))
+                        local_offset = data_types.uint16(f.read(2))
                         offsets.append(local_offset)
                         offset_count -= 1
-                    offset_count = file_info.uint16(f.read(2))
+                    offset_count = data_types.uint16(f.read(2))
                     relocations.append((target_hunk_id, offsets))
                 if f.tell() & 2:
                     f.seek(2, os.SEEK_CUR)
             else:
                 logger.debug("hunkfile.py: _process_file: Unexpected secondary segment type: %X %s", hunk_id, HUNK_NAMES.get(hunk_id, "?"))
                 return False
-            hunk_id = file_info.uint32(f.read(4))
+            hunk_id = data_types.uint32(f.read(4))
 
         l.append((segment_hunk_id, data_offset, data_length, relocations))
 
@@ -192,17 +192,17 @@ def _process_file(file_info, f):
 
     return True
 
-def _read_hunk_strings(file_info, f):
+def _read_hunk_strings(file_info, data_types, f):
     l = []
-    s = _read_hunk_string(file_info, f)
+    s = _read_hunk_string(file_info, data_types, f)
     while len(s):
         l.append(s)
-        s = _read_hunk_string(file_info, f)
+        s = _read_hunk_string(file_info, data_types, f)
     return l
 
-def _read_hunk_string(file_info, f, num_longs=None):
+def _read_hunk_string(file_info, data_types, f, num_longs=None):
     if num_longs is None:
-        num_longs = file_info.uint32(f.read(4))
+        num_longs = data_types.uint32(f.read(4))
     s = ""
     if num_longs > 0:
         s = f.read(num_longs * 4)
@@ -238,7 +238,7 @@ class HunkFile(object):
                     raise RuntimeError("Error", self.hunk_type[idx])
                 self.hunk_type[idx] = hunk_id
                 #
-                self.unit_name = self._read_hunk_string(f)
+                self.unit_name = self._read_hunk_string(f, data_types)
                 if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
                     print "HUNK_UNIT", self.unit_name
             # ...

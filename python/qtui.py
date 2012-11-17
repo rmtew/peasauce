@@ -121,8 +121,8 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
         self.endRemoveRows()
 
     def rowCount(self, parent=None):
-        if self.window._pdata is not None:
-            return disassembly.get_line_count(self.window._pdata)
+        if self.window.disassembly_data is not None:
+            return disassembly.get_line_count(self.window.disassembly_data)
         return 0
 
     def columnCount(self, parent):
@@ -149,8 +149,8 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
             return None
 
         column, row = index.column(), index.row()
-        if self.window._pdata is not None:
-            return disassembly.get_file_line(self.window._pdata, row, column)
+        if self.window.disassembly_data is not None:
+            return disassembly.get_file_line(self.window.disassembly_data, row, column)
         return ""
 
     def parent(self, index):
@@ -225,7 +225,7 @@ STATE_LOADED    = 2
 
 class MainWindow(QtGui.QMainWindow):
     _settings = None
-    _pdata = None
+    disassembly_data = None
 
     loaded_signal = QtCore.Signal(int)
     log_signal = QtCore.Signal(tuple)
@@ -363,7 +363,7 @@ class MainWindow(QtGui.QMainWindow):
         """ Called to clear out all state related to loaded data. """
         self.program_state = STATE_INITIAL
         self.file_path = None
-        self._pdata = None
+        self.disassembly_data = None
 
     def menu_file_open(self):
         if self.program_state == STATE_LOADED:
@@ -390,7 +390,7 @@ class MainWindow(QtGui.QMainWindow):
         line_idx = self.list_table.currentIndex().row()
         if line_idx == -1:
             line_idx = 0
-        address = disassembly.get_address_for_line_number(self._pdata, line_idx)
+        address = disassembly.get_address_for_line_number(self.disassembly_data, line_idx)
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -399,7 +399,7 @@ class MainWindow(QtGui.QMainWindow):
             else:
                 new_address = int(text)
             if new_address is not None:
-                new_line_idx = disassembly.get_line_number_for_address(self._pdata, new_address)
+                new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
                 self.list_table.selectRow(new_line_idx)
 
     def menu_settings_choose_font(self):
@@ -427,9 +427,11 @@ class MainWindow(QtGui.QMainWindow):
         if self.program_state != STATE_LOADED:
             return
 
-        current_line_number = [ index.row() for index in self.list_table.selectionModel().selectedRows() ][0]
-        current_address = disassembly.get_address_for_line_number(self._pdata, current_line_number)
-        symbol_name = disassembly.get_symbol_for_address(self._pdata, current_address)
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
         if symbol_name is not None:
             text, ok = QtGui.QInputDialog.getText(self, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, symbol_name)
             if ok and text != symbol_name:
@@ -437,7 +439,7 @@ class MainWindow(QtGui.QMainWindow):
                 regExp = QtCore.QRegExp("([a-zA-Z_]+[a-zA-Z0-9_\.]*)")
                 if regExp.exactMatch(text):
                     new_symbol_name = regExp.cap(1)
-                    disassembly.set_symbol_for_address(self._pdata, current_address, new_symbol_name)
+                    disassembly.set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
                     logger.info("Renamed symbol '%s' to '%s' at address $%06X.", symbol_name, new_symbol_name, current_address)
                 else:
                     QtGui.QMessageBox.information(self, "Invalid symbol name", "The symbol name needs to match standard practices.")
@@ -447,14 +449,16 @@ class MainWindow(QtGui.QMainWindow):
             return
 
         # Place current address on the stack.
-        current_line_number = [ index.row() for index in self.list_table.selectionModel().selectedRows() ][0]
-        current_address = disassembly.get_address_for_line_number(self._pdata, current_line_number)
-        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self._pdata, current_line_number)
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, selected_line_numbers[0])
         if len(operand_addresses) == 1:
             self.view_address_stack.append(current_address)
             # ...
             address = operand_addresses[0]
-            next_line_number = disassembly.get_line_number_for_address(self._pdata, address)
+            next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
             self.list_table.selectRow(next_line_number)
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         elif len(operand_addresses) == 2:
@@ -469,7 +473,7 @@ class MainWindow(QtGui.QMainWindow):
 
         if len(self.view_address_stack):
             address = self.view_address_stack.pop()
-            line_number = disassembly.get_line_number_for_address(self._pdata, address)
+            line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
             logger.info("view pop symbol going to address %06X / line number %d %s." % (address, line_number, str(self.view_address_stack)))
             self.list_table.selectRow(line_number)
         else:
@@ -539,7 +543,7 @@ class MainWindow(QtGui.QMainWindow):
         # Clean up our use of the worker thread.
         self.thread.result.disconnect(self.attempt_display_file)
 
-        self._pdata, line_count = result
+        self.disassembly_data, line_count = result
 
         if line_count == 0:
             self.reset_state()
@@ -554,22 +558,22 @@ class MainWindow(QtGui.QMainWindow):
  
         # Populate the segments dockable window with the loaded segment information.
         model = self.segments_model
-        for segment_id in range(len(self._pdata.file_info.segments)):
+        loader_segments = self.disassembly_data.loader_segments
+        for segment_id in range(len(loader_segments)):
             model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
             
-            segment_type = self._pdata.file_info.get_segment_type(segment_id)
-            if segment_type == loaderlib.SEGMENT_TYPE_CODE:
+            if loaderlib.is_segment_type_code(loader_segments, segment_id):
                 segment_type = "code"
-            elif segment_type == loaderlib.SEGMENT_TYPE_DATA:
+            elif loaderlib.is_segment_type_data(loader_segments, segment_id):
                 segment_type = "data"
-            elif segment_type == loaderlib.SEGMENT_TYPE_BSS:
+            elif loaderlib.is_segment_type_bss(loader_segments, segment_id):
                 segment_type = "bss"
-            length = self._pdata.file_info.get_segment_length(segment_id)
-            data_length = self._pdata.file_info.get_segment_data_length(segment_id)
-            if self._pdata.file_info.get_segment_data_file_offset(segment_id) == -1:
+            length = loaderlib.get_segment_length(loader_segments, segment_id)
+            data_length = loaderlib.get_segment_data_length(loader_segments, segment_id)
+            if loaderlib.get_segment_data_file_offset(loader_segments, segment_id) == -1:
                 data_length = "-"
-            reloc_count = len(self._pdata.file_info.relocations_by_segment_id.get(segment_id, []))
-            symbol_count = len(self._pdata.file_info.symbols_by_segment_id.get(segment_id, []))
+            reloc_count = len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
+            symbol_count = len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
 
             model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
             for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
@@ -581,12 +585,12 @@ class MainWindow(QtGui.QMainWindow):
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
-        disassembly.set_symbol_insert_func(self._pdata, self.disassembly_symbol_added)
+        disassembly.set_symbol_insert_func(self.disassembly_data, self.disassembly_symbol_added)
 
         model = self.symbols_model
-        model.insertRows(model.rowCount(), len(self._pdata.symbols_by_address), QtCore.QModelIndex())
+        model.insertRows(model.rowCount(), len(self.disassembly_data.symbols_by_address), QtCore.QModelIndex())
         row_index = 0
-        for symbol_address, symbol_label in self._pdata.symbols_by_address.iteritems():
+        for symbol_address, symbol_label in self.disassembly_data.symbols_by_address.iteritems():
             self._add_symbol_to_model(symbol_address, symbol_label, row_index)
             row_index += 1
 
@@ -629,7 +633,7 @@ class MainWindow(QtGui.QMainWindow):
             self.save_work(file_path)
 
     def save_disassembled_source(self, file_path):
-        line_count = disassembly.get_line_count(self._pdata)
+        line_count = disassembly.get_line_count(self.disassembly_data)
 
         # Display a modal dialog.
         progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
@@ -648,9 +652,9 @@ class MainWindow(QtGui.QMainWindow):
             for i in xrange(line_count):
                 progressDialog.setValue(i)
 
-                label_text = disassembly.get_file_line(self._pdata, i, disassembly.LI_LABEL)
-                instruction_text = disassembly.get_file_line(self._pdata, i, disassembly.LI_INSTRUCTION)
-                operands_text = disassembly.get_file_line(self._pdata, i, disassembly.LI_OPERANDS)
+                label_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_LABEL)
+                instruction_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_INSTRUCTION)
+                operands_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_OPERANDS)
                 if label_text:
                     f.write(label_text)
                 f.write("\t")

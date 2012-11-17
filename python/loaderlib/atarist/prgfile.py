@@ -77,12 +77,12 @@ class PRGFile(object):
     _fixup_offsets = None
 
 
-def load_file(file_info):
+def load_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
-        return load_prg_file(file_info, f)
+        return load_prg_file(file_info, data_types, f)
 
-def load_prg_file(file_info, f):
-    magic_word = file_info.uint16(f.read(2))
+def load_prg_file(file_info, data_types, f):
+    magic_word = data_types.uint16(f.read(2))
     if magic_word != MAGIC_WORD:
         logger.debug("atarist/prgfile.py: _process_file: Unrecognised file.")
         return False
@@ -91,23 +91,23 @@ def load_prg_file(file_info, f):
     prg_file._hunk_sizes = []
 
     # Read the PRG executable file header.
-    prg_file._text_segment_size = file_info.uint32(f.read(4))
-    prg_file._data_segment_size = file_info.uint32(f.read(4))
-    prg_file._bss_segment_size = file_info.uint32(f.read(4))
-    prg_file._symbol_table_size = file_info.uint32(f.read(4))
-    prg_file._reserved1 = file_info.uint32(f.read(4))
-    prg_file._reserved2 = file_info.uint32(f.read(4))
-    prg_file._reserved3 = file_info.uint16(f.read(2)) # GEMDOS reference manual says this should be a longword, but that does not work.
+    prg_file._text_segment_size = data_types.uint32(f.read(4))
+    prg_file._data_segment_size = data_types.uint32(f.read(4))
+    prg_file._bss_segment_size = data_types.uint32(f.read(4))
+    prg_file._symbol_table_size = data_types.uint32(f.read(4))
+    prg_file._reserved1 = data_types.uint32(f.read(4))
+    prg_file._reserved2 = data_types.uint32(f.read(4))
+    prg_file._reserved3 = data_types.uint16(f.read(2)) # GEMDOS reference manual says this should be a longword, but that does not work.
 
     if f.tell() != SIZEOF_HEADER:
         logger.debug("Header size mismatch")
         return False
 
     # Process the file meta-data.
-    if not _read_symbol_table(file_info, prg_file, f):
+    if not _read_symbol_table(file_info, data_types, prg_file, f):
         return False
 
-    if not _read_fixup_information(file_info, prg_file, f):
+    if not _read_fixup_information(file_info, data_types, prg_file, f):
         return False
 
     symbols = []
@@ -131,7 +131,7 @@ def load_prg_file(file_info, f):
     return True
 
 
-def _read_symbol_table(file_info, prg_file, f):
+def _read_symbol_table(file_info, data_types, prg_file, f):
     file_offset = SIZEOF_HEADER + prg_file._text_segment_size + prg_file._data_segment_size
     f.seek(file_offset, os.SEEK_SET)
 
@@ -147,27 +147,27 @@ def _read_symbol_table(file_info, prg_file, f):
         idx = symbol_name.find("\0")
         if idx != -1:
             symbol_name = symbol_name[:idx]
-        symbol_type = file_info.uint16(f.read(2))
-        symbol_value = file_info.uint32(f.read(4))
+        symbol_type = data_types.uint16(f.read(2))
+        symbol_value = data_types.uint32(f.read(4))
         l.append((symbol_name, symbol_type, symbol_value))
 
     prg_file._symbol_table_entries = l
     return True
 
 
-def _read_fixup_information(file_info, prg_file, f):
+def _read_fixup_information(file_info, data_types, prg_file, f):
     file_offset = SIZEOF_HEADER + prg_file._text_segment_size + prg_file._data_segment_size + prg_file._symbol_table_size
     f.seek(file_offset, os.SEEK_SET)
 
     # First longword is an offset.  If it is NULL, there are no fixups to make.
     l = []
-    offset = file_info.uint32(f.read(4))
+    offset = data_types.uint32(f.read(4))
     if offset != 0:
         offsets = [ offset ]
 
         maximum_offset = prg_file._text_segment_size + prg_file._data_segment_size
         while 1:
-            byte = file_info.uint8(f.read(1))
+            byte = data_types.uint8(f.read(1))
             if byte == 0:
                 break
             elif byte == 1:
