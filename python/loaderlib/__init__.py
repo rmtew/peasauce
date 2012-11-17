@@ -20,8 +20,6 @@ import os
 import logging
 import struct
 
-import disasmlib
-
 import amiga
 import atarist
 import human68k

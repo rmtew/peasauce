@@ -35,7 +35,7 @@ import traceback
 from PySide import QtCore, QtGui
 
 import disassembly
-import archlib
+import loaderlib
 
 
 SETTINGS_FILE = "settings.pikl"
@@ -558,11 +558,11 @@ class MainWindow(QtGui.QMainWindow):
             model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
             
             segment_type = self._pdata.file_info.get_segment_type(segment_id)
-            if segment_type == archlib.SEGMENT_TYPE_CODE:
+            if segment_type == loaderlib.SEGMENT_TYPE_CODE:
                 segment_type = "code"
-            elif segment_type == archlib.SEGMENT_TYPE_DATA:
+            elif segment_type == loaderlib.SEGMENT_TYPE_DATA:
                 segment_type = "data"
-            elif segment_type == archlib.SEGMENT_TYPE_BSS:
+            elif segment_type == loaderlib.SEGMENT_TYPE_BSS:
                 segment_type = "bss"
             length = self._pdata.file_info.get_segment_length(segment_id)
             data_length = self._pdata.file_info.get_segment_data_length(segment_id)

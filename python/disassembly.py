@@ -25,8 +25,8 @@ import sys
 import traceback
 
 
-import archlib
-import disasmlib
+import loaderlib
+import disassemblylib
 
 logger = logging.getLogger("disassembly")
 
@@ -547,7 +547,7 @@ class ProgramData(object):
 def load_file(file_path):
     program_data = ProgramData()
 
-    file_info = archlib.load_file(file_path)
+    file_info = loaderlib.load_file(file_path)
     if file_info is None:
         return None, 0
 
@@ -556,7 +556,7 @@ def load_file(file_path):
 
     # Set up the disassembly API.
     arch_name = file_info.system.get_arch_name()
-    for func_name, func in disasmlib.get_api(arch_name):
+    for func_name, func in disassemblylib.get_api(arch_name):
         setattr(program_data, "dis_"+ func_name +"_func", func)
 
     # Start disassembling.
@@ -570,7 +570,7 @@ def load_file(file_path):
         segment_length = program_data.file_info.get_segment_length(segment_id)
 
         block = SegmentBlock()
-        if program_data.file_info.get_segment_type(segment_id) == archlib.SEGMENT_TYPE_BSS:
+        if program_data.file_info.get_segment_type(segment_id) == loaderlib.SEGMENT_TYPE_BSS:
             block.flags |= BLOCK_FLAG_ALLOC
         set_data_type(block, DATA_TYPE_LONGWORD)
         block.segment_id = segment_id
