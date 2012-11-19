@@ -28,18 +28,24 @@ import human68k
 logger = logging.getLogger("loader")
 
 
-def get_systems():
-    return [
-        amiga.System(),
-        atarist.System(),
-        human68k.System(),
-    ]
+systems_by_name = {}
 
+def _generate_module_data():
+    global systems_by_name
+    for module in (amiga, atarist, human68k):
+        system_name = module.__name__
+        system = systems_by_name[system_name] = module.System()
+        system.system_name = system_name
+_generate_module_data()
 
+def get_system_data_types(system_name):
+    system = systems_by_name[system_name]
+    return DataTypes(system.big_endian)
+ 
 def load_file(file_path):
-    for system in get_systems():
-        data_types = DataTypes(system.big_endian)
+    for system_name, system in systems_by_name.iteritems():
         file_info = FileInfo(system, file_path)
+        data_types = get_system_data_types(system_name)
         if system.load_file(file_info, data_types):
             return file_info, data_types
 

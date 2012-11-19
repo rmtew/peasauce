@@ -46,7 +46,6 @@ B: -, W: 0, L: 1 - MOVEM (handled case by case)
 import cPickle
 import os
 import sys
-import operator
 import struct
 import logging
 
@@ -584,7 +583,8 @@ def _signed_value(size_char, value):
     unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
     return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
 
-def _get_formatted_ea_description(pc, key, vars, lookup_symbol=None):
+def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
+    pc = instruction.pc
     id = get_EAM_id(key)
     mode_format = EffectiveAddressingModes[id][EAMI_FORMAT]
     reg_field = EffectiveAddressingModes[id][EAMI_REG]
@@ -611,7 +611,12 @@ def _get_formatted_ea_description(pc, key, vars, lookup_symbol=None):
             elif reg_field == Rn:
                 pass # TODO: Use to validate
         elif k == "xxx":
-            mode_format = mode_format.replace("xxx", "$%x" % vars["xxx"])
+            value = vars["xxx"]
+            is_absolute = key == "Imm"
+            value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
+            if value_string is None:
+                value_string = "$%x" % value
+            mode_format = mode_format.replace("xxx",  value_string)
         else:
             mode_format = mode_format.replace(k, str(v))
     return mode_format
@@ -668,10 +673,8 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
                 logger.error("_decode_operand$%X: failed to resolve EA key mode:%s register:%s", M.pc, number2binary(T2.vars["mode"]), number2binary(T2.vars["register"]))
                 return None
         if T2_key == "PreARi":
-            shift = operator.lshift
             mask = 0x8000
         else:
-            shift = operator.rshift
             mask = 0x0001
         dm = am = 0
         for i in range(16):
@@ -680,7 +683,10 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
                     am |= 1<<(i-8)
                 else: # d0-d7
                     dm |= 1<<i
-            word = shift(word, 1)
+            if mask == 0x0001:
+                word >>= 1
+            else:
+                word <<= 1
         T.rl_bits = dm, am
         return data_idx
     elif T.specification.key == "DISPLACEMENT":
@@ -728,6 +734,9 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
                 size_char = M.vars["z"]
             elif instruction_key[-2] == "." and instruction_key[-1] in ("B", "W", "L"):
                 size_char = instruction_key[-1]
+            else:
+                # Presumably an F-line instruction.
+                return None
                 
             try:
                 value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
@@ -890,7 +899,6 @@ def disassemble_one_line(data, data_idx, data_abs_idx):
     idx0 = data_idx
     matches, data_idx = _match_instructions(data, data_idx, data_abs_idx)
     if not len(matches):
-        logger.error("Failed to match instructions at offset $%X", idx0)
         return None, idx0
 
     M = matches[0]
@@ -907,13 +915,20 @@ def disassemble_one_line(data, data_idx, data_abs_idx):
     M.num_bytes = data_idx - idx0
     return M, data_idx
 
+def disassemble_as_data(data, data_idx):
+    # F-line instruction.
+    if _get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
+        return 2
+    return 0
+
 def get_instruction_string(instruction, vars):
     """ Get a printable representation of an instruction. """
     key = instruction.specification.key
     return _get_formatted_description(key, vars)
 
-def get_operand_string(pc, operand, vars, lookup_symbol=None):
+def get_operand_string(instruction, operand, vars, lookup_symbol=None):
     """ Get a printable representation of an instruction operand. """
+    pc = instruction.pc
     key = operand.key
     if key is None:
         key = operand.specification.key
@@ -937,20 +952,28 @@ def get_operand_string(pc, operand, vars, lookup_symbol=None):
             key = [ "DR", "AR" ][i]
             if len(s):
                 s += "/"
-            s += _get_formatted_ea_description(pc, key, {"Rn":r0})
+            s += _get_formatted_ea_description(instruction, key, {"Rn":r0})
             if r0 < rn:
-                s += "-"+ _get_formatted_ea_description(pc, key, {"Rn":rn})
+                s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
         return s
     elif key == "DISPLACEMENT":
-        # TODO: This should not fall to this file, but to the user, who relocates and labelises.
-        return signed_hex_string(vars["xxx"])
+        value = vars["xxx"]
+        if instruction.specification.key[0:4] == "LINK":
+            value_string = None
+        else:
+            value_string = lookup_symbol(instruction.pc + value)
+        if value_string is None:
+            value_string = signed_hex_string(value)
+        return value_string
     elif key in SpecialRegisters:
         return key
     else:
-        return _get_formatted_ea_description(pc, key, vars, lookup_symbol=lookup_symbol)
+        return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
 
-def get_match_addresses(match, extra=False):
-    ret = []
+MAF_CODE = 1
+MAF_ABSOLUTE = 2
+
+def get_match_addresses(match, extra=True):
     # Is it an instruction that exits (RTS, RTR)?
     # Is it an instruction that conditionally branches (Bcc, Dbcc)?
     # Is it an instruction that branches and returns (JSR, BSR)?
@@ -976,21 +999,27 @@ def get_match_addresses(match, extra=False):
         opcode_idx = 0 if instruction_key == "Bcc" else 1
         address = match.pc + match.opcodes[opcode_idx].vars["xxx"]
 
+    ret = {}
     if address is not None:
-        ret.append((address, True))
+        ret[address] = MAF_CODE
 
     # Locate any general addressing modes which infer labels.
     for opcode in match.opcodes:
         if opcode.key == "PCid16":
             address = match.pc + _signed_value("W", opcode.vars["D16"])
-            ret.append((address, False))
+            if address not in ret:
+                ret[address] = 0
         elif opcode.key == "PCiId8":
             address = match.pc + _signed_value("W", opcode.vars["D8"])
-            ret.append((address, False))
+            if address not in ret:
+                ret[address] = 0
         elif extra and opcode.key == "AbsL":
             address = opcode.vars["xxx"]
-            if (address, True) not in ret:
-                ret.append((address, False))
+            if address not in ret:
+                ret[address] = 0
+        elif extra and opcode.key == "Imm":
+            address = opcode.vars["xxx"]
+            ret[address] = ret.get(address, 0) | MAF_ABSOLUTE
         elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
             logger.error("Unhandled opcode EA modde (680x0?): %s", opcode.key)
 

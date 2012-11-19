@@ -27,6 +27,7 @@ def get_api(arch_name):
         "get_instruction_string",
         "get_operand_string",
         "disassemble_one_line",
+        "disassemble_as_data",
     ]
 
     api = []

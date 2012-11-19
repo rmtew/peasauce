@@ -179,11 +179,22 @@ def get_code_block_info_for_address(program_data, address):
 
     bytes_used = 0
     line_number = program_data.block_line0s[block_idx] + calculate_block_leading_line_count(program_data, block)
+    previous_result = None
     for match in block.line_data:
-        if base_address + bytes_used == address:
-            return line_number, match
+        current_result = line_number, match
+        # Within but not at the start of the previous instruction.
+        if address < base_address + bytes_used:
+            return previous_result
+        # Exactly this instruction.
+        if address == base_address + bytes_used:
+            return current_result
+        previous_result = current_result
         bytes_used += match.num_bytes
         line_number += calculate_match_line_count(program_data, match)
+    # Within but not at the start of the previous instruction.
+    if address < base_address + bytes_used:
+        return previous_result
+    # return None, previous_result
 
 
 def get_code_block_info_for_line_number(program_data, line_number):
@@ -202,8 +213,8 @@ def get_code_block_info_for_line_number(program_data, line_number):
 def get_line_number_for_address(program_data, address):
     block, block_idx = lookup_block_by_address(program_data, address)
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        line_number, match = get_code_block_info_for_address(program_data, address)
-        return line_number
+        result = get_code_block_info_for_address(program_data, address)
+        return result[0]
 
     base_address = program_data.block_addresses[block_idx]
     line_number0 = program_data.block_line0s[block_idx]
@@ -276,7 +287,7 @@ def get_address_for_line_number(program_data, line_number):
 
 def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
     address, match = get_code_block_info_for_line_number(program_data, line_number)
-    return [ a[0] for a in program_data.dis_get_match_addresses_func(match, extra=True) if a[0] in program_data.symbols_by_address ]
+    return [ k for (k, v) in program_data.dis_get_match_addresses_func(match, extra=True).iteritems() if k in program_data.symbols_by_address ]
 
 
 def get_line_count(program_data):
@@ -294,12 +305,13 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
     leading_line_count = 0
     if block.segment_offset == 0 and program_data.file_info.has_section_headers():
         if line_idx == block_line_count0:
+            segment_address = loaderlib.get_segment_address(program_data.loader_segments, block.segment_id)
             section_header = program_data.file_info.get_section_header(block.segment_id)
             i = section_header.find(" ")
             if column_idx == LI_INSTRUCTION:
                 return section_header[0:i]
             elif column_idx == LI_OPERANDS:
-                return section_header[i+1:]
+                return section_header[i+1:].format(address=segment_address)
             else:
                 return ""
         leading_line_count += 1
@@ -340,28 +352,12 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         elif column_idx == LI_INSTRUCTION:
             return program_data.dis_get_instruction_string_func(line_match, line_match.vars)
         elif column_idx == LI_OPERANDS:
-            def make_operand_string(match, operand, operand_idx):
-                operand_string = None
-                if match.specification.key[0:4] != "LINK" and operand.specification.key == "DISPLACEMENT":
-                    operand_string = get_symbol_for_address(program_data, match.pc + operand.vars["xxx"])
-                elif operand.specification.key == "AbsL" or operand.key == "AbsL":
-                    operand_string = get_symbol_for_address(program_data, operand.vars["xxx"])
-                elif operand_idx == 0 and (operand.specification.key == "Imm" or operand.key == "Imm"):
-                    # e.g. MOVEA.L #vvv, A0 ?
-                    if len(match.opcodes) > 1:
-                        operand2 = match.opcodes[1]
-                        if (operand2.specification.key == "AR" or operand.key == "AR"):
-                            operand_string = get_symbol_for_address(program_data, operand.vars["xxx"])
-                            if operand_string is not None:
-                                operand_string = "#"+ operand_string
-                if operand_string is None:
-                    return program_data.dis_get_operand_string_func(match.pc, operand, operand.vars, lookup_symbol=lambda address, program_data=program_data: get_symbol_for_address(program_data, address))
-                return operand_string
+            lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(program_data, address, absolute_info)
             opcode_string = ""
             if len(line_match.opcodes) >= 1:
-                opcode_string += make_operand_string(line_match, line_match.opcodes[0], 0)
+                opcode_string += program_data.dis_get_operand_string_func(line_match, line_match.opcodes[0], line_match.opcodes[0].vars, lookup_symbol=lookup_symbol)
             if len(line_match.opcodes) == 2:
-                opcode_string += ", "+ make_operand_string(line_match, line_match.opcodes[1], 1)
+                opcode_string += ", "+ program_data.dis_get_operand_string_func(line_match, line_match.opcodes[1], line_match.opcodes[1].vars, lookup_symbol=lookup_symbol)
             return opcode_string
         elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
             l = []
@@ -418,6 +414,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     data = loaderlib.get_segment_data(segments, block.segment_id)
                     value = read_func(data, data_idx)
                     label = None
+                    # Only turn the value into a symbol if we actually relocated the value.
                     if size_char == "L" and value in program_data.loader_relocatable_addresses:
                         label = get_symbol_for_address(program_data, value)
                     if label is None:
@@ -440,10 +437,17 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
 
 
 def insert_branch_address(program_data, address, src_abs_idx):
-    if address not in program_data.loader_relocated_addresses:
-        program_data.branch_addresses.add(address)
-        # This errors because if the block is a code block, it has no match object.
-        # split_block(address)
+    # These get split as their turn to be disassembled comes up.
+    referring_addresses = program_data.branch_addresses.get(address, set())
+    referring_addresses.add(src_abs_idx)
+    program_data.branch_addresses[address] = referring_addresses
+
+def insert_reference_address(program_data, address, src_abs_idx):
+    referring_addresses = program_data.reference_addresses.get(address, set())
+    referring_addresses.add(src_abs_idx)
+    program_data.reference_addresses[address] = referring_addresses
+
+    split_block(program_data, address)
 
 def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
@@ -452,8 +456,23 @@ def insert_symbol(program_data, address, name):
     program_data.symbols_by_address[address] = name
     if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
 
-def get_symbol_for_address(program_data, address):
-    return program_data.symbols_by_address.get(address)
+def get_symbol_for_address(program_data, address, absolute_info=None):
+    # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
+    if absolute_info is not None:
+        valid_address = False
+        if address in program_data.loader_relocated_addresses:
+            # For now, check all instruction bytes as addresses to see if they were relocated within.
+            search_address = absolute_info[0]
+            while search_address < absolute_info[0] + absolute_info[1]:
+                if search_address in program_data.loader_relocatable_addresses:
+                    # print "ABSOLUTE SYMBOL LOCATION: %X" % absolute_info[0]
+                    valid_address = True
+                    break
+                search_address += 1
+    else:
+        valid_address = True
+    if valid_address:
+        return program_data.symbols_by_address.get(address)
 
 def set_symbol_for_address(program_data, address, symbol):
     program_data.symbols_by_address[address] = symbol
@@ -526,7 +545,8 @@ class ProgramData(object):
     def __init__(self):
         ## Persisted state.
         # Local:
-        self.branch_addresses = set()
+        self.branch_addresses = {}
+        self.reference_addresses = {}
         self.symbols_by_address = {}
         "List of blocks ordered by ascending address."
         self.blocks = []
@@ -548,7 +568,7 @@ class ProgramData(object):
         self.file_size = None
         "When file data is not stored within saved work, this allows verification of substitute files."
         self.file_checksum = None
-        "When saved work is to be independently loadable without original file, we include the required data."
+        self.loader_system_name = None
         self.loader_segments = []
         self.loader_relocated_addresses = set()
         self.loader_relocatable_addresses = set()
@@ -565,11 +585,28 @@ class ProgramData(object):
         self.dis_get_instruction_string_func = None
         self.dis_get_operand_string_func = None
         self.dis_disassemble_one_line_func = None
-        self.dis_big_endian = None
+        self.dis_disassemble_as_data_func = None
 
         # loaderlib:
         self.file_path = None
         self.data_types = None
+
+"""
+Need a save workspace function:
+- Replace line_data code match entries with nothing.  Should be regenerated from cached data & index.
+
+Need a load_workspace function:
+- Load and populate persisted fields of ProgramData.
+- 
+"""
+
+def load_save_file(savefile_path):
+    data = LOAD(savefile_path)
+    program_data = ProgramData()
+    # TODO: POPULATE data INTO program_data
+    program_data.data_types = loaderlib.get_system_data_types(program_data.loader_system_name)
+    for func_name, func in disassemblylib.get_api(program_data.dis_name):
+        setattr(program_data, "dis_"+ func_name +"_func", func)
 
 
 def load_file(file_path):
@@ -581,6 +618,7 @@ def load_file(file_path):
 
     program_data = ProgramData()
     program_data.file_path = file_path
+    program_data.loader_system_name = file_info.system.system_name
 
     # Extract useful information from file loading process.
     program_data.file_info = file_info
@@ -593,8 +631,8 @@ def load_file(file_path):
     loaderlib.relocate_segment_data(segments, data_types, file_info.relocations_by_segment_id, program_data.loader_relocatable_addresses, program_data.loader_relocated_addresses)
 
     # Set up the disassembly API.
-    arch_name = file_info.system.get_arch_name()
-    for func_name, func in disassemblylib.get_api(arch_name):
+    program_data.dis_name = file_info.system.get_arch_name()
+    for func_name, func in disassemblylib.get_api(program_data.dis_name):
         setattr(program_data, "dis_"+ func_name +"_func", func)
 
     # Start disassembling.
@@ -650,7 +688,7 @@ def load_file(file_path):
 
     # Pass 4: Do a disassembly pass.
     disassembly_offsets = [ entrypoint_address ]
-    for address in program_data.branch_addresses:
+    for address in program_data.branch_addresses.iterkeys():
         if address != entrypoint_address:
             disassembly_offsets.append(address)
 
@@ -679,15 +717,21 @@ def load_file(file_path):
         block.flags |= BLOCK_FLAG_PROCESSED
 
         bytes_consumed = 0
+        data_bytes_to_skip = 0
         line_data = []
         found_terminating_instruction = False
         while bytes_consumed < block.length:
             data = loaderlib.get_segment_data(segments, block.segment_id)
             data_offset_start = block.segment_offset + bytes_consumed
             match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, address + bytes_consumed)
+            if match is None:
+                data_bytes_to_skip = program_data.dis_disassemble_as_data_func(data, data_offset_start)
+                if data_bytes_to_skip == 0:
+                    logger.error("unable to disassemble data at %X (started at %X)", address + bytes_consumed, address)
+                break
             bytes_matched = data_offset_end - data_offset_start
-            if match is None or bytes_consumed + bytes_matched > block.length:
-                logger.error("unable to disassemble at %X (started at %X)", address + bytes_consumed, address)
+            if bytes_consumed + bytes_matched > block.length:
+                logger.error("unable to disassemble due to a block length overrun at %X (started at %X)", address + bytes_consumed, address)
                 break
             line_data.append(match)
             bytes_consumed += bytes_matched
@@ -704,6 +748,13 @@ def load_file(file_path):
             set_data_type(trailing_block, DATA_TYPE_LONGWORD)
             if not found_terminating_instruction:
                 trailing_block.flags |= BLOCK_FLAG_PROCESSED
+                # May have to split again but hint for code disassembly.
+                if data_bytes_to_skip:
+                    new_code_address = address + bytes_consumed + data_bytes_to_skip
+                    trailing_block, trailing_block_idx = split_block(program_data, new_code_address)
+                    set_data_type(trailing_block, DATA_TYPE_LONGWORD)
+                    if new_code_address not in disassembly_checklist:
+                        disassembly_offsets.insert(0, new_code_address)
 
         set_data_type(block, DATA_TYPE_CODE)
         block.line_data = line_data
@@ -712,29 +763,40 @@ def load_file(file_path):
 
         # Extract any addresses which are referred to, for later use.
         for match in line_data:
-            for match_address, is_code in program_data.dis_get_match_addresses_func(match):
-                if is_code and match_address not in disassembly_checklist:
-                    disassembly_offsets.insert(0, match_address)
-                insert_branch_address(program_data, match_address, address)
+            for match_address, flags in program_data.dis_get_match_addresses_func(match).iteritems():
+                if flags & 1: # MAF_CODE
+                    if match_address not in disassembly_checklist:
+                        disassembly_offsets.insert(0, match_address)
+                    insert_branch_address(program_data, match_address, match.pc-2)
+                elif flags & 2: # MAF_ABSOLUTE
+                    if match_address in program_data.loader_relocated_addresses:
+                        search_address = match_address
+                        while search_address < match_address + match.num_bytes:
+                            if search_address in program_data.loader_relocatable_addresses:
+                                insert_reference_address(program_data, match_address, match.pc-2)
+                                # print "ABS REF LOCATION: %X FOUND Imm ADDRESS %X INS %s" % (match.pc, match_address, match.specification.key)
+                                break
+                            search_address += 1
+                else:
+                    insert_reference_address(program_data, match_address, match.pc-2)
 
-    for address in program_data.loader_relocated_addresses:
+    # Gather together all the addresses which need to have symbols.
+    symbol_addresses = program_data.loader_relocated_addresses.copy()
+    symbol_addresses.update(program_data.branch_addresses)
+    symbol_addresses.update(program_data.reference_addresses)
+    symbol_addresses.add(entrypoint_address)
+
+    for address in symbol_addresses:
         if address not in program_data.symbols_by_address:
             block, block_idx = lookup_block_by_address(program_data, address)
             if block.address != address:
                 logger.error("Tried to label a relocated address without a block: %X", address)
                 continue
-            insert_symbol(program_data, address, "lb"+ char_by_data_type[get_data_type(block.flags)] + ("%06X" % address))
-
-    if entrypoint_address not in program_data.symbols_by_address:
-        insert_symbol(program_data, entrypoint_address, "ENTRYPOINT")
-
-    for address in program_data.branch_addresses:
-        if address not in program_data.symbols_by_address:
-            block, block_idx = lookup_block_by_address(program_data, address)
-            if block.address != address:
-                logger.error("Tried to label a branch address without a block: %X", address)
-                continue
-            insert_symbol(program_data, address, "lb"+ char_by_data_type[get_data_type(block.flags)] + ("%06X" % address))
+            if address == entrypoint_address:
+                label = "ENTRYPOINT"
+            else:
+                label = "lb"+ char_by_data_type[get_data_type(block.flags)] + ("%06X" % address)
+            insert_symbol(program_data, address, label)
 
     recalculate_line_count_index(program_data)
     line_count = program_data.block_line0s[-1] + program_data.blocks[-1].line_count

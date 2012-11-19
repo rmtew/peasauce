@@ -158,11 +158,7 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
 
     def index(self, row, column, parent):
         if not self.hasIndex(row, column, parent):
-            if row == 10739:
-                print "ZZZ"
             return QtCore.QModelIndex()
-        if row == 10739:
-            print "YYY"
         return self.createIndex(row, column)
 
 
@@ -391,6 +387,9 @@ class MainWindow(QtGui.QMainWindow):
         if line_idx == -1:
             line_idx = 0
         address = disassembly.get_address_for_line_number(self.disassembly_data, line_idx)
+        # Skip lines which are purely for visual effect.
+        if address is None:            
+            return
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -453,6 +452,9 @@ class MainWindow(QtGui.QMainWindow):
         if not len(selected_line_numbers):
             return
         current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        # Whether a non-disassembly "readability" line was selected.
+        if current_address is None:
+            return
         operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, selected_line_numbers[0])
         if len(operand_addresses) == 1:
             self.view_address_stack.append(current_address)
@@ -462,7 +464,7 @@ class MainWindow(QtGui.QMainWindow):
             self.list_table.selectRow(next_line_number)
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         elif len(operand_addresses) == 2:
-            logger.error("Too many addresses, unexpected situation.")
+            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
         else:
             logger.warning("No addresses, nothing to go to.")
 

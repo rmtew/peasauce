@@ -65,7 +65,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Bugs
 
 * Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
-* UI: Disassembly text label placement should not happen in UI, as UI should not be m68k specific.
 * UI: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
 
 #### Functionality
@@ -94,7 +93,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
 * Disassembly: Lots of repeated loops looking for lines by address or address by lines.
 * File loading: Clean up file_info.file_data to only store useful information.
-* File loading: Endian should come from 
+* Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 
 ### Medium Term Tasks
 

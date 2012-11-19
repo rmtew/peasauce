@@ -37,8 +37,7 @@ class System(object):
 
     def get_section_header(self, file_info, segment_id):
         hunk_id = hunkfile.get_hunk_type(file_info.file_data, segment_id)
-        hunk_address = file_info.get_segment_address(segment_id)
-        s = "SECTION name%06X" % hunk_address
+        s = "SECTION name{address:06X}"
         if hunk_id == doshunks.HUNK_DATA:
             s += ", DATA"
         elif hunk_id == doshunks.HUNK_CODE:
