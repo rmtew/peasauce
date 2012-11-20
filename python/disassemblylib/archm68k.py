@@ -793,7 +793,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
                 base_displacement, data_idx = _get_long(data, data_idx)
             if base_displacement is None: # Disassembly failure.
                 return None
-            raise RuntimeError("Full displacement incomplete")
+            raise RuntimeError("Full displacement incomplete", M.specification.key)
         else:
             T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
     elif read_string:

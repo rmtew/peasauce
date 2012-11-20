@@ -192,10 +192,20 @@ def create_table_model(parent, columns, _class=None):
             model.column_alignments[i] = QtCore.Qt.AlignLeft
     return model
 
+class CustomQTableView(QtGui.QTableView):
+    _initial_line_idx = None
+
+    def paintEvent(self, event):
+        if self._initial_line_idx is not None:
+            self.scrollTo(window.list_model.index(self._initial_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+            self.selectRow(self._initial_line_idx)
+            self._initial_line_idx = None
+        super(CustomQTableView, self).paintEvent(event)
+
 
 def create_table_widget(model):
     # Need a custom table view to get selected row.
-    table = QtGui.QTableView()
+    table = CustomQTableView()
     table.setModel(model)
     table.setCornerButtonEnabled(False)
     table.setGridStyle(QtCore.Qt.NoPen)
@@ -316,7 +326,6 @@ class MainWindow(QtGui.QMainWindow):
 
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
-        self.load_work_action = QtGui.QAction("&Load work", self, statusTip="Load previous work", triggered=self.interaction_request_load_work)
         self.save_work_action = QtGui.QAction("&Save work", self, statusTip="Save current work", triggered=self.interaction_request_save_work)
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
@@ -325,7 +334,6 @@ class MainWindow(QtGui.QMainWindow):
 
         self.file_menu = self.menuBar().addMenu("&File")
         self.file_menu.addAction(self.open_action)
-        self.file_menu.addAction(self.load_work_action)
         self.file_menu.addAction(self.save_work_action)
         self.file_menu.addAction(self.export_source_action)
         self.file_menu.addSeparator()
@@ -396,9 +404,12 @@ class MainWindow(QtGui.QMainWindow):
             if text.startswith("0x") or text.startswith("$"):
                 new_address = int(text, 16)
             else:
-                new_address = int(text)
+                new_address = disassembly.get_address_for_symbol(self.disassembly_data, text)
+                if new_address is None:
+                    new_address = int(text)
             if new_address is not None:
                 new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
+                self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
                 self.list_table.selectRow(new_line_idx)
 
     def menu_settings_choose_font(self):
@@ -409,10 +420,6 @@ class MainWindow(QtGui.QMainWindow):
             self._set_setting("font-info", font.toString())
 
     ## INTERACTION FUNCTIONS
-
-    def interaction_request_load_work(self):
-        if self.program_state == STATE_LOADED:
-            self.request_and_load_file({ "Load file (*.wrk)" : "load-file", })
 
     def interaction_request_save_work(self):
         if self.program_state == STATE_LOADED:
@@ -461,6 +468,7 @@ class MainWindow(QtGui.QMainWindow):
             # ...
             address = operand_addresses[0]
             next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
+            self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
             self.list_table.selectRow(next_line_number)
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         elif len(operand_addresses) == 2:
@@ -477,6 +485,7 @@ class MainWindow(QtGui.QMainWindow):
             address = self.view_address_stack.pop()
             line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
             logger.info("view pop symbol going to address %06X / line number %d %s." % (address, line_number, str(self.view_address_stack)))
+            self.list_table.scrollTo(self.list_model.index(line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
             self.list_table.selectRow(line_number)
         else:
             logger.error("view pop symbol has empty stack and nowhere to go to.")
@@ -497,6 +506,16 @@ class MainWindow(QtGui.QMainWindow):
                 self._settings = {}
         return self._settings.get(setting_name, default_value)
 
+        filter_strings = ";;".join(filters.iterkeys())
+        """
+                # options = QtGui.QFileDialog.Options()
+                # file_path, filter_text = QtGui.QFileDialog.getOpenFileName(self, caption="Load from...", filter=filter_strings, options=options)
+                # if not len(file_path):
+                    # return
+                # if filters[filter_text] == "load-file":
+                    # self.load_work(file_path)
+                # self.request_and_load_file({ "Load file (*.wrk)" : "load-file", })
+        """
     def attempt_open_file(self, file_path):
         # An attempt will be made to load an existing file.
         self.program_state = STATE_LOADING
@@ -513,11 +532,14 @@ class MainWindow(QtGui.QMainWindow):
 
         # Start the disassembly on the worker thread.
         self.thread.result.connect(self.attempt_display_file)
-        self.thread.add_work(disassembly.load_file, file_path)
+        if file_path[-4:].lower() == ".wrk":
+            self.thread.add_work(disassembly.load_savefile, file_path)
+        else:
+            self.thread.add_work(disassembly.load_file, file_path)
 
         # Initialise the dialog status.
         progressDialog.setValue(20)
-        progressDialog.setLabelText("Disassembling..")
+        progressDialog.setLabelText("Loading..")
 
         # Register to hear if the cancel button is pressed.
         def canceled():
@@ -552,6 +574,11 @@ class MainWindow(QtGui.QMainWindow):
             QtGui.QMessageBox.information(self, "Unable to open file", "The file does not appear to be a supported executable file format.")
             return
 
+        entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
+        new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
+
+        self.list_table._initial_line_idx = new_line_idx
+
         ## Populate the disassembly view with the loaded data.
         model = self.list_model
         model._data_ready()
@@ -574,8 +601,8 @@ class MainWindow(QtGui.QMainWindow):
             data_length = loaderlib.get_segment_data_length(loader_segments, segment_id)
             if loaderlib.get_segment_data_file_offset(loader_segments, segment_id) == -1:
                 data_length = "-"
-            reloc_count = len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
-            symbol_count = len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
+            reloc_count = "-"#len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
+            symbol_count = "-"#len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
 
             model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
             for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
@@ -616,19 +643,13 @@ class MainWindow(QtGui.QMainWindow):
         model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
         model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
 
-    def request_and_load_file(self, filters):
-        filter_strings = ";;".join(filters.iterkeys())
-
-        options = QtGui.QFileDialog.Options()
-        file_path, filter_text = QtGui.QFileDialog.getOpenFileName(self, caption="Load from...", filter=filter_strings, options=options)
-        if filters[filter_text] == "load-file":
-            self.load_work(file_path)
-
     def request_and_save_file(self, filters):
         filter_strings = ";;".join(filters.iterkeys())
 
         options = QtGui.QFileDialog.Options()
         file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self, caption="Save to...", filter=filter_strings, options=options)
+        if not len(file_path):
+            return
         if filters[filter_text] == "code":
             self.save_disassembled_source(file_path)
         elif filters[filter_text] == "save-file":
@@ -675,11 +696,11 @@ class MainWindow(QtGui.QMainWindow):
             else:
                 progressDialog.setValue(line_count)        
 
-    def save_work(self, file_path):
-        pass
-
     def load_work(self, file_path):
-        pass
+        disassembly.load_savefile(file_path)
+
+    def save_work(self, file_path):
+        disassembly.save_savefile(file_path, self.disassembly_data)
 
 
 def _initialise_logging(window):

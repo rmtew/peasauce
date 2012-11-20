@@ -26,17 +26,23 @@ class System(object):
     def get_arch_name(self):
         return "m68k"
 
-    def load_file(self, file_info, data_types):
-        return hunkfile.load_file(file_info, data_types)
+    def load_input_file(self, file_info, data_types):
+        return hunkfile.load_input_file(file_info, data_types)
+
+    def load_savefile_data(self, f):
+        return hunkfile.load_savefile_data(f)
+
+    def save_savefile_data(self, f, data):
+        return hunkfile.save_savefile_data(f, data)
 
     def print_summary(self, file_info):
         hunkfile.print_summary(file_info)
 
-    def has_section_headers(self):
+    def has_segment_headers(self):
         return True
 
-    def get_section_header(self, file_info, segment_id):
-        hunk_id = hunkfile.get_hunk_type(file_info.file_data, segment_id)
+    def get_segment_header(self, segment_id, data):
+        hunk_id = hunkfile.get_hunk_type(data, segment_id)
         s = "SECTION name{address:06X}"
         if hunk_id == doshunks.HUNK_DATA:
             s += ", DATA"
@@ -44,7 +50,7 @@ class System(object):
             s += ", CODE"
         elif hunk_id == doshunks.HUNK_BSS:
             s += ", BSS"
-        memf_mask = hunkfile.get_hunk_memory_flags(file_info.file_data, segment_id)
+        memf_mask = hunkfile.get_hunk_memory_flags(data, segment_id)
         if memf_mask:
             s += ", "+ hunkfile.MEMF_NAMES[memf_mask & hunkfile.MEMF_MASK]
         return s

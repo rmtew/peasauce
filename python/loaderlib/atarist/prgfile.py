@@ -24,7 +24,9 @@ relocation seems to happen within both based on the base address of
 where the text segment is loaded in memory.
 """
 
+import cPickle
 import os
+import struct
 import sys
 import logging
 
@@ -77,7 +79,7 @@ class PRGFile(object):
     _fixup_offsets = None
 
 
-def load_file(file_info, data_types):
+def load_input_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
         return load_prg_file(file_info, data_types, f)
 
@@ -126,7 +128,8 @@ def load_prg_file(file_info, data_types, f):
         prg_file._hunk_sizes.append((SEGMENT_BSS, 0, 0, prg_file._bss_segment_size))
         file_info.add_bss_segment(-1, 0, prg_file._bss_segment_size, [], {})
 
-    file_info.set_file_data(prg_file)
+    file_info.set_internal_data(prg_file)
+    file_info.set_savefile_data(None)
 
     return True
 
@@ -183,6 +186,21 @@ def _read_fixup_information(file_info, data_types, prg_file, f):
 
     prg_file._fixup_offsets = l
     return True
+
+SAVEFILE_VERSION = 1
+
+def save_savefile_data(f, data):
+    f.write(struct.pack("<H", SAVEFILE_VERSION))
+    cPickle.dump(data, f, -1)
+    return True
+
+def load_savefile_data(f):
+    savefile_version = struct.unpack("<H", f.read(2))[0]
+    if savefile_version != SAVEFILE_VERSION:
+        logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
+        return
+    data = cPickle.load(f)
+    return data
 
 
 def print_summary(file_info):

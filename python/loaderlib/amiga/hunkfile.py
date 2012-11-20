@@ -32,8 +32,10 @@ o HUNK_UNIT: An object file, as created by compilation, is composed of program u
 o HUNK_HEADER: A load file, as created by linking, lacks external references or program units.
 """
 
+import cPickle
 import os
 import logging
+import struct
 import sys
 
 from .doshunks import *
@@ -74,17 +76,11 @@ class HunkFile(object):
     _hunk_segments = None
 
 
-def load_file(file_info, data_types):
+def load_input_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
-        return _process_file(file_info, data_types, f)
+        return load_hunk_file(file_info, data_types, f)
 
-def get_hunk_type(data, segment_id):
-    return data._hunk_segments[segment_id][0]
-
-def get_hunk_memory_flags(data, segment_id):
-    return data._header_segments[segment_id][0]
-
-def _process_file(file_info, data_types, f):
+def load_hunk_file(file_info, data_types, f):
     data = HunkFile()
 
     hunk_id = data_types.uint32(f.read(4))
@@ -172,8 +168,7 @@ def _process_file(file_info, data_types, f):
         logger.debug("hunkfile.py: _process_file: header and actual hunks mismatched")
         return False
 
-    file_info.set_file_data(data)
-
+    persisted_data = []
     for i, header_segment in enumerate(data._header_segments):
         hunk_segment = data._hunk_segments[i]
         hunk_id = hunk_segment[0]
@@ -190,7 +185,36 @@ def _process_file(file_info, data_types, f):
         elif hunk_id == HUNK_BSS:
             file_info.add_bss_segment(data_offset, data_length, segment_size, relocations, symbols)
 
+        persisted_data.append((hunk_id, header_segment[0]))
+
+    file_info.set_internal_data(data)
+    file_info.set_savefile_data(persisted_data)
+
     return True
+
+
+def get_hunk_type(data, segment_id):
+    return data[segment_id][0]
+
+def get_hunk_memory_flags(data, segment_id):
+    return data[segment_id][1]
+
+
+SAVEFILE_VERSION = 1
+
+def save_savefile_data(f, data):
+    f.write(struct.pack("<H", SAVEFILE_VERSION))
+    cPickle.dump(data, f, -1)
+    return True
+
+def load_savefile_data(f):
+    savefile_version = struct.unpack("<H", f.read(2))[0]
+    if savefile_version != SAVEFILE_VERSION:
+        logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
+        return
+    data = cPickle.load(f)
+    return data
+
 
 def _read_hunk_strings(file_info, data_types, f):
     l = []

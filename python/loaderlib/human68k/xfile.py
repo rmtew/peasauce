@@ -31,7 +31,9 @@ o What is the bindlist?
 
 """
 
+import cPickle
 import os
+import struct
 import sys
 import logging
 
@@ -87,7 +89,7 @@ class XFile(object):
     _symbol_table_entries = None
 
 
-def load_file(file_info, data_types):
+def load_input_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
         return load_x_file(file_info, data_types, f)
 
@@ -141,7 +143,8 @@ def load_x_file(file_info, data_types, f):
         # Does not contain file data, so no file offset, or file data length.
         file_info.add_bss_segment(-1, 0, data._bss_segment_size, [], {})
 
-    file_info.set_file_data(data)
+    file_info.set_internal_data(data)
+    file_info.set_savefile_data(None)
 
     return True
 
@@ -182,33 +185,49 @@ def _read_symbol_table(file_info, data_types, data, f):
     f.seek(file_offset, os.SEEK_SET)
     
     entry_count = data._symbol_table_size
-    if entry_count == 0:
-        logger.debug("xfile.py: _read_symbol_table: no symbol table data to read")
-        return False
 
     l = []
-    bytes_read = 0
-    while bytes_read < data._symbol_table_size:
-        xdef_type = data_types.uint16(f.read(2))
-        offset = data_types.uint32(f.read(4))
-        bytes_read += SIZEOF_SYMBOL_ENTRY
+    if entry_count > 0:
+        bytes_read = 0
+        while bytes_read < data._symbol_table_size:
+            xdef_type = data_types.uint16(f.read(2))
+            offset = data_types.uint32(f.read(4))
+            bytes_read += SIZEOF_SYMBOL_ENTRY
 
-        name = ""
-        c = f.read(1)
-        bytes_read += 1
-        while c != "\0":
-            name += c
+            name = ""
             c = f.read(1)
             bytes_read += 1
-        l.append((name, xdef_type, offset))
+            while c != "\0":
+                name += c
+                c = f.read(1)
+                bytes_read += 1
+            l.append((name, xdef_type, offset))
 
-        if bytes_read & 1:
-            f.read(1)
-            bytes_read += 1
-        # logger.debug("_read_symbol_table %d %d %d \"%s\"", byte1, byte2, offset, name) 
+            if bytes_read & 1:
+                f.read(1)
+                bytes_read += 1
+            # logger.debug("_read_symbol_table %d %d %d \"%s\"", byte1, byte2, offset, name) 
+    else:
+        logger.debug("xfile.py: _read_symbol_table: no symbol table data to read")
     
     data._symbol_table_entries = l
     return True
+
+
+SAVEFILE_VERSION = 1
+
+def save_savefile_data(f, data):
+    f.write(struct.pack("<H", SAVEFILE_VERSION))
+    cPickle.dump(data, f, -1)
+    return True
+
+def load_savefile_data(f):
+    savefile_version = struct.unpack("<H", f.read(2))[0]
+    if savefile_version != SAVEFILE_VERSION:
+        logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
+        return
+    data = cPickle.load(f)
+    return data
 
 
 def print_summary(file_info):

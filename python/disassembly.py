@@ -19,8 +19,10 @@
 DEBUG_ANNOTATE_DISASSEMBLY = True
 
 import bisect
+import cPickle
 import logging
 import os
+import struct
 import sys
 import traceback
 
@@ -89,6 +91,11 @@ class DisplayConfiguration(object):
 display_configuration = DisplayConfiguration()
 
 
+# Segment line data entry types.
+SLD_INSTRUCTION = 1
+SLD_COMMENT_TRAILING = 2
+SLD_COMMENT_FULL_LINE = 3
+
 class SegmentBlock(object):
     """ The number of this segment in the file. """
     segment_id = None
@@ -105,19 +112,64 @@ class SegmentBlock(object):
     """ Calculated number of lines. """
     line_count = 0
 
+    static_fmt = "<HIIIIHH"
+
+    def write_savefile_data(self, f):
+        if self.line_data is None:
+            line_data_count = 0
+        else:
+            line_data_count = len(self.line_data)
+
+        s = struct.pack(self.static_fmt, self.segment_id, self.segment_offset, self.address, self.length, self.flags, self.line_count, line_data_count)
+        f.write(s)
+
+        if line_data_count > 0:
+            segment_offset = 0
+            for type_id, entry in self.line_data:
+                f.write(struct.pack("<H", type_id))
+                if type_id == SLD_INSTRUCTION:
+                    f.write(struct.pack("<I", segment_offset))
+                    segment_offset += entry.num_bytes
+                else:
+                    f.write(struct.pack("<H", len(entry)))
+                    f.write(entry)
+
+    def read_savefile_data(self, f):
+        bytes_to_read = struct.calcsize(self.static_fmt)
+        self.segment_id, self.segment_offset, self.address, self.length, self.flags, self.line_count, line_data_count = struct.unpack(self.static_fmt, f.read(bytes_to_read))
+
+        if line_data_count > 0:
+            self.line_data = [ None ] * line_data_count
+            for i in xrange(line_data_count):
+                type_id = struct.unpack("<H", f.read(2))[0]
+                if type_id == SLD_INSTRUCTION:
+                    segment_offset = struct.unpack("<I", f.read(4))[0]
+                    self.line_data[i] = (type_id, segment_offset)
+                else:
+                    num_bytes = struct.unpack("<I", f.read(2))[0]
+                    text = f.read(num_bytes)
+                    self.line_data[i] = (type_id, text)
 
 ## SegmentBlock flag helpers
 
 def get_data_type(flags):
     return (flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
 
-def set_data_type(block, data_type):
+def set_block_data_type(block, data_type):
     block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
     block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
 
 
+def realise_instruction_entry(program_data, block, segment_extra_offset):
+    data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
+    data_offset_start = block.segment_offset + segment_extra_offset
+    match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, block.address + segment_extra_offset)
+    return match
+
+
+
 def calculate_block_leading_line_count(program_data, block):
-    if block.segment_offset == 0 and program_data.file_info.has_section_headers():
+    if block.segment_offset == 0 and loaderlib.has_segment_headers(program_data.loader_system_name):
         return 1
     return 0
 
@@ -137,8 +189,13 @@ def calculate_line_count(program_data, block):
     old_line_count = block.line_count
     block.line_count = calculate_block_leading_line_count(program_data, block)
     if get_data_type(block.flags) == DATA_TYPE_CODE:
-        for match in block.line_data:
-            block.line_count += calculate_match_line_count(program_data, match)
+        for type_id, entry in block.line_data:
+            if type_id == SLD_INSTRUCTION:
+                if type(entry) is int:
+                    entry = realise_instruction_entry(program_data, block, entry)
+                block.line_count += calculate_match_line_count(program_data, entry)
+            elif type_id == SLD_COMMENT_FULL_LINE:
+                block.line_count += 1
     elif get_data_type(block.flags) in (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE):
         # If there are excess bytes that do not fit into the given data type, append them in the smaller data types.
         if get_data_type(block.flags) == DATA_TYPE_LONGWORD:
@@ -180,17 +237,22 @@ def get_code_block_info_for_address(program_data, address):
     bytes_used = 0
     line_number = program_data.block_line0s[block_idx] + calculate_block_leading_line_count(program_data, block)
     previous_result = None
-    for match in block.line_data:
-        current_result = line_number, match
-        # Within but not at the start of the previous instruction.
-        if address < base_address + bytes_used:
-            return previous_result
-        # Exactly this instruction.
-        if address == base_address + bytes_used:
-            return current_result
-        previous_result = current_result
-        bytes_used += match.num_bytes
-        line_number += calculate_match_line_count(program_data, match)
+    for type_id, entry in block.line_data:
+        if type_id == SLD_INSTRUCTION:
+            if type(entry) is int:
+                entry = realise_instruction_entry(program_data, block, entry)
+            current_result = line_number, entry
+            # Within but not at the start of the previous instruction.
+            if address < base_address + bytes_used:
+                return previous_result
+            # Exactly this instruction.
+            if address == base_address + bytes_used:
+                return current_result
+            previous_result = current_result
+            bytes_used += entry.num_bytes
+            line_number += calculate_match_line_count(program_data, entry)
+        elif type_id == SLD_COMMENT_FULL_LINE:
+            block.line_count += 1
     # Within but not at the start of the previous instruction.
     if address < base_address + bytes_used:
         return previous_result
@@ -203,11 +265,16 @@ def get_code_block_info_for_line_number(program_data, line_number):
 
     bytes_used = 0
     line_count = program_data.block_line0s[block_idx] + calculate_block_leading_line_count(program_data, block)
-    for match in block.line_data:
-        if line_count == line_number:
-            return base_address + bytes_used, match
-        bytes_used += match.num_bytes
-        line_count += calculate_match_line_count(program_data, match)
+    for type_id, entry in block.line_data:
+        if type_id == SLD_INSTRUCTION:
+            if type(entry) is int:
+                entry = realise_instruction_entry(program_data, block, entry)
+            if line_count == line_number:
+                return base_address + bytes_used, entry
+            bytes_used += entry.num_bytes
+            line_count += calculate_match_line_count(program_data, entry)
+        elif type_id == SLD_COMMENT_FULL_LINE:
+            block.line_count += 1
 
 
 def get_line_number_for_address(program_data, address):
@@ -303,15 +370,15 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
     
     # If the line is the first of the block, check if it is a segment header.
     leading_line_count = 0
-    if block.segment_offset == 0 and program_data.file_info.has_section_headers():
+    if block.segment_offset == 0 and loaderlib.has_segment_headers(program_data.loader_system_name):
         if line_idx == block_line_count0:
             segment_address = loaderlib.get_segment_address(program_data.loader_segments, block.segment_id)
-            section_header = program_data.file_info.get_section_header(block.segment_id)
-            i = section_header.find(" ")
+            segment_header = loaderlib.get_segment_header(program_data.loader_system_name, block.segment_id, program_data.loader_internal_data)
+            i = segment_header.find(" ")
             if column_idx == LI_INSTRUCTION:
-                return section_header[0:i]
+                return segment_header[0:i]
             elif column_idx == LI_OPERANDS:
-                return section_header[i+1:].format(address=segment_address)
+                return segment_header[i+1:].format(address=segment_address)
             else:
                 return ""
         leading_line_count += 1
@@ -327,12 +394,17 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         bytes_used = 0
         line_count = block_line_count0 + leading_line_count
         line_match = None
-        for match in block.line_data:
+        for type_id, entry in block.line_data:
+            if type(entry) is int:
+                entry = realise_instruction_entry(program_data, block, entry)
             if line_count == line_idx:
-                line_match = match
+                line_match = entry
                 break
-            bytes_used += match.num_bytes
-            line_count += calculate_match_line_count(program_data, match)
+            if type_id == SLD_INSTRUCTION:
+                bytes_used += entry.num_bytes
+                line_count += calculate_match_line_count(program_data, entry)
+            elif type_id == SLD_COMMENT_FULL_LINE:
+                line_count += 1
         else:
             # Trailing blank lines.
             return ""
@@ -406,7 +478,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                         return ""
                     return label
                 elif column_idx == LI_INSTRUCTION:
-                    name = program_data.file_info.get_data_instruction_string(block.segment_id, (block.flags & BLOCK_FLAG_ALLOC) != BLOCK_FLAG_ALLOC)
+                    name = loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, (block.flags & BLOCK_FLAG_ALLOC) != BLOCK_FLAG_ALLOC)
                     return name +"."+ size_char
                 elif column_idx == LI_OPERANDS:
                     if block.flags & BLOCK_FLAG_ALLOC:
@@ -448,6 +520,15 @@ def insert_reference_address(program_data, address, src_abs_idx):
     program_data.reference_addresses[address] = referring_addresses
 
     split_block(program_data, address)
+
+def get_entrypoint_address(program_data):
+    return loaderlib.get_segment_address(program_data.loader_segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
+
+def get_address_for_symbol(program_data, symbol_name):
+    symbol_name = symbol_name.lower()
+    for k, v in program_data.symbols_by_address.iteritems():
+        if v.lower() == symbol_name:
+            return k
 
 def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
@@ -528,10 +609,13 @@ def split_block(program_data, address):
 
     if get_data_type(block.flags) == DATA_TYPE_CODE:
         num_bytes = 0
-        for i, match in enumerate(block.line_data):
-            if num_bytes == block.length:
-                break
-            num_bytes += match.num_bytes
+        for i, (type_id, entry) in enumerate(block.line_data):
+            if type_id == SLD_INSTRUCTION:
+                if type(entry) is int:
+                    entry = realise_instruction_entry(program_data, block, entry)
+                if num_bytes == block.length:
+                    break
+                num_bytes += entry.num_bytes
         new_block.line_data = block.line_data[i:]
         block.line_data[i:] = []
 
@@ -574,6 +658,7 @@ class ProgramData(object):
         self.loader_relocatable_addresses = set()
         self.loader_entrypoint_segment_id = None
         self.loader_entrypoint_offset = None
+        self.loader_internal_data = None # PERSISTED VIA LOADERLIB
 
         ## Non-persisted state.
         # Local:
@@ -591,23 +676,123 @@ class ProgramData(object):
         self.file_path = None
         self.data_types = None
 
-"""
-Need a save workspace function:
-- Replace line_data code match entries with nothing.  Should be regenerated from cached data & index.
+SAVEFILE_VERSION = 1
 
-Need a load_workspace function:
-- Load and populate persisted fields of ProgramData.
-- 
-"""
+def save_savefile(savefile_path, program_data):
+    with open(savefile_path, "wb") as f:
+        f.write(struct.pack("<H", SAVEFILE_VERSION))
+        size_offset = f.tell()
+        f.write(struct.pack("<I", 0))
 
-def load_save_file(savefile_path):
-    data = LOAD(savefile_path)
+        data_start_offset = f.tell()
+        cPickle.dump(program_data.branch_addresses, f, -1)
+        print 0, f.tell()
+        cPickle.dump(program_data.reference_addresses, f, -1)
+        print 1, f.tell()
+        cPickle.dump(program_data.symbols_by_address, f, -1)
+        print 2, f.tell()
+        cPickle.dump(program_data.block_addresses, f, -1)
+        print 3, f.tell()
+        cPickle.dump(program_data.block_line0s, f, -1)
+        print 4, f.tell()
+        cPickle.dump(program_data.block_line0s_dirtyidx, f, -1)
+        print 5, f.tell()
+        cPickle.dump(program_data.dis_name, f, -1)
+        print 6, f.tell()
+        cPickle.dump(program_data.file_name, f, -1)
+        print 7, f.tell()
+        cPickle.dump(program_data.file_size, f, -1)
+        print 8, f.tell()
+        cPickle.dump(program_data.file_checksum, f, -1)
+        print 9, f.tell()
+        cPickle.dump(program_data.loader_system_name, f, -1)
+        print 10, f.tell()
+        cPickle.dump(program_data.loader_segments, f, -1)
+        print 11, f.tell()
+        cPickle.dump(program_data.loader_relocated_addresses, f, -1)
+        print 12, f.tell()
+        cPickle.dump(program_data.loader_relocatable_addresses, f, -1)
+        print 13, f.tell()
+        cPickle.dump(program_data.loader_entrypoint_segment_id, f, -1)
+        print 13, f.tell()
+        cPickle.dump(program_data.loader_entrypoint_offset, f, -1)
+        f.write(struct.pack("<I", len(program_data.blocks)))
+        for block in program_data.blocks:
+            block.write_savefile_data(f)
+        data_end_offset = f.tell()
+
+        # Go back and write the size.
+        f.seek(size_offset, os.SEEK_SET)
+        f.write(struct.pack("<I", data_end_offset - data_start_offset))
+
+        f.seek(data_end_offset, os.SEEK_SET)
+        f.write(struct.pack("<I", 0))
+        loader_data_start_offset = f.tell()
+        system = loaderlib.get_system(program_data.loader_system_name)
+        system.save_savefile_data(f, program_data.loader_internal_data)
+        loader_data_end_offset = f.tell()
+
+        # Go back and write the size.
+        f.seek(data_end_offset, os.SEEK_SET)
+        f.write(struct.pack("<I", loader_data_end_offset - loader_data_start_offset))
+
+
+def load_savefile(savefile_path):
     program_data = ProgramData()
-    # TODO: POPULATE data INTO program_data
+    with open(savefile_path, "rb") as f:
+        savefile_version = struct.unpack("<H", f.read(2))[0]
+        if savefile_version != SAVEFILE_VERSION:
+            logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
+            return None, 0
+
+        localdata_size = struct.unpack("<I", f.read(4))[0]
+
+        data_start_offset = f.tell()
+        program_data.branch_addresses = cPickle.load(f)
+        program_data.reference_addresses = cPickle.load(f)
+        program_data.symbols_by_address = cPickle.load(f)
+        #program_data.blocks = cPickle.load(f)
+        program_data.block_addresses = cPickle.load(f)
+        program_data.block_line0s = cPickle.load(f)
+        program_data.block_line0s_dirtyidx = cPickle.load(f)
+        program_data.dis_name = cPickle.load(f)
+        program_data.file_name = cPickle.load(f)
+        program_data.file_size = cPickle.load(f)
+        program_data.file_checksum = cPickle.load(f)
+        program_data.loader_system_name = cPickle.load(f)
+        program_data.loader_segments = cPickle.load(f)
+        program_data.loader_relocated_addresses = cPickle.load(f)
+        program_data.loader_relocatable_addresses = cPickle.load(f)
+        program_data.loader_entrypoint_segment_id = cPickle.load(f)
+        program_data.loader_entrypoint_offset = cPickle.load(f)
+        num_blocks = struct.unpack("<I", f.read(4))[0]
+        program_data.blocks = [ None ] * num_blocks
+        for i in xrange(num_blocks):
+            program_data.blocks[i] = block = SegmentBlock()
+            block.read_savefile_data(f)
+        data_end_offset = f.tell()
+
+        if localdata_size != data_end_offset - data_start_offset:
+            logger.error("Save-file localdata length mismatch, got: %d wanted: %d", data_end_offset - data_start_offset, localdata_size)
+            return None, 0
+
+        loaderdata_size = struct.unpack("<I", f.read(4))[0]
+
+        loader_data_start_offset = f.tell()
+        system = loaderlib.get_system(program_data.loader_system_name)
+        program_data.loader_internal_data = system.load_savefile_data(f)
+        loader_data_end_offset = f.tell()
+
+        if loaderdata_size != loader_data_end_offset - loader_data_start_offset:
+            logger.error("Save-file loaderdata length mismatch, got: %d wanted: %d", loader_data_end_offset - loader_data_start_offset, loaderdata_size)
+            return None, 0
+
     program_data.data_types = loaderlib.get_system_data_types(program_data.loader_system_name)
+
     for func_name, func in disassemblylib.get_api(program_data.dis_name):
         setattr(program_data, "dis_"+ func_name +"_func", func)
 
+    return program_data, get_line_count(program_data)
 
 def load_file(file_path):
     result = loaderlib.load_file(file_path)
@@ -621,8 +806,8 @@ def load_file(file_path):
     program_data.loader_system_name = file_info.system.system_name
 
     # Extract useful information from file loading process.
-    program_data.file_info = file_info
     program_data.data_types = data_types
+    program_data.loader_internal_data = file_info.get_savefile_data()
 
     program_data.loader_entrypoint_segment_id = file_info.entrypoint_segment_id
     program_data.loader_entrypoint_offset = file_info.entrypoint_offset
@@ -647,7 +832,7 @@ def load_file(file_path):
         block = SegmentBlock()
         if loaderlib.is_segment_type_bss(segments, segment_id):
             block.flags |= BLOCK_FLAG_ALLOC
-        set_data_type(block, DATA_TYPE_LONGWORD)
+        set_block_data_type(block, DATA_TYPE_LONGWORD)
         block.segment_id = segment_id
 
         block.segment_offset = 0
@@ -661,7 +846,7 @@ def load_file(file_path):
         if segment_length > data_length:
             block = SegmentBlock()
             block.flags |= BLOCK_FLAG_ALLOC
-            set_data_type(block, DATA_TYPE_LONGWORD)
+            set_block_data_type(block, DATA_TYPE_LONGWORD)
             block.segment_id = segment_id
             block.address = address + data_length
             block.segment_offset = data_length
@@ -706,12 +891,9 @@ def load_file(file_path):
                     split_block(program_data, address)
                 continue
             # Split a block off at the processing point.
-            new_block, block_idx = split_block(program_data, address)
-            new_block.flags |= block.flags & BLOCK_FLAG_PROCESSED
-            block = new_block
+            block, block_idx = split_block(program_data, address)
 
         if block.flags & BLOCK_FLAG_PROCESSED:
-            #logger.debug("Address already processed: %X", address)
             continue
 
         block.flags |= BLOCK_FLAG_PROCESSED
@@ -733,52 +915,63 @@ def load_file(file_path):
             if bytes_consumed + bytes_matched > block.length:
                 logger.error("unable to disassemble due to a block length overrun at %X (started at %X)", address + bytes_consumed, address)
                 break
-            line_data.append(match)
+            line_data.append((SLD_INSTRUCTION, match))
             bytes_consumed += bytes_matched
             found_terminating_instruction = program_data.dis_is_final_instruction_func(match)
             if found_terminating_instruction:
                 break
 
+        # Discard any unprocessed block / jump over isolatible unprocessed instructions.
+        if bytes_consumed < block.length:
+            new_code_address = None
+            if bytes_consumed == 0:
+                # If we encountered an unknown instruction at the start of a block.
+                if data_bytes_to_skip:
+                    # We'll split at this address, leaving the current block as a processed longword block.
+                    new_code_address = address + data_bytes_to_skip
+                else:
+                    logger.error("Skipping block at %X with no code (length: %X)", data_offset_start, block.length)
+            else:
+                trailing_block, discard = split_block(program_data, address + bytes_consumed)
+                set_block_data_type(trailing_block, DATA_TYPE_LONGWORD)
+                # If an unknown instruction was encountered.
+                if not found_terminating_instruction:
+                    trailing_block.flags |= BLOCK_FLAG_PROCESSED
+                    # If code resumes after analysis determines we can skip the unknown instruction as data.
+                    if data_bytes_to_skip:
+                        new_code_address = address + bytes_consumed + data_bytes_to_skip
+            if new_code_address is not None:
+                trailing_block, trailing_block_idx = split_block(program_data, new_code_address)
+                set_block_data_type(trailing_block, DATA_TYPE_LONGWORD)
+                if new_code_address not in disassembly_checklist:
+                    disassembly_offsets.insert(0, new_code_address)
+
         if len(line_data) == 0:
             continue
 
-        # Discard any unprocessed block.
-        if bytes_consumed < block.length:
-            trailing_block, trailing_block_idx = split_block(program_data, address + bytes_consumed)
-            set_data_type(trailing_block, DATA_TYPE_LONGWORD)
-            if not found_terminating_instruction:
-                trailing_block.flags |= BLOCK_FLAG_PROCESSED
-                # May have to split again but hint for code disassembly.
-                if data_bytes_to_skip:
-                    new_code_address = address + bytes_consumed + data_bytes_to_skip
-                    trailing_block, trailing_block_idx = split_block(program_data, new_code_address)
-                    set_data_type(trailing_block, DATA_TYPE_LONGWORD)
-                    if new_code_address not in disassembly_checklist:
-                        disassembly_offsets.insert(0, new_code_address)
-
-        set_data_type(block, DATA_TYPE_CODE)
+        set_block_data_type(block, DATA_TYPE_CODE)
         block.line_data = line_data
         calculate_line_count(program_data, block)
         disassembly_checklist[block.address] = None
 
         # Extract any addresses which are referred to, for later use.
-        for match in line_data:
-            for match_address, flags in program_data.dis_get_match_addresses_func(match).iteritems():
+        for type_id, entry in line_data:
+            for match_address, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
                 if flags & 1: # MAF_CODE
                     if match_address not in disassembly_checklist:
                         disassembly_offsets.insert(0, match_address)
-                    insert_branch_address(program_data, match_address, match.pc-2)
+                    insert_branch_address(program_data, match_address, entry.pc-2)
                 elif flags & 2: # MAF_ABSOLUTE
                     if match_address in program_data.loader_relocated_addresses:
                         search_address = match_address
-                        while search_address < match_address + match.num_bytes:
+                        while search_address < match_address + entry.num_bytes:
                             if search_address in program_data.loader_relocatable_addresses:
-                                insert_reference_address(program_data, match_address, match.pc-2)
-                                # print "ABS REF LOCATION: %X FOUND Imm ADDRESS %X INS %s" % (match.pc, match_address, match.specification.key)
+                                insert_reference_address(program_data, match_address, entry.pc-2)
+                                # print "ABS REF LOCATION: %X FOUND Imm ADDRESS %X INS %s" % (entry.pc, match_address, entry.specification.key)
                                 break
                             search_address += 1
                 else:
-                    insert_reference_address(program_data, match_address, match.pc-2)
+                    insert_reference_address(program_data, match_address, entry.pc-2)
 
     # Gather together all the addresses which need to have symbols.
     symbol_addresses = program_data.loader_relocated_addresses.copy()
@@ -799,10 +992,9 @@ def load_file(file_path):
             insert_symbol(program_data, address, label)
 
     recalculate_line_count_index(program_data)
-    line_count = program_data.block_line0s[-1] + program_data.blocks[-1].line_count
-    line_count += END_INSTRUCTION_LINES # blank line, then "end" instruction
-    return program_data, line_count
-    
+    return program_data, get_line_count(program_data)
+
+
 
 if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)

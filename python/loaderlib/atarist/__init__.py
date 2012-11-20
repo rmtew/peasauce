@@ -25,16 +25,22 @@ class System(object):
     def get_arch_name(self):
         return "m68k"
 
-    def load_file(self, file_info, data_types):
-        return prgfile.load_file(file_info, data_types)
+    def load_input_file(self, file_info, data_types):
+        return prgfile.load_input_file(file_info, data_types)
+
+    def load_savefile_data(self, f):
+        return prgfile.load_savefile_data(f)
+
+    def save_savefile_data(self, f, data):
+        return prgfile.save_savefile_data(f, data)
 
     def print_summary(self, file_info):
         prgfile.print_summary(file_info)
 
-    def has_section_headers(self):
+    def has_segment_headers(self):
         return False
 
-    def get_section_header(self, file_info, segment_id):
+    def get_segment_header(self, file_info, segment_id):
         return "this section header should never be seen"
 
     def get_data_instruction_string(self, is_bss_segment, with_file_data):

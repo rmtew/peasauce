@@ -38,6 +38,9 @@ def _generate_module_data():
         system.system_name = system_name
 _generate_module_data()
 
+def get_system(system_name):
+    return systems_by_name[system_name]
+
 def get_system_data_types(system_name):
     system = systems_by_name[system_name]
     return DataTypes(system.big_endian)
@@ -46,7 +49,7 @@ def load_file(file_path):
     for system_name, system in systems_by_name.iteritems():
         file_info = FileInfo(system, file_path)
         data_types = get_system_data_types(system_name)
-        if system.load_file(file_info, data_types):
+        if system.load_input_file(file_info, data_types):
             return file_info, data_types
 
 
@@ -125,6 +128,18 @@ def relocate_segment_data(segments, data_types, relocations, relocatable_address
                 data[local_offset:local_offset+4] = data_types.uint32_bytes(address)
 
 
+def has_segment_headers(system_name):
+    return get_system(system_name).has_segment_headers()
+
+def get_segment_header(system_name, segment_id, data):
+    return get_system(system_name).get_segment_header(segment_id, data)
+
+def get_data_instruction_string(system_name, segments, segment_id, with_file_data):
+    segment_type = get_segment_type(segments, segment_id)
+    is_bss_segment = segment_type == SEGMENT_TYPE_BSS
+    return get_system(system_name).get_data_instruction_string(is_bss_segment, with_file_data)
+
+
 class DataTypes(object):
     def __init__(self, big_endian):
         self.big_endian = big_endian
@@ -183,7 +198,8 @@ class DataTypes(object):
 
 class FileInfo(object):
     """ The custom system data for the loaded file. """
-    file_data = None
+    internal_data = None
+    savefile_data = None
 
     def __init__(self, system, file_path):
         self.system = system
@@ -202,8 +218,17 @@ class FileInfo(object):
 
     ## Segment registration related operations
 
-    def set_file_data(self, file_data):
-        self.file_data = file_data
+    def set_internal_data(self, file_data):
+        self.internal_data = file_data
+
+    def get_internal_data(self):
+        return self.internal_data
+
+    def set_savefile_data(self, file_data):
+        self.savefile_data = file_data
+
+    def get_savefile_data(self):
+        return self.savefile_data
 
     def print_summary(self):
         self.system.print_summary(self)
@@ -246,13 +271,3 @@ class FileInfo(object):
 
     ## Segment querying related operations
 
-    def has_section_headers(self):
-        return self.system.has_section_headers()
-
-    def get_section_header(self, segment_id):
-        return self.system.get_section_header(self, segment_id)
-
-    def get_data_instruction_string(self, segment_id, with_file_data):
-        segment_type = get_segment_type(self.segments, segment_id)
-        is_bss_segment = segment_type == SEGMENT_TYPE_BSS
-        return self.system.get_data_instruction_string(is_bss_segment, with_file_data)
