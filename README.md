@@ -20,8 +20,8 @@ Peasauce can currently do the following:
 
 * Load and attempt to disassemble Amiga executable files.
 * Load and attempt to disassemble Atari ST executable files.
-* Load and attempt to disassemble X60000 executable files.
-* Attempt to disassemble loaded M60000 code
+* Load and attempt to disassemble X68000 executable files.
+* Attempt to disassemble loaded M68000 code
 
 Note that there are limitations, files which include unsupported assembly code or use special executable file features may among other things not get loaded, or disassembled fully.
 
