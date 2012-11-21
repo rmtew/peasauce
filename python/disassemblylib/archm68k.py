@@ -238,7 +238,9 @@ II_TEXT = 3
 II_ANDMASK = 4
 II_CMPMASK = 5
 II_EXTRAWORDS = 6
-II_LENGTH = 7
+II_SRCEAMASK = 7
+II_DSTEAMASK = 8
+II_LENGTH = 9
 
 IF_000 = 1<<0
 IF_010 = 1<<1
@@ -271,7 +273,7 @@ def _process_instruction_info():
         _list = [
             [ "1100DDD100000SSS", "ABCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
             [ "1100DDD100001SSS", "ABCD PreARi:(Rn=S),PreARi:(Rn=D)",      IF_000, "Add Decimal With Extend (memory)", ],
-            [ "1101DDD0zzsssSSS", "ADD.z:(z=z) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}, DR:(Rn=D)",             IF_000, "Add", ],
+            [ "1101DDD0zzsssSSS", "ADD.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",             IF_000, "Add", ],
             [ "1101DDD1zzsssSSS", "ADD.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",             IF_000, "Add", ],
             [ "1101DDD011sssSSS", "ADDA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
             [ "1101DDD111sssSSS", "ADDA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
@@ -402,13 +404,14 @@ def _process_instruction_info():
             entry = _list_old.pop()
             if " " in entry[II_NAME]:
                 # INSTR.z OP, OP
-                entry_name, entry_name_suffix = entry[II_NAME].split(" ", 1)
-                entry_name_suffix = " "+ entry_name_suffix
+                entry_name, operands_string = entry[II_NAME].split(" ", 1)
+                entry_name_suffix = " "+ operands_string
             else:
                 # INSTR.z
                 entry_name = entry[II_NAME]
-                entry_name_suffix = ""
+                entry_name_suffix = operands_string = ""
 
+            # Size-based processing.
             specification = _make_specification(entry_name)
             if "z" in specification.mask_char_vars:
                 mask_char_vars = specification.mask_char_vars.copy()
@@ -440,7 +443,6 @@ def _process_instruction_info():
 
         # Pass 2: Sort all entries by known bits to reduce hitting matches with unknown bits first.
         #         Also inject calculated columns.
-        @memoize
         def make_operand_mask(mask_string):
             and_mask = cmp_mask = 0
             for c in mask_string:
@@ -459,10 +461,12 @@ def _process_instruction_info():
 
             # Ensure pre-calculated columns have space present and precalculate some useful information.
             entry.extend([ None ] * (II_LENGTH - len(entry)))
+
             # Matching and comparison masks.
             and_mask, cmp_mask = make_operand_mask(operand_mask)
             entry[II_ANDMASK] = and_mask
             entry[II_CMPMASK] = cmp_mask
+
             # Extra word needs.
             max_extra_words = 0
             line_bits = entry[II_NAME].split(" ", 1)
@@ -483,6 +487,20 @@ def _process_instruction_info():
                                 if extra_words > max_extra_words:
                                     max_extra_words = extra_words
             entry[II_EXTRAWORDS] = max_extra_words
+
+            # EA mask generation.
+            name_bits = entry[II_NAME].split(" ", 1)
+            if len(name_bits) > 1:
+                for i, operand_string in enumerate(name_bits[1].split(",")):
+                    mask = 0
+                    spec = _make_specification(operand_string)
+                    if spec.filter_keys is not None:
+                        for ea_key in spec.filter_keys:
+                            mask |= 1 << get_EAM_id(ea_key)
+                    if i == 0:
+                        entry[II_SRCEAMASK] = mask
+                    elif i == 1:
+                        entry[II_DSTEAMASK] = mask
 
             # Sort..
             sort_key = ""
@@ -571,10 +589,9 @@ class MatchOpcode(object):
     vars = None
     rl_bits = None
 
-@memoize
-def _resolve_specific_ea_key(mode_bits, register_bits):
-    for line in EffectiveAddressingModes:
-        if line[EAMI_MODE] == mode_bits:
+def _resolve_specific_ea_key(mode_bits, register_bits, operand_ea_mask):
+    for i, line in enumerate(EffectiveAddressingModes):
+        if operand_ea_mask & (1 << i) and line[EAMI_MODE] == mode_bits:
             if line[EAMI_REG] != "Rn" and line[EAMI_REG] != register_bits:
                 continue
             return line[EAMI_LABEL]
@@ -668,9 +685,9 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             return None
         T2_key = T2.specification.key
         if T2_key == "EA":
-            T2_key = _resolve_specific_ea_key(T2.vars["mode"], T2.vars["register"])
+            T2_key = _resolve_specific_ea_key(T2.vars["mode"], T2.vars["register"], M.table_ea_masks[1-operand_idx])
             if T2_key is None:
-                logger.error("_decode_operand$%X: failed to resolve EA key mode:%s register:%s", M.pc, number2binary(T2.vars["mode"]), number2binary(T2.vars["register"]))
+                logger.debug("_decode_operand$%X: failed to resolve EA key mode:%s register:%s operand: %d instruction: %s ea_mask: %X", M.pc, number2binary(T2.vars["mode"]), number2binary(T2.vars["register"]), operand_idx, M.specification.key, M.table_ea_masks[1-operand_idx])
                 return None
         if T2_key == "PreARi":
             mask = 0x8000
@@ -715,10 +732,9 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
     operand_key = specific_key = T.specification.key
 
     if specific_key == "EA":
-        specific_key = T.key = _resolve_specific_ea_key(T.vars["mode"], T.vars["register"])
+        specific_key = T.key = _resolve_specific_ea_key(T.vars["mode"], T.vars["register"], M.table_ea_masks[operand_idx])
         if specific_key is None:
-            # Could be F-Line exception, should check modes
-            logger.error("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", M.pc, M.specification.key, number2binary(T.vars["mode"]), number2binary(T.vars["register"]))
+            #logger.debug("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", M.pc, M.specification.key, number2binary(T.vars["mode"]), number2binary(T.vars["register"]))
             return None
         T.vars["Rn"] = T.vars["register"]
 
@@ -737,12 +753,12 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             else:
                 # Presumably an F-line instruction.
                 return None
-                
-            try:
-                value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
-            except Exception:
-                print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
-                raise
+
+            #try:
+            value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
+            #except Exception:
+            #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
+            #    raise
             if value is None: # Disassembly failure.
                 logger.error("Failed to fetch EA/Imm data")
                 return None
@@ -793,6 +809,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
                 base_displacement, data_idx = _get_long(data, data_idx)
             if base_displacement is None: # Disassembly failure.
                 return None
+            # TODO: Finish implementation.
             raise RuntimeError("Full displacement incomplete", M.specification.key)
         else:
             T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
@@ -837,6 +854,7 @@ def _match_instructions(data, data_idx, data_abs_idx):
             M.table_text = t[II_TEXT]
             M.table_mask = mask_string
             M.table_extra_words = t[II_EXTRAWORDS]
+            M.table_ea_masks = (t[II_SRCEAMASK], t[II_DSTEAMASK])
 
             M.format = instruction_parts[0]
             M.specification = _make_specification(M.format)

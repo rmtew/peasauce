@@ -18,6 +18,12 @@
 
 """
 
+PySide eccentricities:
+- After populating the disassembly view, it is not possible to tell it to select a row
+  and scroll to it immediately.  Nothing will happen.  It needs to render first, so in
+  order to do this, the paint event needs to be caught and the scrolling and selecting
+  done there.
+
 http://doc.qt.digia.com/4.6/richtext-html-subset.html
 http://qt-project.org/faq/answer/how_can_i_programatically_find_out_which_rows_items_are_visible_in_my_view
 http://qt-project.org/wiki/Signals_and_Slots_in_PySide
@@ -330,6 +336,8 @@ class MainWindow(QtGui.QMainWindow):
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
+        self.goto_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
+        self.goto_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
         self.choose_font_action = QtGui.QAction("Select disassembly font", self, statusTip="Change the font used in the disassembly view", triggered=self.menu_settings_choose_font)
 
         self.file_menu = self.menuBar().addMenu("&File")
@@ -341,6 +349,8 @@ class MainWindow(QtGui.QMainWindow):
 
         self.search_menu = self.menuBar().addMenu("&Search")
         self.search_menu.addAction(self.goto_address_action)
+        self.search_menu.addAction(self.goto_previous_data_block_action)
+        self.search_menu.addAction(self.goto_next_data_block_action)
 
         self.viewMenu = self.menuBar().addMenu("&View")
 
@@ -398,6 +408,7 @@ class MainWindow(QtGui.QMainWindow):
         # Skip lines which are purely for visual effect.
         if address is None:            
             return
+        logger.debug("goto line: %d address: %X", line_idx, address)
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -411,6 +422,26 @@ class MainWindow(QtGui.QMainWindow):
                 new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
                 self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
                 self.list_table.selectRow(new_line_idx)
+
+    def menu_search_goto_previous_data_block(self):
+        line_idx = self.list_table.currentIndex().row()
+        if line_idx == -1:
+            line_idx = 0
+        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
+        if new_line_idx is None:
+            return
+        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+        self.list_table.selectRow(new_line_idx)
+
+    def menu_search_goto_next_data_block(self):
+        line_idx = self.list_table.currentIndex().row()
+        if line_idx == -1:
+            line_idx = 0
+        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, 1)
+        if new_line_idx is None:
+            return
+        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+        self.list_table.selectRow(new_line_idx)
 
     def menu_settings_choose_font(self):
         # TODO: Could identify the current font and pass it in to be initial selection.
@@ -468,9 +499,12 @@ class MainWindow(QtGui.QMainWindow):
             # ...
             address = operand_addresses[0]
             next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
-            self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-            self.list_table.selectRow(next_line_number)
-            logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
+            if next_line_number is not None:
+                self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+                self.list_table.selectRow(next_line_number)
+                logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
+            else:
+                logger.error("view push symbol for address %06X unable to resolve line number." % address)
         elif len(operand_addresses) == 2:
             logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
         else:
@@ -526,7 +560,7 @@ class MainWindow(QtGui.QMainWindow):
         progressDialog.setCancelButtonText("&Cancel")
         progressDialog.setRange(0, 100)
         progressDialog.setWindowTitle("Loading a File")
-        progressDialog.setMinimumDuration(1)
+        progressDialog.setMinimumDuration(0)
         progressDialog.setAutoClose(True)
         progressDialog.setWindowModality(QtCore.Qt.WindowModal)
 
@@ -550,8 +584,10 @@ class MainWindow(QtGui.QMainWindow):
         progressDialog.canceled.connect(canceled)
 
         # Wait until cancel or the work is complete.
+        t0 = time.time()
         while self.progressDialog is not None:
             QtGui.qApp.processEvents()
+        logger.debug("Loading file finished in %0.1fs", time.time() - t0)
 
     def attempt_display_file(self, result):
         # This isn't really good enough, as long loading files may send mixed signals.

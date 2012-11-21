@@ -64,8 +64,9 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
-* Disassembly: If f-line instruction has an invalid EA mode, disassemble as "dc.w $Fxxx".
-* UI: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* Metadata: Blocks should not be split mid-instruction, instead extra automatic lines should be inserted "label:	*-2" ?  Not sure of markup.
+* Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* Metadata: If symbol address is past end of address space, can't go there, as they are not factored into line numbering.  See "TNT.x" first line.
 
 #### Functionality
 
@@ -73,17 +74,15 @@ This is intended to be a summarised list of points that briefly note intended wo
 * UI: Ala Resource, change the datatype of a block.
 * UI: Ala Resource, edit/override values.
 * UI: Ala Resource, change the numeric base of a value.
-* Disassembly: Collect together program disassembly data for saving and loading, ala .RS files.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
 * Disassembly: Jump table discovery / processing.
-* Disassembly: Verify used EA mode against instructions declared valid list.
 * Disassembly: Research assembler syntax for different platforms, to generalise custom output.
 * Disassembly: Choose use of new or old style assembly syntax.
 * File loading: For Amiga, choose use of "DATA, CHIP" or "DATA_C" in section headers.
-* UI: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
-* UI: Add leading comments that detail file type, processor, entry point offset.. maybe more.
+* Metadata: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
+* Metadata: Add leading comments that detail file type, processor, entry point offset.. maybe more.
 
 #### Technical Debt
 
