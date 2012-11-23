@@ -335,6 +335,12 @@ class MainWindow(QtGui.QMainWindow):
         self.save_work_action = QtGui.QAction("&Save work", self, statusTip="Save current work", triggered=self.interaction_request_save_work)
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
+
+        self.edit_set_datatype_code_action = QtGui.QAction("Set datatype code", self, statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
+        self.edit_set_datatype_32bit_action = QtGui.QAction("Set datatype 32 bit", self, statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
+        self.edit_set_datatype_16bit_action = QtGui.QAction("Set datatype 16 bit", self, statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
+        self.edit_set_datatype_8bit_action = QtGui.QAction("Set datatype 8 bit", self, statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
+
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
         self.goto_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
         self.goto_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
@@ -346,6 +352,12 @@ class MainWindow(QtGui.QMainWindow):
         self.file_menu.addAction(self.export_source_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
+
+        self.edit_menu = self.menuBar().addMenu("&Edit")
+        self.edit_menu.addAction(self.edit_set_datatype_code_action)
+        self.edit_menu.addAction(self.edit_set_datatype_32bit_action)
+        self.edit_menu.addAction(self.edit_set_datatype_16bit_action)
+        self.edit_menu.addAction(self.edit_set_datatype_8bit_action)
 
         self.search_menu = self.menuBar().addMenu("&Search")
         self.search_menu.addAction(self.goto_address_action)
@@ -408,7 +420,6 @@ class MainWindow(QtGui.QMainWindow):
         # Skip lines which are purely for visual effect.
         if address is None:            
             return
-        logger.debug("goto line: %d address: %X", line_idx, address)
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -420,6 +431,7 @@ class MainWindow(QtGui.QMainWindow):
                     new_address = int(text)
             if new_address is not None:
                 new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
+                logger.debug("goto line: %d address: $%X", new_line_idx, new_address)
                 self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
                 self.list_table.selectRow(new_line_idx)
 
@@ -524,7 +536,47 @@ class MainWindow(QtGui.QMainWindow):
         else:
             logger.error("view pop symbol has empty stack and nowhere to go to.")
 
+    def interaction_set_datatype_code(self):
+        address = self.get_current_address()
+        if address is None:
+            return
+        self.set_data_type(address, disassembly.DATA_TYPE_CODE)
+
+    def interaction_set_datatype_32bit(self):
+        address = self.get_current_address()
+        if address is None:
+            return
+        self.set_data_type(address, disassembly.DATA_TYPE_LONGWORD)
+
+    def interaction_set_datatype_16bit(self):
+        address = self.get_current_address()
+        if address is None:
+            return
+        self.set_data_type(address, disassembly.DATA_TYPE_WORD)
+
+    def interaction_set_datatype_8bit(self):
+        address = self.get_current_address()
+        if address is None:
+            return
+        self.set_data_type(address, disassembly.DATA_TYPE_BYTE)
+
     ## MISCELLANEIA
+
+    def set_data_type(self, address, data_type):
+        disassembly.set_data_type_at_address(self.disassembly_data, address, data_type)
+
+    def get_current_address(self):
+        # Place current address on the stack.
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            logger.debug("Failed to get current address, no selected lines.")
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        # Whether a non-disassembly "readability" line was selected.
+        if current_address is None:
+            logger.debug("Failed to get current address, no address for line.")
+            return
+        return current_address
 
     def _set_setting(self, setting_name, setting_value):
         self._settings[setting_name] = setting_value

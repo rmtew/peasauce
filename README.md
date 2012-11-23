@@ -55,6 +55,11 @@ You should be able to use the user interface to:
 * Load and disassemble a new file.
 * Scroll through a loaded and disassembled file.
 * Change the font used to a smaller or non-proportional one.
+* Edit label names.
+* Change datatype of pieces of disassembled data.
+* Save and load ongoing disassembly work.
+
+Note that the ongoing work save file format is not final, and when it changes, older save files will not be loadable.  For this reason, you should not use this disassembler unless you can deal with that.
 
 ## Future Work
 
@@ -64,14 +69,13 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
-* Metadata: Blocks should not be split mid-instruction, instead extra automatic lines should be inserted "label:	*-2" ?  Not sure of markup.
+* Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
+* Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
-* Metadata: If symbol address is past end of address space, can't go there, as they are not factored into line numbering.  See "TNT.x" first line.
 
 #### Functionality
 
 * Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
-* UI: Ala Resource, change the datatype of a block.
 * UI: Ala Resource, edit/override values.
 * UI: Ala Resource, change the numeric base of a value.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
