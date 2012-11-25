@@ -25,6 +25,10 @@ Peasauce can currently do the following:
 
 Note that there are limitations, files which include unsupported assembly code or use special executable file features may among other things not get loaded, or disassembled fully.
 
+![Editing a label](http://i.imgur.com/cUMLj.png "Editing a label")
+
+![Self-modifying code](http://i.imgur.com/Fyefy.png "Self-modifying code")
+
 ## Licensing
 
 All files that comprise this are released under the GPLv3 license.
