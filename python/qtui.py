@@ -280,6 +280,10 @@ class MainWindow(QtGui.QMainWindow):
         if window_geometry is not None:
             self.restoreGeometry(window_geometry)
 
+        window_state = self._get_setting("window-state")
+        if window_state is not None:
+            self.restoreState(window_state)
+
         ## INITIALISE APPLICATION STATE
 
         # State related to having something loaded.
@@ -296,6 +300,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # Persist window layout.
         self._set_setting("window-geometry", self.saveGeometry())
+        self._set_setting("window-state", self.saveState())
 
         # Let the window close.
         event.accept()
@@ -340,7 +345,9 @@ class MainWindow(QtGui.QMainWindow):
         self.edit_set_datatype_32bit_action = QtGui.QAction("Set datatype 32 bit", self, statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
         self.edit_set_datatype_16bit_action = QtGui.QAction("Set datatype 16 bit", self, statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
         self.edit_set_datatype_8bit_action = QtGui.QAction("Set datatype 8 bit", self, statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
+        self.edit_set_datatype_ascii_action = QtGui.QAction("Set datatype ascii", self, statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
 
+        self.search_find = QtGui.QAction("Find..", self, shortcut="Ctrl+F", statusTip="Find some specific text", triggered=self.menu_search_find)
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
         self.goto_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
         self.goto_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
@@ -358,8 +365,10 @@ class MainWindow(QtGui.QMainWindow):
         self.edit_menu.addAction(self.edit_set_datatype_32bit_action)
         self.edit_menu.addAction(self.edit_set_datatype_16bit_action)
         self.edit_menu.addAction(self.edit_set_datatype_8bit_action)
+        self.edit_menu.addAction(self.edit_set_datatype_ascii_action)
 
         self.search_menu = self.menuBar().addMenu("&Search")
+        self.search_menu.addAction(self.search_find)
         self.search_menu.addAction(self.goto_address_action)
         self.search_menu.addAction(self.goto_previous_data_block_action)
         self.search_menu.addAction(self.goto_next_data_block_action)
@@ -374,6 +383,8 @@ class MainWindow(QtGui.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_view_push_symbol)
         # Go back in the browsing stack.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_view_pop_symbol)
+        # Display referring addresses.
+        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols)
         # Edit the name of a label.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol)
 
@@ -411,6 +422,14 @@ class MainWindow(QtGui.QMainWindow):
     def menu_file_quit(self):
         if QtGui.QMessageBox.question(self, "Quit..", "Are you sure you wish to quit?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel):
             self.close()
+
+    def menu_search_find(self):
+        line_idx = self.list_table.currentIndex().row()
+        if line_idx == -1:
+            line_idx = 0
+        text, ok = QtGui.QInputDialog.getText(self, "Find what?", "Text:", QtGui.QLineEdit.Normal, "")
+        if ok and text != '':
+            pass
 
     def menu_search_goto_address(self):
         line_idx = self.list_table.currentIndex().row()
@@ -507,16 +526,7 @@ class MainWindow(QtGui.QMainWindow):
             return
         operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, selected_line_numbers[0])
         if len(operand_addresses) == 1:
-            self.view_address_stack.append(current_address)
-            # ...
-            address = operand_addresses[0]
-            next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
-            if next_line_number is not None:
-                self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-                self.list_table.selectRow(next_line_number)
-                logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
-            else:
-                logger.error("view push symbol for address %06X unable to resolve line number." % address)
+            self.functionality_view_push_address(current_address, operand_addresses[0])
         elif len(operand_addresses) == 2:
             logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
         else:
@@ -535,6 +545,27 @@ class MainWindow(QtGui.QMainWindow):
             self.list_table.selectRow(line_number)
         else:
             logger.error("view pop symbol has empty stack and nowhere to go to.")
+
+    def interaction_view_referring_symbols(self):
+        # Place current address on the stack.
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        # Whether a non-disassembly "readability" line was selected.
+        if current_address is None:
+            return
+        addresses = disassembly.get_referring_addresses(self.disassembly_data, current_address)
+        for address in addresses:
+            logger.debug("%06X: Referring address %06X", current_address, address)
+        # One address -> goto?
+        # Going to an address should push the current.
+        if len(addresses) == 0:
+            logger.warning("No addresses, nothing to go to.")
+        elif len(addresses) == 1:
+            self.functionality_view_push_address(current_address, addresses.pop())
+        else:
+            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
 
     def interaction_set_datatype_code(self):
         address = self.get_current_address()
@@ -560,7 +591,23 @@ class MainWindow(QtGui.QMainWindow):
             return
         self.set_data_type(address, disassembly.DATA_TYPE_BYTE)
 
+    def interaction_set_datatype_ascii(self):
+        address = self.get_current_address()
+        if address is None:
+            return
+        self.set_data_type(address, disassembly.DATA_TYPE_ASCII)
+
     ## MISCELLANEIA
+
+    def functionality_view_push_address(self, current_address, address):
+        self.view_address_stack.append(current_address)
+        next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        if next_line_number is not None:
+            self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+            self.list_table.selectRow(next_line_number)
+            logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
+        else:
+            logger.error("view push symbol for address %06X unable to resolve line number." % address)
 
     def set_data_type(self, address, data_type):
         disassembly.set_data_type_at_address(self.disassembly_data, address, data_type)
@@ -621,6 +668,9 @@ class MainWindow(QtGui.QMainWindow):
         if file_path[-4:].lower() == ".wrk":
             self.thread.add_work(disassembly.load_savefile, file_path)
         else:
+            result = LoadOptionsDialog(file_path).exec_()
+            if result != QtGui.QDialog.Accepted:
+                return
             self.thread.add_work(disassembly.load_file, file_path)
 
         # Initialise the dialog status.
@@ -789,6 +839,121 @@ class MainWindow(QtGui.QMainWindow):
 
     def save_work(self, file_path):
         disassembly.save_savefile(file_path, self.disassembly_data)
+
+
+class LoadOptionsDialog(QtGui.QDialog):
+    def __init__(self, file_path, parent=None):
+        super(LoadOptionsDialog, self).__init__(parent)
+
+        dir_path, file_name = os.path.split(file_path)
+
+        # Attempt to identify the file type.
+        identification_result = loaderlib.identify_file(file_path)
+        if identification_result is not None:
+            file_info, file_details = identification_result
+        else:
+            file_info, file_details = None, {}
+
+        ## Options / information layouts.
+        # File groupbox.
+        file_name_key_label = QtGui.QLabel("Name:")
+        file_name_value_label = QtGui.QLabel(file_name)
+        file_size_key_label = QtGui.QLabel("Size:")
+        file_size_value_label = QtGui.QLabel("%d bytes" % os.path.getsize(file_path))
+        file_hline = QtGui.QFrame()
+        file_hline.setFrameShape(QtGui.QFrame.HLine)
+        file_hline.setFrameShadow(QtGui.QFrame.Sunken)
+        file_hline.setLineWidth(0)
+        file_hline.setMidLineWidth(1)
+
+        file_type_key_label = QtGui.QLabel("Type:")
+        file_type_value_label = QtGui.QLabel(file_details.get("filetype", "-"))
+        file_arch_key_label = QtGui.QLabel("Architecture:")
+        file_arch_value_label = QtGui.QLabel(file_details.get("processor", "-"))
+
+        information_groupbox = QtGui.QGroupBox("File Information")
+        information_layout = QtGui.QGridLayout()
+        information_layout.addWidget(file_name_key_label, 0, 0)
+        information_layout.addWidget(file_name_value_label, 0, 1)
+        information_layout.addWidget(file_size_key_label, 1, 0)
+        information_layout.addWidget(file_size_value_label, 1, 1)
+        information_layout.addWidget(file_hline, 2, 0, 1, 2)
+        information_layout.addWidget(file_type_key_label, 3, 0)
+        information_layout.addWidget(file_type_value_label, 3, 1)
+        information_layout.addWidget(file_arch_key_label, 4, 0)
+        information_layout.addWidget(file_arch_value_label, 4, 1)
+        information_groupbox.setLayout(information_layout)
+
+        # Processing groupbox.
+        load_address = 0
+        entrypoint_address = 0
+        if file_info is not None:
+            load_address = loaderlib.get_load_address(file_info)
+            entrypoint_address = loaderlib.get_entrypoint_address(file_info)
+
+        processing_loadaddress_key_label = QtGui.QLabel("Load address:")
+        processing_loadaddress_value_label = QtGui.QLabel("$%X" % load_address)
+        processing_entryaddress_key_label = QtGui.QLabel("Entrypoint address:")
+        processing_entryaddress_value_label = QtGui.QLabel("$%X" % entrypoint_address)
+        processing_hline1 = QtGui.QFrame()
+        processing_hline1.setFrameShape(QtGui.QFrame.HLine)
+        processing_hline1.setFrameShadow(QtGui.QFrame.Sunken)
+        processing_hline1.setLineWidth(0)
+        processing_hline1.setMidLineWidth(0)
+
+        processing_groupbox = QtGui.QGroupBox("Processing")
+        processing_layout = QtGui.QGridLayout()
+        processing_layout.addWidget(processing_loadaddress_key_label, 0, 0)
+        processing_layout.addWidget(processing_loadaddress_value_label, 0, 1)
+        processing_layout.addWidget(processing_entryaddress_key_label, 1, 0)
+        processing_layout.addWidget(processing_entryaddress_value_label, 1, 1)
+        fill_row_count = information_layout.rowCount() - processing_layout.rowCount() # Need grid spacing to be equal.
+        processing_layout.addWidget(processing_hline1, 2, 0, fill_row_count, 2)
+        processing_groupbox.setLayout(processing_layout)
+
+        # Gather together complete options layout.
+        options_layout = QtGui.QHBoxLayout()
+        options_layout.addWidget(information_groupbox)
+        options_layout.addWidget(processing_groupbox)
+
+        ## Input data copy layout.
+        inputdata_do_radio = QtGui.QRadioButton()
+        inputdata_dont_radio = QtGui.QRadioButton()
+        inputdata_do_short_label = QtGui.QLabel("Saved work SHOULD contain source/input file data.")
+        inputdata_do_long_label = QtGui.QLabel("When you load your saved work, you WILL NOT need to provide the source/input file.")
+        inputdata_dont_short_label = QtGui.QLabel("Saved work SHOULD NOT contain source/input file data.")
+        inputdata_dont_long_label = QtGui.QLabel("When you load your saved work, you WILL need to provide the source/input file.")
+        inputdata_do_radio.setChecked(True)
+
+        inputdata_groupbox = QtGui.QGroupBox("File Options")
+        inputdata_layout = QtGui.QGridLayout()
+        inputdata_layout.addWidget(inputdata_do_radio, 0, 0)
+        inputdata_layout.addWidget(inputdata_do_short_label, 0, 1)
+        inputdata_layout.addWidget(inputdata_do_long_label, 1, 1)
+        inputdata_layout.addWidget(inputdata_dont_radio, 2, 0)
+        inputdata_layout.addWidget(inputdata_dont_short_label, 2, 1)
+        inputdata_layout.addWidget(inputdata_dont_long_label, 3, 1)
+        inputdata_groupbox.setLayout(inputdata_layout)
+
+        ## Buttons layout.
+        load_button = QtGui.QPushButton("Proceed")
+        cancel_button = QtGui.QPushButton("Cancel")
+        self.connect(load_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
+        self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
+
+        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout.addWidget(load_button, QtCore.Qt.AlignRight)
+        buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
+
+        ## Outer layout.
+        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout.addLayout(options_layout)
+        outer_vertical_layout.addWidget(inputdata_groupbox)
+        outer_vertical_layout.addLayout(buttons_layout)
+        self.setLayout(outer_vertical_layout)
+
+        self.setWindowTitle("Disassembly Options")
+        self.setWindowModality(QtCore.Qt.ApplicationModal)
 
 
 def _initialise_logging(window):

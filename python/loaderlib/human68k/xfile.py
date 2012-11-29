@@ -89,6 +89,11 @@ class XFile(object):
     _symbol_table_entries = None
 
 
+def identify_input_file(file_info, data_types):
+    with open(file_info.file_path, "rb") as f:
+        if load_x_file(file_info, data_types, f):
+            return "Sharp X68000 executable"
+
 def load_input_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
         return load_x_file(file_info, data_types, f)

@@ -25,6 +25,9 @@ class System(object):
     def get_arch_name(self):
         return "m68k"
 
+    def identify_input_file(self, file_info, data_types):
+        return xfile.identify_input_file(file_info, data_types)
+
     def load_input_file(self, file_info, data_types):
         return xfile.load_input_file(file_info, data_types)
 

@@ -76,6 +76,11 @@ class HunkFile(object):
     _hunk_segments = None
 
 
+def identify_input_file(file_info, data_types):
+    with open(file_info.file_path, "rb") as f:
+        if load_hunk_file(file_info, data_types, f):
+            return "Amiga hunk-based executable"
+
 def load_input_file(file_info, data_types):
     with open(file_info.file_path, "rb") as f:
         return load_hunk_file(file_info, data_types, f)

@@ -79,10 +79,11 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Functionality
 
-* Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
-* UI: Ala Resource, edit/override values.
+* Functionality/Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
 * UI: Ala Resource, change the numeric base of a value.
+* UI: Ala Resource, edit/override values.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
+* Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
 * Disassembly: Jump table discovery / processing.
@@ -94,12 +95,9 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Technical Debt
 
-* Coding style: Better error propagation, no exception raising on purpose.
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
-* Disassembly: Lots of repeated loops looking for lines by address or address by lines.
-* File loading: Clean up file_info.file_data to only store useful information.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 
 ### Medium Term Tasks

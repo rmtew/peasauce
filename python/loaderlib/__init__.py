@@ -52,6 +52,21 @@ def load_file(file_path):
         if system.load_input_file(file_info, data_types):
             return file_info, data_types
 
+def identify_file(file_path):
+    for system_name, system in systems_by_name.iteritems():
+        file_info = FileInfo(system, file_path)
+        data_types = get_system_data_types(system_name)
+        filetype_name = system.identify_input_file(file_info, data_types)
+        if filetype_name is not None:
+            result = {}
+            result["processor"] = system.get_arch_name()
+            result["filetype"] = filetype_name
+            if system.big_endian:
+                result["endian"] = "big"
+            else:
+                result["endian"] = "little"
+            return file_info, result
+
 
 SEGMENT_TYPE_CODE = 1
 SEGMENT_TYPE_DATA = 2
@@ -93,22 +108,21 @@ def is_segment_type_data(segments, segment_id):
 def is_segment_type_bss(segments, segment_id):
     return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_BSS
 
-def cache_segment_data(file_path, segments):
-    for segment_id in range(len(segments)):
-        data = None
-        file_offset = get_segment_data_file_offset(segments, segment_id)
-        # No data for segments that have no data..
-        if file_offset != -1:
-            file_length = get_segment_data_length(segments, segment_id)
+def cache_segment_data(file_path, segments, segment_id):
+    data = None
+    file_offset = get_segment_data_file_offset(segments, segment_id)
+    # No data for segments that have no data..
+    if file_offset != -1:
+        file_length = get_segment_data_length(segments, segment_id)
 
-            f = open(file_path, "rb")
-            f.seek(file_offset, os.SEEK_SET)
-            file_data = f.read(file_length)
-            if len(file_data) == file_length:
-                data = bytearray(file_data)
-            else:
-                logger.error("Unable to cache segment %d data, got %d bytes, wanted %d", segment_id, len(file_data), file_length)
-        segments[segment_id][SI_CACHED_DATA] = data
+        f = open(file_path, "rb")
+        f.seek(file_offset, os.SEEK_SET)
+        file_data = f.read(file_length)
+        if len(file_data) == file_length:
+            data = bytearray(file_data)
+        else:
+            logger.error("Unable to cache segment %d data, got %d bytes, wanted %d", segment_id, len(file_data), file_length)
+    segments[segment_id][SI_CACHED_DATA] = data
 
 def relocate_segment_data(segments, data_types, relocations, relocatable_addresses, relocated_addresses):
     for segment_id in range(len(segments)):
@@ -138,6 +152,13 @@ def get_data_instruction_string(system_name, segments, segment_id, with_file_dat
     segment_type = get_segment_type(segments, segment_id)
     is_bss_segment = segment_type == SEGMENT_TYPE_BSS
     return get_system(system_name).get_data_instruction_string(is_bss_segment, with_file_data)
+
+
+def get_load_address(file_info):
+    return 0
+
+def get_entrypoint_address(file_info):
+    return get_segment_address(file_info.segments, file_info.entrypoint_segment_id) + file_info.entrypoint_offset
 
 
 class DataTypes(object):

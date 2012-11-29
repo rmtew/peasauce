@@ -29,6 +29,9 @@ class System(object):
     def load_input_file(self, file_info, data_types):
         return hunkfile.load_input_file(file_info, data_types)
 
+    def identify_input_file(self, file_info, data_types):
+        return hunkfile.identify_input_file(file_info, data_types)
+
     def load_savefile_data(self, f):
         return hunkfile.load_savefile_data(f)
 

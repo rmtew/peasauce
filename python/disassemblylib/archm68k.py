@@ -760,7 +760,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
             #    raise
             if value is None: # Disassembly failure.
-                logger.error("Failed to fetch EA/Imm data")
+                logger.debug("Failed to fetch EA/Imm data")
                 return None
             T.vars["xxx"] = value
         elif operand_key == "Imm" and "z" in T.vars and "xxx" not in T.vars:
@@ -774,7 +774,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
         if T.vars["xxx"] == "+z":
             value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
             if value is None: # Disassembly failure.
-                logger.error("Failed to fetch xxx/+z data")
+                logger.debug("Failed to fetch xxx/+z data")
                 return None
             T.vars["xxx"] = value
 
@@ -782,7 +782,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
     if read_string == "EW":
         ew1, data_idx = _get_word(data, data_idx)
         if ew1 is None: # Disassembly failure.
-            logger.error("Failed to extension word1")
+            logger.debug("Failed to extension word1")
             return None
 
         register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
@@ -810,7 +810,9 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             if base_displacement is None: # Disassembly failure.
                 return None
             # TODO: Finish implementation.
-            raise RuntimeError("Full displacement incomplete", M.specification.key)
+            logger.debug("Skipping full extension word for instruction '%s'", M.specification.key)
+            return None
+            # raise RuntimeError("Full displacement incomplete", M.specification.key)
         else:
             T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
     elif read_string:
