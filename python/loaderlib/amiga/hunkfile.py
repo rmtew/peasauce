@@ -17,15 +17,43 @@
 """
 
 """
-Todo:
-o A range of hunk handling is already written in the old unused code below.  Incorporate it (with testing).
-  - HUNK_UNIT, ?
-  - HUNK_LIB, ?
-  - HUNK_INDEX, ?
-  - HUNK_DEBUG, handles many variations
-  - HUNK_SYMBOL, complete
-  - HUNK_NAME, ?
-  - HUNK_EXT, ?
+Valid hunks:
+- Load files:
+  o HUNK_NAME (v31)
+  o HUNK_CODE (v31)
+  o HUNK_DATA (v31)
+  o HUNK_BSS (v31)
+  o HUNK_RELOC32 (v31)
+  o HUNK_SYMBOL (v31)
+  o HUNK_DEBUG (v31)
+  o HUNK_END (v31)
+  o HUNK_OVERLAY (v31)
+  o HUNK_BREAK (v31)
+  o HUNK_DREL32 (v31)
+  o HUNK_RELOC32SHORT (v31)
+  o HUNK_ABSRELOC16 (v31)
+
+- Library file (orginal):
+  o HUNK_UNIT
+  o HUNK_NAME
+  o HUNK_CODE
+  o HUNK_DATA
+  o HUNK_BSS
+  o HUNK_RELOC32
+  o HUNK_EXT
+  o HUNK_DEBUG
+  o HUNK_END
+
+- Library file (new):
+  o HUNK_LIB
+  ...
+
+Special hunk handling implementation todo list:
+- HUNK_LIB
+- HUNK_UNIT
+- HUNK_NAME (hunk combining)
+- HUNK_OVERLAY
+- HUNK_BREAK
 
 Notes:
 o HUNK_UNIT: An object file, as created by compilation, is composed of program units.
@@ -134,6 +162,7 @@ def load_hunk_file(file_info, data_types, f):
             return False
 
         relocations = []
+        symbols = []
         hunk_id = data_types.uint32(f.read(4))
         while hunk_id != HUNK_END:
             if hunk_id == HUNK_RELOC32:
@@ -160,12 +189,25 @@ def load_hunk_file(file_info, data_types, f):
                     relocations.append((target_hunk_id, offsets))
                 if f.tell() & 2:
                     f.seek(2, os.SEEK_CUR)
+            elif hunk_id == HUNK_SYMBOL:
+                symbol_name = _read_hunk_string(file_info, data_types, f)
+                while symbol_name:
+                    symbol_value = structures.read_uint32(f)
+                    symbols.append((symbol_value, symbol_name, False))
+                    symbol_name = _read_hunk_string(file_info, data_types, f)
+            elif hunk_id == HUNK_DEBUG:
+                # Skip this information.  Handling is lower in this file.
+                num_longwords = structures.read_uint32(f)
+                f.seek(4 * num_longwords, os.SEEK_CUR)
+            elif hunk_id == HUNK_NAME:
+                # Optional.  Hunks with the same name are combined.
+                hunk_name = self._read_hunk_string(f)
             else:
                 logger.debug("hunkfile.py: _process_file: Unexpected secondary segment type: %X %s", hunk_id, HUNK_NAMES.get(hunk_id, "?"))
                 return False
             hunk_id = data_types.uint32(f.read(4))
 
-        l.append((segment_hunk_id, data_offset, data_length, relocations))
+        l.append((segment_hunk_id, data_offset, data_length, relocations, symbols))
 
     data._hunk_segments = l
 
@@ -181,7 +223,7 @@ def load_hunk_file(file_info, data_types, f):
         data_length = hunk_segment[2]
         relocations = hunk_segment[3]
         segment_size = header_segment[1]
-        symbols = {}
+        symbols = hunk_segment[4]
 
         if hunk_id == HUNK_CODE:
             file_info.add_code_segment(data_offset, data_length, segment_size, relocations, symbols)
@@ -207,12 +249,12 @@ def get_hunk_memory_flags(data, segment_id):
 
 SAVEFILE_VERSION = 1
 
-def save_savefile_data(f, data):
+def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
     cPickle.dump(data, f, -1)
     return True
 
-def load_savefile_data(f):
+def load_project_data(f):
     savefile_version = struct.unpack("<H", f.read(2))[0]
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
@@ -392,19 +434,9 @@ class HunkFile(object):
                             text += "..."
                         print text
                         raise RuntimeError("New debug", num_longwords, debug_id, debug_base, hex(_pre_file_offset))
-            elif hunk_id == HUNK_SYMBOL:
-                symbol_name = self._read_hunk_string(f)
-                symbol_value = 0
-                if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                    print "  HUNK_SYMBOL"
-                    print "    SYMBOL", "\"%s\"=%x" % (symbol_name, symbol_value)
-                while symbol_name:
-                    symbol_value = structures.read_uint32(f)
-                    if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "    SYMBOL", "\"%s\"=%x" % (symbol_name, symbol_value)
-                    symbol_name = self._read_hunk_string(f)                
             elif hunk_id == HUNK_NAME:
-                symbol_name = self._read_hunk_string(f)
+                # Optional.  Hunks with the same name are combined.
+                hunk_name = self._read_hunk_string(f)
                 if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
                     print "  HUNK_NAME", symbol_name
             elif hunk_id == HUNK_EXT:

@@ -133,7 +133,7 @@ def write_segment_list_entry(f, v):
 
 SAVEFILE_VERSION = 1
 
-def save_savefile(savefile_path, program_data):
+def save_project(savefile_path, program_data):
     program_data.savefile_path = savefile_path
 
     t0 = time.time()
@@ -164,6 +164,11 @@ def save_savefile(savefile_path, program_data):
         if True:
             item_length = f.tell() - item_offset
             logger.debug("save item length: %d name: post_segment_addresses", item_length)
+            item_offset = f.tell()
+        persistence.write_uint32(f, program_data.flags)
+        if True:
+            item_length = f.tell() - item_offset
+            logger.debug("save item length: %d name: dis_name", item_length)
             item_offset = f.tell()
         persistence.write_string(f, program_data.dis_name)
         if True:
@@ -234,7 +239,7 @@ def save_savefile(savefile_path, program_data):
 
         loader_data_start_offset = f.tell()
         system = loaderlib.get_system(program_data.loader_system_name)
-        system.save_savefile_data(f, program_data.loader_internal_data)
+        system.save_project_data(f, program_data.loader_internal_data)
         loader_data_end_offset = f.tell()
 
         # Go back and write the size.
@@ -245,7 +250,7 @@ def save_savefile(savefile_path, program_data):
     logger.info("Saved working data to: %s (length: %d, time taken: %0.1fs)", savefile_path, loader_data_end_offset, seconds_taken)
 
 
-def load_savefile(savefile_path):
+def load_project(savefile_path):
     t0 = time.time()
     logger.debug("loading 'savefile' from: %s", savefile_path)
 
@@ -263,6 +268,7 @@ def load_savefile(savefile_path):
         program_data.reference_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
         program_data.symbols_by_address = persistence.read_dict_uint32_to_string(f)
         program_data.post_segment_addresses = persistence.read_dict_uint32_to_list_of_uint32s(f)
+        program_data.flags = persistence.read_uint32(f)
         program_data.dis_name = persistence.read_string(f)
         program_data.file_name = persistence.read_string(f)
         program_data.file_size = persistence.read_uint32(f)
@@ -296,7 +302,7 @@ def load_savefile(savefile_path):
         loaderdata_size = persistence.read_uint32(f)
         loader_data_start_offset = f.tell()
         system = loaderlib.get_system(program_data.loader_system_name)
-        program_data.loader_internal_data = system.load_savefile_data(f)
+        program_data.loader_internal_data = system.load_project_data(f)
         loader_data_end_offset = f.tell()
 
         if loaderdata_size != loader_data_end_offset - loader_data_start_offset:

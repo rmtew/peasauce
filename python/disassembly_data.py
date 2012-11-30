@@ -16,6 +16,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+
 ## SegmentBlock flag field related.
 
 def _count_bits(v):
@@ -61,6 +62,10 @@ SLD_COMMENT_FULL_LINE = 3
 SLD_EQU_LOCATION_RELATIVE = 4
 
 
+PDF_CACHE_INPUT_DATA = 1
+
+DEFAULT_PROGRAMDATA_FLAGS = PDF_CACHE_INPUT_DATA
+
 class ProgramData(object):
     def __init__(self):
         ## Persisted state.
@@ -72,6 +77,8 @@ class ProgramData(object):
         self.blocks = []
         "Extra lines for the last block in a segment, for trailing labels."
         self.post_segment_addresses = None # {}
+        "Default flags"
+        self.flags = 0
 
         # disassemblylib:
         "Identifies which architecture the file has been identified as belonging to."
@@ -104,8 +111,6 @@ class ProgramData(object):
         self.symbol_insert_func = None
         "List of segment address ranges, used to validate addresses."
         self.address_ranges = None # []
-        "Temporary input file path"
-        self.tempfile_path = None
         "Where the file was saved to, or loaded from."
         self.savefile_path = None
 
@@ -138,3 +143,21 @@ class SegmentBlock(object):
     """ Calculated number of lines. """
     line_count = 0
 
+
+class NewProjectOptions:
+    cache_input_data = True
+
+    # Binary file options.
+    dis_name = None
+    loader_load_address = None
+    loader_entrypoint_offset = None
+
+class LoadProjectOptions:
+    valid_file_size = False
+    valid_file_checksum = False
+
+    cache_input_data = True
+    loader_file_path = None
+
+class SaveProjectOptions:
+    cache_input_data = True

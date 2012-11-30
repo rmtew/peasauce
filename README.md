@@ -108,6 +108,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Debugging: Connect to WinUAE, browse files, and select a file to run and debug.
 * Decompilation: Look into IRs.  LLVM?
 * Disassembly: Handle more / differentiate between different M680x0 instructions.
+* File loading: Use 'vamos' to run amiga packer detection and unpacking.
 
 ### Long Term Tasks
 
@@ -119,7 +120,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Disassembly: Support x86-64 instructions.
 * File loading: Support Amiga library loading.
 * File loading: Support Amiga object file loading.
-* File loading: Detect and automatically do Amiga decrunching.
 * File loading: Support Mac OS X Mach-O executable loading.
 * File loading: Support Macintosh m68k PEF loading.
 * File loading: Support Windows PE loading.

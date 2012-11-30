@@ -31,11 +31,11 @@ class System(object):
     def load_input_file(self, file_info, data_types):
         return xfile.load_input_file(file_info, data_types)
 
-    def load_savefile_data(self, f):
-        return xfile.load_savefile_data(f)
+    def load_project_data(self, f):
+        return xfile.load_project_data(f)
 
-    def save_savefile_data(self, f, data):
-        xfile.save_savefile_data(f, data)
+    def save_project_data(self, f, data):
+        xfile.save_project_data(f, data)
 
     def print_summary(self, file_info):
         xfile.print_summary(file_info)

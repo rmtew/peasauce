@@ -22,7 +22,6 @@ import bisect
 import hashlib
 import logging
 import os
-import tempfile
 
 from disassembly_data import *
 import loaderlib
@@ -866,33 +865,75 @@ def _make_inputfile_name(savefile_path):
     savefile_name0, savefile_name1 = os.path.splitext(savefile_name)
     return savefile_name0 +"-file.cache"
 
-def save_savefile(savefile_path, program_data):
-    if False:
-        # Work out where to copy the cached source/input file from.
-        old_savefile_path = program_data.savefile_path
-    result = disassembly_persistence.save_savefile(savefile_path, program_data)
-    if False:
-        # If this is the first save, preserve the source/input file.
-        if old_savefile_path:
-            old_savedir_path, old_savefile_name = os.path.split(savefile_path)
-            old_inputfile_path = os.path.join(old_savedir_path, _make_inputfile_name(old_savefile_path))
-            # ...
-        if program_data.tempfile_path:
-            savedir_path, savefile_name = os.path.split(savefile_path)
-            inputfile_path = os.path.join(savedir_path, _make_inputfile_name(savefile_path))
-            if os.path.exists(inputfile_path):
-                os.remove(inputfile_path)
-            os.rename(program_data.tempfile_path, inputfile_path)
-            program_data.tempfile_path = None
-        # If this is a save further down the line, copy the existing cached data.
-        if old_savefile_path:
-            pass
-    return result
+# TODO: Finicky mess of project option functions.  Need to clean this up.
 
-def load_savefile(savefile_path):
-    program_data = disassembly_persistence.load_savefile(savefile_path)
+def _get_project_shared_options(program_data, options):
+    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
+    options.cache_input_data = flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA
 
+def _set_project_shared_options(program_data, options):
+    if options.cache_input_data:
+        program_data.flags |= PDF_CACHE_INPUT_DATA
+    else:
+        program_data.flags &= ~PDF_CACHE_INPUT_DATA
+
+def get_new_project_options(program_data):
+    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
+    options = NewProjectOptions()
+    _get_project_shared_options(program_data, options)
+    return options
+
+def get_load_project_options(program_data):
+    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
+    options = LoadProjectOptions()
+    _get_project_shared_options(program_data, options)
+    return options
+
+def get_save_project_options(program_data):
+    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
+    options = SaveProjectOptions()
+    _get_project_shared_options(program_data, options)
+    return options
+
+def _make_cached_inputfile_path(savefile_path):
+    savedir_path, savefile_name = os.path.split(savefile_path)
+    savefile_name0, discard = os.path.splitext(savefile_name)
+    return os.path.join(savedir_path, savefile_name0 +"-file.cache")
+
+def _cache_input_file(savefile_path, inputfile_path):
+    cachefile_path = _make_cached_inputfile_path(savefile_path)
+    logger.debug("_cache_input_file: %s", cachefile_path)
+    with open(inputfile_path, "rb") as rf:
+        with open(cachefile_path, "wb") as wf:
+            data = rf.read(256 * 1024)
+            while len(data):
+                wf.write(data)
+                data = rf.read(256 * 1024)
+    return True
+
+def is_project_inputfile_cached(program_data):
+    return program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA
+
+## Project loading and saving.
+
+def save_project(savefile_path, program_data, save_options):
+    # Apply save project options to the program data fields.
+    _set_project_shared_options(program_data, save_options)
+    if program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA:
+        cachefile_path = _make_cached_inputfile_path(savefile_path)
+        if program_data.loader_file_path is not None and cachefile_path != program_data.loader_file_path:
+            _cache_input_file(savefile_path, program_data.loader_file_path)
+    return disassembly_persistence.save_project(savefile_path, program_data)
+
+def load_project(savefile_path):
+    program_data = disassembly_persistence.load_project(savefile_path)
     recalculate_line_count_index(program_data)
+
+    # Try and cache the input file data automatically.
+    if program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA:
+        cachefile_path = _make_cached_inputfile_path(savefile_path)
+        if validate_cached_file(program_data, cachefile_path):
+            cache_segment_data(program_data, cachefile_path)
 
     onload_set_disassemblylib_functions(program_data)
     onload_make_address_ranges(program_data)
@@ -901,8 +942,7 @@ def load_savefile(savefile_path):
 
     return program_data, get_line_count(program_data)
 
-
-def load_file(file_path):
+def load_file(file_path, new_options):
     result = loaderlib.load_file(file_path)
     if result is None:
         return None, 0
@@ -922,17 +962,8 @@ def load_file(file_path):
 
     program_data.file_name = os.path.split(file_path)[-1]
     program_data.file_size = os.path.getsize(file_path)
-    program_data.file_checksum = onload_calculate_file_checksum(file_path)
+    program_data.file_checksum = calculate_file_checksum(file_path)
     program_data.dis_name = file_info.system.get_arch_name()
-
-    # Copy the source/input file to a temporary path.
-    program_data.temporary_file_path = os.path.join(tempfile.gettempdir(), program_data.file_name)
-    with open(file_path, "rb") as rf:
-        with open(program_data.temporary_file_path, "wb") as wf:
-            data = rf.read(256 * 1024)
-            while len(data):
-                wf.write(data)
-                data = rf.read(256 * 1024)
 
     segments = program_data.loader_segments = file_info.segments
 
@@ -1010,6 +1041,9 @@ def load_file(file_path):
                 continue
             logger.error("load_file: At $%06X unexpected splitting error #%d", address, result[1])
 
+    # Ensure the new project options are recorded and persisted.
+    _set_project_shared_options(program_data, new_options)
+
     DEBUG_log_load_stats(program_data)
 
     recalculate_line_count_index(program_data)
@@ -1038,7 +1072,7 @@ def onload_make_address_ranges(program_data):
         else:
             program_data.address_ranges.append((new_address0, new_addressN-1, set([segment_id])))
 
-def onload_calculate_file_checksum(file_path):
+def calculate_file_checksum(file_path):
     hasher = hashlib.md5()
     with open(file_path, "rb") as f:
         data = f.read(256 * 1024)
@@ -1046,6 +1080,38 @@ def onload_calculate_file_checksum(file_path):
             hasher.update(data)
             data = f.read(256 * 1024)
     return hasher.digest()
+
+def validate_cached_file_size(program_data, load_options):
+    cachefile_path = _make_cached_inputfile_path(program_data.savefile_path)
+    result = os.path.isfile(cachefile_path) and os.path.getsize(cachefile_path) == program_data.file_size
+    load_options.valid_file_size = result
+    return result
+
+def validate_cached_file_checksum(program_data, load_options):
+    cachefile_path = _make_cached_inputfile_path(program_data.savefile_path)
+    result = False
+    if os.path.isfile(cachefile_path):
+        result = program_data.file_checksum == calculate_file_checksum(cachefile_path)
+    load_options.valid_file_checksum = result
+    return result
+
+def validate_cached_file(program_data, cachefile_path):
+    if os.path.isfile(cachefile_path) and os.path.getsize(cachefile_path) == program_data.file_size:
+        return program_data.file_checksum == calculate_file_checksum(cachefile_path)
+    return False
+
+def cache_segment_data(program_data, file_path):
+    segments = program_data.loader_segments
+    for i in range(len(segments)):
+        loaderlib.cache_segment_data(file_path, segments, i)
+    program_data.loader_file_path = file_path
+
+def is_segment_data_cached(program_data):
+    segments = program_data.loader_segments
+    for i in range(len(segments)):
+        if loaderlib.get_segment_data(segments, i) is not None:
+            return True
+    return False
 
 def DEBUG_log_load_stats(program_data):
     # Log debug statistics

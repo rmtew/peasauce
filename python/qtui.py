@@ -30,7 +30,7 @@ http://qt-project.org/wiki/Signals_and_Slots_in_PySide
 
 """
 
-
+import collections
 import cPickle
 import logging
 import os
@@ -41,10 +41,16 @@ import traceback
 from PySide import QtCore, QtGui
 
 import disassembly
+import disassemblylib
 import loaderlib
 
 
 SETTINGS_FILE = "settings.pikl"
+
+APPLICATION_NAME = "PeaSauce"
+PROJECT_SUFFIX = "psproj"
+PROJECT_FILTER = APPLICATION_NAME +" project (*."+ PROJECT_SUFFIX +")"
+SOURCE_CODE_FILTER = "Source code (*.s *.asm)"
 
 
 logger = logging.getLogger("UI")
@@ -208,6 +214,12 @@ class CustomQTableView(QtGui.QTableView):
             self._initial_line_idx = None
         super(CustomQTableView, self).paintEvent(event)
 
+    def setFont(self, font):
+        result = super(CustomQTableView, self).setFont(font)
+        fontMetrics = QtGui.QFontMetrics(font)
+        # Whenever the font is changed, resize the row heights to suit.
+        self.verticalHeader().setDefaultSectionSize(fontMetrics.lineSpacing() + 2)
+        return result
 
 def create_table_widget(model):
     # Need a custom table view to get selected row.
@@ -249,7 +261,7 @@ class MainWindow(QtGui.QMainWindow):
 
         ## GENERATE THE UI
 
-        self.setWindowTitle("PeaSauce")
+        self.setWindowTitle(APPLICATION_NAME)
 
         self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
         self.list_model.column_alignments[0] = QtCore.Qt.AlignRight
@@ -337,7 +349,8 @@ class MainWindow(QtGui.QMainWindow):
 
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
-        self.save_work_action = QtGui.QAction("&Save work", self, statusTip="Save current work", triggered=self.interaction_request_save_work)
+        self.save_project_action = QtGui.QAction("&Save project", self, statusTip="Save currently loaded project", triggered=self.interaction_request_save_project)
+        self.save_project_as_action = QtGui.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
 
@@ -355,7 +368,8 @@ class MainWindow(QtGui.QMainWindow):
 
         self.file_menu = self.menuBar().addMenu("&File")
         self.file_menu.addAction(self.open_action)
-        self.file_menu.addAction(self.save_work_action)
+        self.file_menu.addAction(self.save_project_action)
+        self.file_menu.addAction(self.save_project_as_action)
         self.file_menu.addAction(self.export_source_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
@@ -476,20 +490,24 @@ class MainWindow(QtGui.QMainWindow):
 
     def menu_settings_choose_font(self):
         # TODO: Could identify the current font and pass it in to be initial selection.
-        font, ok = QtGui.QFontDialog.getFont(QtGui.QFont("Courier New", 10), self)
+        font, ok = QtGui.QFontDialog.getFont(self.list_table.font(), self)
         if font and ok:
             self.list_table.setFont(font)
             self._set_setting("font-info", font.toString())
 
     ## INTERACTION FUNCTIONS
 
-    def interaction_request_save_work(self):
+    def interaction_request_save_project(self):
         if self.program_state == STATE_LOADED:
-            self.request_and_save_file({ "Save file (*.wrk)" : "save-file", })
+            self.request_and_save_file({ PROJECT_FILTER : "save-file", })
+
+    def interaction_request_save_project_as(self):
+        if self.program_state == STATE_LOADED:
+            self.request_and_save_file({ PROJECT_FILTER : "save-file", })
 
     def interaction_request_export_source(self):
         if self.program_state == STATE_LOADED:
-            self.request_and_save_file({ "Source code (*.s *.asm)" : "code", })
+            self.request_and_save_file({ SOURCE_CODE_FILTER : "code", })
 
     def interaction_rename_symbol(self):
         if self.program_state != STATE_LOADED:
@@ -650,32 +668,41 @@ class MainWindow(QtGui.QMainWindow):
                 # self.request_and_load_file({ "Load file (*.wrk)" : "load-file", })
         """
     def attempt_open_file(self, file_path):
+        # Cover the case of a command-line startup with a current directory file name.
+        if os.path.dirname(file_path) == "":
+            file_path = os.path.join(os.getcwd(), file_path)
+
         # An attempt will be made to load an existing file.
         self.program_state = STATE_LOADING
         self.file_path = file_path
 
+        # Start the disassembly on the worker thread.
+        self.thread.result.connect(self.attempt_display_file)
+        if file_path.endswith("."+ PROJECT_SUFFIX):
+            # We display the load project dialog after loading.
+            self.thread.add_work(disassembly.load_project, file_path)
+            progress_title = "Load Project"
+            progress_text = "Loading project"
+        else:
+            new_options = disassembly.get_new_project_options(self.disassembly_data)
+            result = NewProjectDialog(new_options, file_path, self).exec_()
+            if result != QtGui.QDialog.Accepted:
+                self.reset_state()
+                return
+            self.thread.add_work(disassembly.load_file, file_path, new_options)
+            progress_title = "New Project"
+            progress_text = "Creating initial project"
+
         # Display a modal dialog.
         progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
         progressDialog.setCancelButtonText("&Cancel")
-        progressDialog.setRange(0, 100)
-        progressDialog.setWindowTitle("Loading a File")
-        progressDialog.setMinimumDuration(0)
+        progressDialog.setWindowTitle(progress_title)
         progressDialog.setAutoClose(True)
         progressDialog.setWindowModality(QtCore.Qt.WindowModal)
-
-        # Start the disassembly on the worker thread.
-        self.thread.result.connect(self.attempt_display_file)
-        if file_path[-4:].lower() == ".wrk":
-            self.thread.add_work(disassembly.load_savefile, file_path)
-        else:
-            result = LoadOptionsDialog(file_path).exec_()
-            if result != QtGui.QDialog.Accepted:
-                return
-            self.thread.add_work(disassembly.load_file, file_path)
-
-        # Initialise the dialog status.
+        progressDialog.setRange(0, 100)
+        progressDialog.setMinimumDuration(0)
         progressDialog.setValue(20)
-        progressDialog.setLabelText("Loading..")
+        progressDialog.setLabelText(progress_text +"..")
 
         # Register to hear if the cancel button is pressed.
         def canceled():
@@ -684,9 +711,10 @@ class MainWindow(QtGui.QMainWindow):
             self.reset_state()
             self.progressDialog = None
         progressDialog.canceled.connect(canceled)
-
+        
         # Wait until cancel or the work is complete.
         t0 = time.time()
+        progressDialog.show()
         while self.progressDialog is not None:
             QtGui.qApp.processEvents()
         logger.debug("Loading file finished in %0.1fs", time.time() - t0)
@@ -712,6 +740,22 @@ class MainWindow(QtGui.QMainWindow):
             QtGui.QMessageBox.information(self, "Unable to open file", "The file does not appear to be a supported executable file format.")
             return
 
+        ## Last minute steps before display of loaded data.
+        if self.file_path.endswith("."+ PROJECT_SUFFIX):
+            load_options = disassembly.get_load_project_options(self.disassembly_data)
+            ##if disassembly.is_project_inputfile_cached(self.disassembly_data):
+            ##    disassembly.validate_cached_file_size(self.disassembly_data, load_options)
+            ##    disassembly.validate_cached_file_checksum(self.disassembly_data, load_options)
+            # If the input file is cached, it's data should have been cached by the project loading.
+            if not disassembly.is_segment_data_cached(self.disassembly_data):
+                result = LoadProjectDialog(load_options, self.file_path, self).exec_()
+                if result != QtGui.QDialog.Accepted:
+                    self.reset_state()
+                    return
+
+                disassembly.cache_segment_data(self.disassembly_data, load_options.loader_file_path)
+
+        ## Proceed with display of loaded data.
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
 
@@ -791,7 +835,14 @@ class MainWindow(QtGui.QMainWindow):
         if filters[filter_text] == "code":
             self.save_disassembled_source(file_path)
         elif filters[filter_text] == "save-file":
-            self.save_work(file_path)
+            save_options = disassembly.get_save_project_options(self.disassembly_data)
+            # Lightweight validation of whether there's the input file is cached.
+            if disassembly.is_project_inputfile_cached(self.disassembly_data):
+                if self.disassembly_data.savefile_path is None or not disassembly.validate_cached_file_size(self.disassembly_data, save_options):
+                    result = SaveProjectDialog(save_options, file_path, self).exec_()
+                    if result != QtGui.QDialog.Accepted:
+                        return
+            self.save_work(file_path, save_options)
 
     def save_disassembled_source(self, file_path):
         line_count = disassembly.get_line_count(self.disassembly_data)
@@ -835,24 +886,257 @@ class MainWindow(QtGui.QMainWindow):
                 progressDialog.setValue(line_count)        
 
     def load_work(self, file_path):
-        disassembly.load_savefile(file_path)
+        disassembly.load_project(file_path)
 
-    def save_work(self, file_path):
-        disassembly.save_savefile(file_path, self.disassembly_data)
+    def save_work(self, file_path, save_options):
+        disassembly.save_project(file_path, self.disassembly_data, save_options)
+
+## Option dialogs.
+
+class ClickableLabel(QtGui.QLabel):
+    clicked = QtCore.Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+
+def _make_inputdata_options(dialog, group_title, keep_input_data=True):
+    """
+    This uses two workarounds resulting in a second-rate solution:
+    - Radio button text does not wrap, so the workaround is that no text is
+      given to the radio buttons.  Instead the text is displayed using labels.
+    - Labels cannot be clicked on to get the related radio buttons to depress.
+      Instead, a custom label class is created that responds to mouse press
+      events.  This leaves gaps in the clickable areas.
+    """
+    dialog.inputdata_do_radio = QtGui.QRadioButton()
+    dialog.inputdata_dont_radio = QtGui.QRadioButton()
+    inputdata_do_short_label = ClickableLabel("Saved work SHOULD contain source/input file data.")
+    inputdata_do_short_label.clicked.connect(dialog.inputdata_do_radio.click)
+    inputdata_do_long_label = ClickableLabel("When you load your saved work, you WILL NOT need to provide the source/input file.")
+    inputdata_do_long_label.clicked.connect(dialog.inputdata_do_radio.click)
+    inputdata_dont_short_label = ClickableLabel("Saved work SHOULD NOT contain source/input file data.")
+    inputdata_dont_short_label.clicked.connect(dialog.inputdata_dont_radio.click)
+    inputdata_dont_long_label = ClickableLabel("When you load your saved work, you WILL need to provide the source/input file.")
+    inputdata_dont_long_label.clicked.connect(dialog.inputdata_dont_radio.click)
+    if keep_input_data:
+        dialog.inputdata_do_radio.setChecked(True)
+    else:
+        dialog.inputdata_dont_radio.setChecked(True)
+    inputdata_groupbox = QtGui.QGroupBox(group_title)
+    inputdata_layout = QtGui.QGridLayout()
+    inputdata_layout.addWidget(dialog.inputdata_do_radio, 0, 0)
+    inputdata_layout.addWidget(inputdata_do_short_label, 0, 1)
+    inputdata_layout.addWidget(inputdata_do_long_label, 1, 1)
+    inputdata_layout.addWidget(dialog.inputdata_dont_radio, 2, 0)
+    inputdata_layout.addWidget(inputdata_dont_short_label, 2, 1)
+    inputdata_layout.addWidget(inputdata_dont_long_label, 3, 1)
+    inputdata_groupbox.setLayout(inputdata_layout)
+    return inputdata_groupbox
+
+def _set_default_font(widget):
+    font = QtGui.QFont()
+    if not font.fromString("Arial,8,-1,5,50,0,0,0,0,0"):
+        font = QtGui.QApplication.font()
+    widget.setFont(font)
 
 
-class LoadOptionsDialog(QtGui.QDialog):
-    def __init__(self, file_path, parent=None):
-        super(LoadOptionsDialog, self).__init__(parent)
+class LoadProjectDialog(QtGui.QDialog):
+    def __init__(self, load_options, file_path, parent=None):
+        super(LoadProjectDialog, self).__init__(parent)
 
+        self.load_options = load_options
+        _set_default_font(self)
+
+        self.setWindowTitle("Load Project")
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        ## Information layout.
+        problem_groupbox = QtGui.QGroupBox("Problem")
+        problem_label1 = QtGui.QLabel("This project does not include the original data.")
+        problem_label2 = QtGui.QLabel("Perhaps whomever created the project opted to exclude it.")
+        problem_label3 = QtGui.QLabel("Perhaps Peasource's cached copy was somehow deleted.")
+        problem_label4 = QtGui.QLabel("In any case, you need to locate and provide it.")
+        problem_layout = QtGui.QVBoxLayout()
+        problem_layout.addWidget(problem_label1)
+        problem_layout.addSpacing(10)
+        problem_layout.addWidget(problem_label2)
+        problem_layout.addWidget(problem_label3)
+        problem_layout.addSpacing(10)
+        problem_layout.addWidget(problem_label4)
+        problem_groupbox.setLayout(problem_layout)
+
+        original_filesize = self.parentWidget().disassembly_data.file_size
+        original_filename = self.parentWidget().disassembly_data.file_name
+        original_checksum = self.parentWidget().disassembly_data.file_checksum
+
+        filespec_groupbox = QtGui.QGroupBox("Original file")
+        filespec_layout = QtGui.QGridLayout()
+        filename_key_label = QtGui.QLabel("Name:")
+        filename_value_label = QtGui.QLabel(original_filename)
+        filesize_key_label = QtGui.QLabel("Size:")
+        filesize_value_label = QtGui.QLabel("%d bytes" % original_filesize)
+        filechecksum_key_label = QtGui.QLabel("Checksum:")
+        filechecksum_value_label = QtGui.QLabel("".join("%X" % ord(c) for c in original_checksum))
+        filespec_layout.addWidget(filename_key_label, 0, 0, 1, 1)
+        filespec_layout.addWidget(filename_value_label, 0, 1, 1, 19)
+        filespec_layout.addWidget(filesize_key_label, 1, 0, 1, 1)
+        filespec_layout.addWidget(filesize_value_label, 1, 1, 1, 19)
+        filespec_layout.addWidget(filechecksum_key_label, 2, 0, 1, 1)
+        filespec_layout.addWidget(filechecksum_value_label, 2, 1, 1, 19)
+        filespec_groupbox.setLayout(filespec_layout)
+
+        filelocation_groupbox = QtGui.QGroupBox("File location")
+        filelocation_layout = QtGui.QVBoxLayout()
+        path_layout = QtGui.QHBoxLayout()
+        path_lineedit = QtGui.QLineEdit()
+        path_button = QtGui.QToolButton(self) # A button that stays minimally sized.
+        path_button.setText("...")
+        path_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+        path_layout.addWidget(path_lineedit)
+        path_layout.addWidget(path_button)
+        valid_size_checkbox = QtGui.QCheckBox("Size", self)
+        valid_size_checkbox.setChecked(False)
+        valid_size_checkbox.setEnabled(False)
+        valid_checksum_checkbox = QtGui.QCheckBox("Checksum", self)
+        valid_checksum_checkbox.setChecked(False)
+        valid_checksum_checkbox.setEnabled(False)
+        validity_layout = QtGui.QHBoxLayout()
+        validity_layout.addWidget(QtGui.QLabel("Validity:"))
+        validity_layout.addWidget(valid_size_checkbox, alignment=QtCore.Qt.AlignLeft)
+        validity_layout.addWidget(valid_checksum_checkbox, alignment=QtCore.Qt.AlignLeft)
+        filelocation_layout.addLayout(path_layout)
+        filelocation_layout.addLayout(validity_layout)
+        filelocation_groupbox.setLayout(filelocation_layout)
+
+        # The algorithm used to enable the load button is:
+        # - Wait 2 seconds after the last text change, or when return pressed.
+        # - Check if given path is a file of the correct size.
+        # - 
+
+        self.validation_attempt = 0
+        self.validation_attempt_text = None
+        self.validation_key = None
+
+        def validate_file_path(validation_attempt, file_path):
+            # Maybe the user kept typing, if so they're not finished.
+            if self.validation_attempt != validation_attempt:
+                return
+            path_lineedit.setEnabled(False)
+            if os.path.isfile(file_path):
+                if os.path.getsize(file_path) == original_filesize:
+                    valid_size_checkbox.setChecked(True)
+                file_checksum = disassembly.calculate_file_checksum(file_path)
+                if file_checksum == original_checksum:
+                    valid_checksum_checkbox.setChecked(True)
+                if valid_size_checkbox.isChecked() and valid_checksum_checkbox.isChecked():
+                    load_button.setEnabled(True)
+                    self.valid_file_path = file_path
+            path_lineedit.setEnabled(True)
+
+        def _reset_widgets():
+            self.valid_file_path = None
+            valid_size_checkbox.setChecked(False)
+            valid_checksum_checkbox.setChecked(False)
+            load_button.setEnabled(False)
+        def on_path_lineedit_textChanged(new_text):
+            if self.validation_attempt_text != new_text:
+                _reset_widgets()
+                self.validation_attempt_text = new_text
+                self.validation_attempt += 1 
+                QtCore.QTimer.singleShot(2000, lambda n=self.validation_attempt: validate_file_path(n, new_text))
+        def on_path_lineedit_returnPressed():
+            if self.validation_attempt_text != path_lineedit.text():
+                _reset_widgets()
+                self.validation_attempt_text = path_lineedit.text()
+                self.validation_attempt += 1 
+                validate_file_path(self.validation_attempt, path_lineedit.text())
+
+        path_lineedit.textChanged.connect(on_path_lineedit_textChanged)
+        path_lineedit.returnPressed.connect(on_path_lineedit_returnPressed)
+
+        def on_path_button_clicked():
+            options = QtGui.QFileDialog.Options()
+            file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self, "Locate original file..", options=options)
+            if not len(file_path):
+                return
+            path_lineedit.setText(file_path)
+        path_button.clicked.connect(on_path_button_clicked)
+
+        ## Buttons layout.
+        load_button = QtGui.QPushButton("Load")
+        load_button.setEnabled(False)
+        cancel_button = QtGui.QPushButton("Cancel")
+        self.connect(load_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
+        self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
+
+        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout.addWidget(load_button, QtCore.Qt.AlignRight)
+        buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
+
+        ## Outer layout.
+        information_layout = QtGui.QVBoxLayout()
+        information_layout.addWidget(problem_groupbox)
+        information_layout.addWidget(filespec_groupbox)
+        information_layout.addWidget(filelocation_groupbox)
+        information_layout.addLayout(buttons_layout)
+        self.setLayout(information_layout)
+
+    def accept(self):
+        self.load_options.loader_file_path = self.valid_file_path
+        return super(LoadProjectDialog, self).accept()
+
+class SaveProjectDialog(QtGui.QDialog):
+    def __init__(self, save_options, file_path, parent=None):
+        super(SaveProjectDialog, self).__init__(parent)
+
+        self.save_options = save_options
+        _set_default_font(self)
+
+        self.setWindowTitle("Save Project")
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        ## File options layout.
+        inputdata_groupbox = _make_inputdata_options(self, "File Options", save_options.cache_input_data)
+
+        ## Buttons layout.
+        save_button = QtGui.QPushButton("Save")
+        cancel_button = QtGui.QPushButton("Cancel")
+        self.connect(save_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
+        self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
+
+        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout.addWidget(save_button, QtCore.Qt.AlignRight)
+        buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
+
+        ## Outer layout.
+        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout.addWidget(inputdata_groupbox)
+        outer_vertical_layout.addLayout(buttons_layout)
+        self.setLayout(outer_vertical_layout)
+
+    def accept(self):
+        self.save_options.cache_input_data = self.inputdata_do_radio.isChecked()
+        return super(SaveProjectDialog, self).accept()
+
+
+class NewProjectDialog(QtGui.QDialog):
+    def __init__(self, new_options, file_path, parent=None):
+        super(NewProjectDialog, self).__init__(parent)
+
+        _set_default_font(self)
+
+        self.new_options = new_options
         dir_path, file_name = os.path.split(file_path)
 
         # Attempt to identify the file type.
         identification_result = loaderlib.identify_file(file_path)
         if identification_result is not None:
             file_info, file_details = identification_result
+            self.is_binary_file = False
         else:
             file_info, file_details = None, {}
+            self.is_binary_file = True
 
         ## Options / information layouts.
         # File groupbox.
@@ -869,7 +1153,16 @@ class LoadOptionsDialog(QtGui.QDialog):
         file_type_key_label = QtGui.QLabel("Type:")
         file_type_value_label = QtGui.QLabel(file_details.get("filetype", "-"))
         file_arch_key_label = QtGui.QLabel("Architecture:")
-        file_arch_value_label = QtGui.QLabel(file_details.get("processor", "-"))
+        self.file_arch_value_combobox = file_arch_value_combobox = QtGui.QComboBox(self)
+        if self.is_binary_file:
+            # List all supported processor options, for user to choose.
+            for arch_name in disassemblylib.get_arch_names():
+                file_arch_value_combobox.addItem(arch_name)
+            file_arch_value_combobox.setEnabled(True)
+        else:
+            # Fixed processor defined by the file format.
+            file_arch_value_combobox.addItem(file_details["processor"])
+            file_arch_value_combobox.setEnabled(False)
 
         information_groupbox = QtGui.QGroupBox("File Information")
         information_layout = QtGui.QGridLayout()
@@ -881,20 +1174,22 @@ class LoadOptionsDialog(QtGui.QDialog):
         information_layout.addWidget(file_type_key_label, 3, 0)
         information_layout.addWidget(file_type_value_label, 3, 1)
         information_layout.addWidget(file_arch_key_label, 4, 0)
-        information_layout.addWidget(file_arch_value_label, 4, 1)
+        information_layout.addWidget(file_arch_value_combobox, 4, 1)
         information_groupbox.setLayout(information_layout)
 
         # Processing groupbox.
         load_address = 0
         entrypoint_address = 0
-        if file_info is not None:
+        if not self.is_binary_file:
             load_address = loaderlib.get_load_address(file_info)
             entrypoint_address = loaderlib.get_entrypoint_address(file_info)
 
         processing_loadaddress_key_label = QtGui.QLabel("Load address:")
-        processing_loadaddress_value_label = QtGui.QLabel("$%X" % load_address)
+        self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtGui.QLineEdit("0x%X" % load_address)
+        processing_loadaddress_value_textedit.setEnabled(self.is_binary_file)
         processing_entryaddress_key_label = QtGui.QLabel("Entrypoint address:")
-        processing_entryaddress_value_label = QtGui.QLabel("$%X" % entrypoint_address)
+        self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtGui.QLineEdit("0x%X" % entrypoint_address)
+        processing_entryaddress_value_textedit.setEnabled(self.is_binary_file)
         processing_hline1 = QtGui.QFrame()
         processing_hline1.setFrameShape(QtGui.QFrame.HLine)
         processing_hline1.setFrameShadow(QtGui.QFrame.Sunken)
@@ -904,9 +1199,9 @@ class LoadOptionsDialog(QtGui.QDialog):
         processing_groupbox = QtGui.QGroupBox("Processing")
         processing_layout = QtGui.QGridLayout()
         processing_layout.addWidget(processing_loadaddress_key_label, 0, 0)
-        processing_layout.addWidget(processing_loadaddress_value_label, 0, 1)
+        processing_layout.addWidget(processing_loadaddress_value_textedit, 0, 1)
         processing_layout.addWidget(processing_entryaddress_key_label, 1, 0)
-        processing_layout.addWidget(processing_entryaddress_value_label, 1, 1)
+        processing_layout.addWidget(processing_entryaddress_value_textedit, 1, 1)
         fill_row_count = information_layout.rowCount() - processing_layout.rowCount() # Need grid spacing to be equal.
         processing_layout.addWidget(processing_hline1, 2, 0, fill_row_count, 2)
         processing_groupbox.setLayout(processing_layout)
@@ -916,45 +1211,34 @@ class LoadOptionsDialog(QtGui.QDialog):
         options_layout.addWidget(information_groupbox)
         options_layout.addWidget(processing_groupbox)
 
-        ## Input data copy layout.
-        inputdata_do_radio = QtGui.QRadioButton()
-        inputdata_dont_radio = QtGui.QRadioButton()
-        inputdata_do_short_label = QtGui.QLabel("Saved work SHOULD contain source/input file data.")
-        inputdata_do_long_label = QtGui.QLabel("When you load your saved work, you WILL NOT need to provide the source/input file.")
-        inputdata_dont_short_label = QtGui.QLabel("Saved work SHOULD NOT contain source/input file data.")
-        inputdata_dont_long_label = QtGui.QLabel("When you load your saved work, you WILL need to provide the source/input file.")
-        inputdata_do_radio.setChecked(True)
-
-        inputdata_groupbox = QtGui.QGroupBox("File Options")
-        inputdata_layout = QtGui.QGridLayout()
-        inputdata_layout.addWidget(inputdata_do_radio, 0, 0)
-        inputdata_layout.addWidget(inputdata_do_short_label, 0, 1)
-        inputdata_layout.addWidget(inputdata_do_long_label, 1, 1)
-        inputdata_layout.addWidget(inputdata_dont_radio, 2, 0)
-        inputdata_layout.addWidget(inputdata_dont_short_label, 2, 1)
-        inputdata_layout.addWidget(inputdata_dont_long_label, 3, 1)
-        inputdata_groupbox.setLayout(inputdata_layout)
-
         ## Buttons layout.
-        load_button = QtGui.QPushButton("Proceed")
+        create_button = QtGui.QPushButton("Create")
         cancel_button = QtGui.QPushButton("Cancel")
-        self.connect(load_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
-        self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
+        create_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
 
         buttons_layout = QtGui.QHBoxLayout()
-        buttons_layout.addWidget(load_button, QtCore.Qt.AlignRight)
+        buttons_layout.addWidget(create_button, QtCore.Qt.AlignRight)
         buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
 
         ## Outer layout.
         outer_vertical_layout = QtGui.QVBoxLayout()
         outer_vertical_layout.addLayout(options_layout)
-        outer_vertical_layout.addWidget(inputdata_groupbox)
         outer_vertical_layout.addLayout(buttons_layout)
         self.setLayout(outer_vertical_layout)
 
-        self.setWindowTitle("Disassembly Options")
-        self.setWindowModality(QtCore.Qt.ApplicationModal)
+        self.setWindowTitle("New Project")
+        self.setWindowModality(QtCore.Qt.WindowModal)
 
+    def accept(self):
+        if self.is_binary_file:
+            self.new_options.dis_name = self.file_arch_value_combobox.currentText()
+            self.new_options.loader_load_address = self.processing_loadaddress_value_textedit.text()
+            self.new_options.loader_entrypoint_offset = self.processing_entryaddress_value_textedit.text()
+        return super(NewProjectDialog, self).accept()
+
+
+## General script startup code.
 
 def _initialise_logging(window):
     def _ui_thread_logging(t):

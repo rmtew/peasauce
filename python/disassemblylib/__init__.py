@@ -16,6 +16,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+def get_arch_names():
+    return [ "m68k" ]
 
 def get_api(arch_name):
     if arch_name == "m68k":
