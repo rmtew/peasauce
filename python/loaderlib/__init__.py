@@ -22,6 +22,7 @@ import struct
 
 import amiga
 import atarist
+import binary
 import human68k
 
 
@@ -32,7 +33,7 @@ systems_by_name = {}
 
 def _generate_module_data():
     global systems_by_name
-    for module in (amiga, atarist, human68k):
+    for module in (amiga, atarist, human68k, binary):
         system_name = module.__name__
         system = systems_by_name[system_name] = module.System()
         system.system_name = system_name
@@ -45,9 +46,9 @@ def get_system_data_types(system_name):
     system = systems_by_name[system_name]
     return DataTypes(system.big_endian)
  
-def load_file(file_path):
+def load_file(file_path, loader_options=None):
     for system_name, system in systems_by_name.iteritems():
-        file_info = FileInfo(system, file_path)
+        file_info = FileInfo(system, file_path, loader_options)
         data_types = get_system_data_types(system_name)
         if system.load_input_file(file_info, data_types):
             return file_info, data_types
@@ -155,9 +156,11 @@ def get_data_instruction_string(system_name, segments, segment_id, with_file_dat
 
 
 def get_load_address(file_info):
-    return 0
+    return file_info.load_address
 
 def get_entrypoint_address(file_info):
+    if file_info.entrypoint_address is not None:
+        return file_info.entrypoint_address
     return get_segment_address(file_info.segments, file_info.entrypoint_segment_id) + file_info.entrypoint_offset
 
 
@@ -222,8 +225,9 @@ class FileInfo(object):
     internal_data = None
     savefile_data = None
 
-    def __init__(self, system, file_path):
+    def __init__(self, system, file_path, loader_options=None):
         self.system = system
+        self.loader_options = loader_options
 
         self.file_path = file_path
 
@@ -231,9 +235,19 @@ class FileInfo(object):
         self.relocations_by_segment_id = []
         self.symbols_by_segment_id = []
 
+        if loader_options is not None:
+            self.load_address = loader_options.load_address
+        else:
+            self.load_address = 0
+
         """ The segment id and offset in that segment of the program entrypoint. """
         self.entrypoint_segment_id = 0
         self.entrypoint_offset = 0
+        """ Overrides the segment id and offset. """
+        if loader_options is not None:
+            self.entrypoint_address = loader_options.entrypoint_address
+        else:
+            self.entrypoint_address = None
 
     ## Query..
 
@@ -268,7 +282,7 @@ class FileInfo(object):
 
     def add_segment(self, segment_type, file_offset, data_length, segment_length, relocations, symbols):
         segment_id = len(self.segments)
-        segment_address = 0
+        segment_address = self.load_address
         if segment_id > 0:
             segment_address = get_segment_address(self.segments, segment_id-1) + get_segment_length(self.segments, segment_id-1)
         segment = [ None ] * SIZEOF_SI
@@ -292,3 +306,8 @@ class FileInfo(object):
 
     ## Segment querying related operations
 
+class BinaryFileOptions(object):
+    is_binary_file = True
+    dis_name = None
+    load_address = None
+    entrypoint_address = None

@@ -333,9 +333,10 @@ def _process_instruction_info():
             [ "0010DDDdddsssSSS", "MOVE.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, EA:(mode=d&register=D){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}", IF_000, "Move Data from Source to Destination", ],
             [ "0011DDD001sssSSS", "MOVEA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8},AR:(Rn=D)",     IF_000, "Move Address", ],
             [ "0010DDD001sssSSS", "MOVEA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8},AR:(Rn=D)",     IF_000, "Move Address", ],
-            [ "0100001011sssSSS", "MOVE CCR, EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Move from the Condition Code Register", ],
-            [ "0100010011sssSSS", "MOVE EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, CCR",      IF_000, "Move to Condition Code Register", ],
-            [ "0100000011sssSSS", "MOVE SR, EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Move from the Status Register", ],
+            [ "0100001011sssSSS", "MOVE.W CCR, EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Move from the Condition Code Register", ],
+            [ "0100010011sssSSS", "MOVE.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, CCR",      IF_000, "Move to Condition Code Register", ],
+            [ "0100000011sssSSS", "MOVE.W SR, EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Move from the Status Register", ],
+            [ "0100011011sssSSS", "MOVE.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, SR",      IF_000, "Move to the Status Register", ],
             ## 040 [ "1111011000100DDD", "MOVE16", IF_000, "Move 16-Byte Block (post increment)", ],
             [ "1111011000000DDD", "MOVE16 ARiPost:(Dn=D), AbsL", IF_040, "Move 16-Byte Block (absolute)", ],
             [ "1111011000001DDD", "MOVE16 AbsL, ARiPost:(Dn=D)", IF_040, "Move 16-Byte Block (absolute)", ],
@@ -629,7 +630,7 @@ def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
                 pass # TODO: Use to validate
         elif k == "xxx":
             value = vars["xxx"]
-            is_absolute = key == "Imm"
+            is_absolute = key in ("Imm", "AbsL", "AbsW")
             value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
             if value_string is None:
                 value_string = "$%x" % value
@@ -992,8 +993,9 @@ def get_operand_string(instruction, operand, vars, lookup_symbol=None):
 
 MAF_CODE = 1
 MAF_ABSOLUTE = 2
+MAF_UNCERTAIN = 4
 
-def get_match_addresses(match, extra=True):
+def get_match_addresses(match):
     # Is it an instruction that exits (RTS, RTR)?
     # Is it an instruction that conditionally branches (Bcc, Dbcc)?
     # Is it an instruction that branches and returns (JSR, BSR)?
@@ -1006,12 +1008,12 @@ def get_match_addresses(match, extra=True):
     if instruction_key in ("RTS", "RTR"):
         pass
     elif instruction_key in ("JMP", "BRA"):
-        if match.opcodes[0].key == "AbsL":
+        if match.opcodes[0].key in ("AbsW", "AbsL"):
             address = match.opcodes[0].vars["xxx"]
         elif match.opcodes[0].specification.key == "DISPLACEMENT":
             address = match.pc + match.opcodes[0].vars["xxx"]
     elif instruction_key == "JSR":
-        if match.opcodes[0].key == "AbsL":
+        if match.opcodes[0].key in ("AbsL", "AbsW"):
             address = match.opcodes[0].vars["xxx"]
     elif instruction_key == "BSR":
         address = match.pc + match.opcodes[0].vars["xxx"]
@@ -1024,7 +1026,7 @@ def get_match_addresses(match, extra=True):
         ret[address] = MAF_CODE
 
     # Locate any general addressing modes which infer labels.
-    for opcode in match.opcodes:
+    for i, opcode in enumerate(match.opcodes):
         if opcode.key == "PCid16":
             address = match.pc + _signed_value("W", opcode.vars["D16"])
             if address not in ret:
@@ -1033,13 +1035,24 @@ def get_match_addresses(match, extra=True):
             address = match.pc + _signed_value("W", opcode.vars["D8"])
             if address not in ret:
                 ret[address] = 0
-        elif extra and opcode.key == "AbsL":
+        elif opcode.key in ("AbsL", "AbsW"):
             address = opcode.vars["xxx"]
             if address not in ret:
                 ret[address] = 0
-        elif extra and opcode.key == "Imm":
+        elif opcode.key == "Imm" and i == 0:
+            # move.w #xxx, SR (no) / move.l #xxx, a0 (yes) / move.l #xxx, AR (yes)
+            # Is the destination an address register?
+            # Is the 
+            # Imm, AbsL; Imm, DR; Imm, AR
             address = opcode.vars["xxx"]
-            ret[address] = ret.get(address, 0) | MAF_ABSOLUTE
+            dest_key = match.opcodes[1].key
+            if dest_key is None:
+                dest_key = match.opcodes[1].specification.key
+            bits = ret.get(address, 0) | MAF_ABSOLUTE
+            if match.specification.key != "MOVE.L":
+                if bits & MAF_CODE != MAF_CODE:
+                    bits |= MAF_UNCERTAIN
+            ret[address] = bits
         elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
             logger.error("Unhandled opcode EA modde (680x0?): %s", opcode.key)
 

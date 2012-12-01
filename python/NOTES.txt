@@ -1,0 +1,32 @@
+
+INTELLIGENT DISASSEMBLING
+=========================
+
+For a given address, the "intelligent" logic disassembles instruction after instruction
+as a sequence, until it is no longer able to do so.
+
+This is because of three possible reasons:
+
+1. The end of the current memory space is reached.
+2. Unrecognisable data is encountered.
+3. A final instruction is reached (branch, jump, return, etc).
+
+After this, the matched instructions are processed for addresses in their operands.
+
+Two types of addresses can be found:
+
+1. Branch addresses.
+2. Reference addresses.
+
+
+
+RELOCATIBLE FILES
+-----------------
+
+
+BINARY FILES
+------------
+
+There's a lot more room for ambiguity.
+Imm values (#xxx) cannot be assumed to be references if they fall within known address spaces.
+

@@ -95,6 +95,8 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Technical Debt
 
+* Binary files: Tag all uncertain references and put them in a list view for the user to work through.
+* Binary files: Separate platform and file loading.  Then binary files can be assigned a platform.
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.

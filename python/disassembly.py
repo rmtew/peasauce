@@ -245,7 +245,7 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
     result = get_code_block_info_for_line_number(program_data, line_number)
     if result is not None:
         address, match = result
-        return [ k for (k, v) in program_data.dis_get_match_addresses_func(match, extra=True).iteritems() if k in program_data.symbols_by_address ]
+        return [ k for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems() if k in program_data.symbols_by_address ]
     return []
 
 
@@ -475,27 +475,32 @@ def insert_address_check(program_data, address):
     pre_ids = set()
     for address0, addressN, segment_ids in program_data.address_ranges:
         if address < address0:
-            pass #post_ids.update(segment_ids)
+            pass
         elif address > addressN:
             pre_ids.update(segment_ids)
+            break
         else:
-            return
+            return True
 
-    # At this point we have an address that lies outside segment address spaces.
-    pre_segment_id = -1
-    if len(pre_ids):
-        pre_segment_id = max(pre_ids)
-        addresses = program_data.post_segment_addresses.get(pre_segment_id, None)
-        if addresses is None:
-            program_data.post_segment_addresses[pre_segment_id] = [ address ]
-        elif address not in addresses:
-            addresses.append(address)
-            addresses.sort()
-    #if len(post_ids): post_segment_id = min(post_ids)
-    logger.debug("Found address not within segment address spaces: %X, excess: %d, pre segment_id: %d", address, address - addressN, pre_segment_id)
+    if address == addressN + 1:
+        # At this point we have an address that lies outside segment address spaces.
+        pre_segment_id = -1
+        if len(pre_ids):
+            pre_segment_id = max(pre_ids)
+            addresses = program_data.post_segment_addresses.get(pre_segment_id, None)
+            if addresses is None:
+                program_data.post_segment_addresses[pre_segment_id] = [ address ]
+            elif address not in addresses:
+                addresses.append(address)
+                addresses.sort()
+        return True
+    else:
+        logger.debug("Found address not within segment address spaces: %X, excess: %d, pre segment_id: %s", address, address - addressN, pre_ids)
+    return False
 
 def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_addresses):
-    insert_address_check(program_data, address)
+    if not insert_address_check(program_data, address):
+        return
     # These get split as their turn to be disassembled comes up.
     referring_addresses = program_data.branch_addresses.get(address, set())
     referring_addresses.add(src_abs_idx)
@@ -503,7 +508,8 @@ def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_add
     pending_symbol_addresses.add(address)
 
 def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_addresses):
-    insert_address_check(program_data, address)
+    if not insert_address_check(program_data, address):
+        return
     referring_addresses = program_data.reference_addresses.get(address, set())
     referring_addresses.add(src_abs_idx)
     program_data.reference_addresses[address] = referring_addresses
@@ -528,7 +534,8 @@ def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
 
 def insert_symbol(program_data, address, name):
-    insert_address_check(program_data, address)
+    if not insert_address_check(program_data, address):
+        return
     program_data.symbols_by_address[address] = name
     if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
 
@@ -536,12 +543,18 @@ def get_symbol_for_address(program_data, address, absolute_info=None):
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
     if absolute_info is not None:
         valid_address = False
-        if address in program_data.loader_relocated_addresses:
+        referring_instruction_address, num_instruction_bytes = absolute_info
+        if program_data.flags & PDF_BINARY_FILE == PDF_BINARY_FILE:
+            # This gets called for values.  All values of the given kind, not just the ones that
+            # actually were picked up as references.  We need to verify they are known references.
+            referring_addresses = program_data.reference_addresses.get(address)
+            if referring_addresses and referring_instruction_address in referring_addresses:
+                valid_address = True
+        elif address in program_data.loader_relocated_addresses:
             # For now, check all instruction bytes as addresses to see if they were relocated within.
-            search_address = absolute_info[0]
-            while search_address < absolute_info[0] + absolute_info[1]:
+            search_address = referring_instruction_address
+            while search_address < referring_instruction_address + num_instruction_bytes:
                 if search_address in program_data.loader_relocatable_addresses:
-                    # print "ABSOLUTE SYMBOL LOCATION: %X" % absolute_info[0]
                     valid_address = True
                     break
                 search_address += 1
@@ -551,6 +564,9 @@ def get_symbol_for_address(program_data, address, absolute_info=None):
         return program_data.symbols_by_address.get(address)
 
 def set_symbol_for_address(program_data, address, symbol):
+    if address == 0x20:
+        import traceback
+        traceback.print_stack(limit=3)
     program_data.symbols_by_address[address] = symbol
 
 def recalculate_line_count_index(program_data, dirtyidx=None):
@@ -611,6 +627,8 @@ def split_block(program_data, address, own_midinstruction=False):
     segment_length = loaderlib.get_segment_length(segments, block.segment_id)
     if address < segment_address or address >= segment_address + segment_length:
         logger.error("Tried to split at out of bounds address: %06X not within %06X-%06X", address, segment_address, segment_address+segment_length-1)
+        #import traceback
+        #traceback.print_stack()
         return block, ERR_SPLIT_BOUNDS
 
     block_data_type = get_block_data_type(block)
@@ -709,7 +727,8 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
     disassembly_offsets = set([ address ])
     while len(disassembly_offsets):
         address = disassembly_offsets.pop()
-        # logger.debug("Processing address: %X", address)
+        if address == 0xD60:
+            logger.debug("Processing address: %X", address)
 
         block, block_idx = lookup_block_by_address(program_data, address)
         block_data_type = get_block_data_type(block)
@@ -729,6 +748,7 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
         data_bytes_to_skip = 0
         line_data = []
         found_terminating_instruction = False
+        # logger.debug("disassembling block: address=$%X length=%d", address, block.length)
         while bytes_consumed < block.length:
             data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
             data_offset_start = block.segment_offset + bytes_consumed
@@ -815,6 +835,8 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
         for type_id, entry in line_data:
             if type_id == SLD_INSTRUCTION:
                 for match_address, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
+                    if match_address == 0x2000:
+                        print "0x2000", flags
                     if flags & 1: # MAF_CODE
                         disassembly_offsets.add(match_address)
                         insert_branch_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
@@ -827,8 +849,10 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
                                     # print "ABS REF LOCATION: %X FOUND Imm ADDRESS %X INS %s" % (entry.pc, match_address, entry.specification.key)
                                     break
                                 search_address += 1
-                    else:
+                    elif flags & 4 != 4: # !MAF_UNCERTAIN
                         insert_reference_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
+                    else:
+                        print "XXX", match_address
 
         # DEBUG BLOCK SPILLING BASED ON LOGICAL ASSUMPTION OF MORE CODE.
         if bytes_consumed == block.length and not found_terminating_instruction and not data_bytes_to_skip:
@@ -943,13 +967,24 @@ def load_project(savefile_path):
     return program_data, get_line_count(program_data)
 
 def load_file(file_path, new_options):
-    result = loaderlib.load_file(file_path)
+    loader_options = None
+    if new_options.is_binary_file:
+        loader_options = loaderlib.BinaryFileOptions()
+        loader_options.dis_name = new_options.dis_name
+        loader_options.load_address = new_options.loader_load_address
+        loader_options.entrypoint_offset = new_options.loader_entrypoint_offset
+
+    result = loaderlib.load_file(file_path, loader_options)
     if result is None:
         return None, 0
 
     file_info, data_types = result
 
     program_data = disassembly_persistence.ProgramData()
+    flags = 0
+    if new_options.is_binary_file:
+        flags |= PDF_BINARY_FILE
+    program_data.flags |= flags
     program_data.block_addresses = []
     program_data.block_line0s = []
     program_data.block_line0s_dirtyidx = 0

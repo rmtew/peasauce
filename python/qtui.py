@@ -546,7 +546,7 @@ class MainWindow(QtGui.QMainWindow):
         if len(operand_addresses) == 1:
             self.functionality_view_push_address(current_address, operand_addresses[0])
         elif len(operand_addresses) == 2:
-            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
+            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.  %s", operand_addresses)
         else:
             logger.warning("No addresses, nothing to go to.")
 
@@ -1133,10 +1133,10 @@ class NewProjectDialog(QtGui.QDialog):
         identification_result = loaderlib.identify_file(file_path)
         if identification_result is not None:
             file_info, file_details = identification_result
-            self.is_binary_file = False
+            new_options.is_binary_file = False
         else:
             file_info, file_details = None, {}
-            self.is_binary_file = True
+            new_options.is_binary_file = True
 
         ## Options / information layouts.
         # File groupbox.
@@ -1154,7 +1154,7 @@ class NewProjectDialog(QtGui.QDialog):
         file_type_value_label = QtGui.QLabel(file_details.get("filetype", "-"))
         file_arch_key_label = QtGui.QLabel("Architecture:")
         self.file_arch_value_combobox = file_arch_value_combobox = QtGui.QComboBox(self)
-        if self.is_binary_file:
+        if new_options.is_binary_file:
             # List all supported processor options, for user to choose.
             for arch_name in disassemblylib.get_arch_names():
                 file_arch_value_combobox.addItem(arch_name)
@@ -1180,16 +1180,16 @@ class NewProjectDialog(QtGui.QDialog):
         # Processing groupbox.
         load_address = 0
         entrypoint_address = 0
-        if not self.is_binary_file:
+        if not new_options.is_binary_file:
             load_address = loaderlib.get_load_address(file_info)
             entrypoint_address = loaderlib.get_entrypoint_address(file_info)
 
         processing_loadaddress_key_label = QtGui.QLabel("Load address:")
         self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtGui.QLineEdit("0x%X" % load_address)
-        processing_loadaddress_value_textedit.setEnabled(self.is_binary_file)
+        processing_loadaddress_value_textedit.setEnabled(new_options.is_binary_file)
         processing_entryaddress_key_label = QtGui.QLabel("Entrypoint address:")
         self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtGui.QLineEdit("0x%X" % entrypoint_address)
-        processing_entryaddress_value_textedit.setEnabled(self.is_binary_file)
+        processing_entryaddress_value_textedit.setEnabled(new_options.is_binary_file)
         processing_hline1 = QtGui.QFrame()
         processing_hline1.setFrameShape(QtGui.QFrame.HLine)
         processing_hline1.setFrameShadow(QtGui.QFrame.Sunken)
@@ -1231,11 +1231,17 @@ class NewProjectDialog(QtGui.QDialog):
         self.setWindowModality(QtCore.Qt.WindowModal)
 
     def accept(self):
-        if self.is_binary_file:
+        if self.new_options.is_binary_file:
             self.new_options.dis_name = self.file_arch_value_combobox.currentText()
-            self.new_options.loader_load_address = self.processing_loadaddress_value_textedit.text()
-            self.new_options.loader_entrypoint_offset = self.processing_entryaddress_value_textedit.text()
+            self.new_options.loader_load_address = to_int(self.processing_loadaddress_value_textedit.text())
+            self.new_options.loader_entrypoint_address = to_int(self.processing_entryaddress_value_textedit.text())
         return super(NewProjectDialog, self).accept()
+
+# TODO: int(, 16) chokes on $ prefix.  Done elsewhere too.
+def to_int(value):
+    if value.startswith("0x") or value.startswith("$"):
+        return int(value, 16)
+    return int(value)
 
 
 ## General script startup code.
