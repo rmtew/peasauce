@@ -110,6 +110,8 @@ class ProgramData(object):
         self.block_line0s_dirtyidx = None # 0
         "Callback application can register to be notified."
         self.symbol_insert_func = None
+        "Callback application can register to be notified."
+        self.uncertain_reference_modification_func = None
         "List of segment address ranges, used to validate addresses."
         self.address_ranges = None # []
         "Where the file was saved to, or loaded from."
@@ -143,6 +145,8 @@ class SegmentBlock(object):
     line_data = None
     """ Calculated number of lines. """
     line_count = 0
+    """ Cached potential address references. """
+    references = None
 
 
 class NewProjectOptions:

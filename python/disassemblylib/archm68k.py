@@ -1045,9 +1045,6 @@ def get_match_addresses(match):
             # Is the 
             # Imm, AbsL; Imm, DR; Imm, AR
             address = opcode.vars["xxx"]
-            dest_key = match.opcodes[1].key
-            if dest_key is None:
-                dest_key = match.opcodes[1].specification.key
             bits = ret.get(address, 0) | MAF_ABSOLUTE
             if match.specification.key != "MOVE.L":
                 if bits & MAF_CODE != MAF_CODE:

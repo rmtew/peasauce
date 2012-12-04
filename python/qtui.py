@@ -23,6 +23,9 @@ PySide eccentricities:
   and scroll to it immediately.  Nothing will happen.  It needs to render first, so in
   order to do this, the paint event needs to be caught and the scrolling and selecting
   done there.
+- Changing the font used in the TableView will not change the height of the rows, resulting
+  in clipping of text.  The font height needs to be obtained and the row height changed
+  accordingly.
 
 http://doc.qt.digia.com/4.6/richtext-html-subset.html
 http://qt-project.org/faq/answer/how_can_i_programatically_find_out_which_rows_items_are_visible_in_my_view
@@ -96,7 +99,15 @@ class WorkThread(QtCore.QThread):
         self.mutex.unlock()
 
         while not self.quit:
-            result = work_data[0](*work_data[1], **work_data[2])
+            try:
+                try:
+                    result = work_data[0](*work_data[1], **work_data[2])
+                except Exception:
+                    traceback.print_stack()
+                    raise
+            except SystemExit:
+                traceback.print_exc()
+                raise
             work_data = None
 
             self.mutex.lock()
@@ -106,21 +117,24 @@ class WorkThread(QtCore.QThread):
             self.work_data = None
             self.mutex.unlock()
 
-
-class DisassemblyItemModel(QtCore.QAbstractItemModel):
+class BaseItemModel(QtCore.QAbstractItemModel):
     _header_font = None
 
-    def __init__(self, rows, columns, parent):
-        self.column_count = columns
-        self.window = parent
+    def __init__(self, columns, parent):
+        super(BaseItemModel, self).__init__(parent)
 
-        super(DisassemblyItemModel, self).__init__(parent)
+        self._header_data = {}
 
-        self.column_alignments = [ QtCore.Qt.AlignLeft ] * self.column_count
-        self.header_data = {}
-
-    def set_header_font(self, font):
-        self._header_font = font
+        self._column_count = len(columns)
+        self._column_types = {}
+        self._column_alignments = [ None ] * len(columns)
+        for i, (column_name, column_type) in enumerate(columns):
+            self._column_types[i] = column_type
+            self.setHeaderData(i, QtCore.Qt.Horizontal, column_name)
+            if column_type is int or column_type is hex:
+                self._column_alignments[i] = QtCore.Qt.AlignRight
+            else:
+                self._column_alignments[i] = QtCore.Qt.AlignLeft
 
     def _data_ready(self):
         row_count = self.rowCount()
@@ -132,21 +146,19 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
         self.beginRemoveRows(QtCore.QModelIndex(), 0, row_count-1)
         self.endRemoveRows()
 
-    def rowCount(self, parent=None):
-        if self.window.disassembly_data is not None:
-            return disassembly.get_line_count(self.window.disassembly_data)
-        return 0
-
-    def columnCount(self, parent):
-        return self.column_count
+    def _set_header_font(self, font):
+        self._header_font = font
 
     def setHeaderData(self, section, orientation, data):
-        self.header_data[(section, orientation)] = data
+        self._header_data[(section, orientation)] = data
+
+    def columnCount(self, parent):
+        return self._column_count
 
     def headerData(self, section, orientation, role):
         if role == QtCore.Qt.DisplayRole:
             # e.g. section = column_index, orientation = QtCore.Qt.Horizontal
-            return self.header_data.get((section, orientation))
+            return self._header_data.get((section, orientation))
         elif role == QtCore.Qt.FontRole:
             return self._header_font
 
@@ -156,14 +168,16 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
 
         if role == QtCore.Qt.TextAlignmentRole:
             column = index.column()
-            return self.column_alignments[column]
+            return self._column_alignments[column]
         elif role != QtCore.Qt.DisplayRole:
             return None
 
         column, row = index.column(), index.row()
-        if self.window.disassembly_data is not None:
-            return disassembly.get_file_line(self.window.disassembly_data, row, column)
-        return ""
+        column_type = self._column_types[column]
+        value = self._lookup_cell_value(row, column)
+        if column_type is hex:
+            value = "$%X" % value
+        return value
 
     def parent(self, index):
         return QtCore.QModelIndex()
@@ -174,35 +188,53 @@ class DisassemblyItemModel(QtCore.QAbstractItemModel):
         return self.createIndex(row, column)
 
 
-class CustomItemModel(QtGui.QStandardItemModel):
+class DisassemblyItemModel(BaseItemModel):
+    def __init__(self, columns, parent):
+        self.window = parent
+
+        super(DisassemblyItemModel, self).__init__(columns, parent)
+
+    def rowCount(self, parent=None):
+        if self.window.disassembly_data is not None:
+            return disassembly.get_line_count(self.window.disassembly_data)
+        return 0
+
+    def _lookup_cell_value(self, row, column):
+        if self.window.disassembly_data is not None:
+            return disassembly.get_file_line(self.window.disassembly_data, row, column)
+        return ""
+
+
+class CustomItemModel(BaseItemModel):
     """ The main reason for this subclass is to give custom column alignment. """
-    def __init__(self, row_count, column_count, parent):
-        super(CustomItemModel, self).__init__(row_count, column_count, parent)
+    def __init__(self, columns, parent):
+        self._row_data = []
 
-        self.column_alignments = [ QtCore.Qt.AlignLeft ] * self.columnCount(QtCore.QModelIndex())
+        super(CustomItemModel, self).__init__(columns, parent)
 
-    def _clear_data(self):
-        # .clear() also clears the header of columns, this is sufficient.
-        self.removeRows(0, self.rowCount(), QtCore.QModelIndex())
+    def _set_row_data(self, row_data, removal_rows=None, addition_rows=None):
+        self._row_data = row_data
+        if addition_rows:
+            self.beginInsertRows(QtCore.QModelIndex(), addition_rows[0], addition_rows[1])
+            self.endInsertRows()
+        elif removal_rows:
+            self.beginRemoveRows(QtCore.QModelIndex(), removal_rows[0], removal_rows[1])
+            self.endRemoveRows()
 
-    def data(self, index, role=QtCore.Qt.DisplayRole):
-        column, row = index.column(), index.row()
-        if role == QtCore.Qt.TextAlignmentRole:
-            return self.column_alignments[column]
-        return super(CustomItemModel, self).data(index, role)
+    def _get_row_data(self):
+        return self._row_data
+
+    def _lookup_cell_value(self, row, column):
+        return self._row_data[row][column]
+
+    def rowCount(self, parent=None):
+        return len(self._row_data)
 
 
 def create_table_model(parent, columns, _class=None):
     if _class is None:
         _class = CustomItemModel
-    model = _class(0, len(columns), parent)
-    for i, (column_name, column_type) in enumerate(columns):
-        model.setHeaderData(i, QtCore.Qt.Horizontal, column_name)
-        if column_type is int:
-            model.column_alignments[i] = QtCore.Qt.AlignRight
-        else:
-            model.column_alignments[i] = QtCore.Qt.AlignLeft
-    return model
+    return _class(columns, parent)
 
 class CustomQTableView(QtGui.QTableView):
     _initial_line_idx = None
@@ -264,7 +296,7 @@ class MainWindow(QtGui.QMainWindow):
         self.setWindowTitle(APPLICATION_NAME)
 
         self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
-        self.list_model.column_alignments[0] = QtCore.Qt.AlignRight
+        self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self.list_model)
 
         self.setCentralWidget(self.list_table)
@@ -276,7 +308,7 @@ class MainWindow(QtGui.QMainWindow):
         # Override the default behaviour of using the same font for the table header, that the table itself uses.
         # TODO: Maybe rethink this, as it looks a bit disparate to use different fonts for both.
         default_header_font = QtGui.QApplication.font(self.list_table.horizontalHeader())
-        self.list_model.set_header_font(default_header_font)
+        self.list_model._set_header_font(default_header_font)
 
         ## RESTORE SAVED SETTINGS
 
@@ -286,6 +318,9 @@ class MainWindow(QtGui.QMainWindow):
             font = QtGui.QFont()
             if font.fromString(self.font_info):
                 self.list_table.setFont(font)
+                self.uncertain_code_references_table.setFont(font)
+                self.uncertain_data_references_table.setFont(font)
+                self.symbols_table.setFont(font)
 
         # Restore the layout of the main window and the dock windows.
         window_geometry = self._get_setting("window-geometry")
@@ -328,17 +363,59 @@ class MainWindow(QtGui.QMainWindow):
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-log") # State/geometry persistence requirement.
 
-        dock = QtGui.QDockWidget("Symbols", self)
+        dock = QtGui.QDockWidget("Symbol List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.symbols_model = create_table_model(self, [ ("Symbol", str), ("Address", int), ])
+        self.symbols_model = create_table_model(self, [ ("Address", hex), ("Symbol", str), ])
         self.symbols_table = create_table_widget(self.symbols_model)
         self.symbols_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-symbols") # State/geometry persistence requirement.
+        # Double-click on a row to scroll the view to the address for that row.
+        def symbols_doubleClicked(index):
+            row_index = index.row()
+            new_address = self.symbols_model._lookup_cell_value(row_index, 0)
+            self.scroll_to_address(new_address)
+        self.symbols_table.doubleClicked.connect(symbols_doubleClicked)
 
-        dock = QtGui.QDockWidget("Segments", self)
+        # The "Uncertain Code References" list is currently hidden by default.
+        dock = QtGui.QDockWidget("Uncertain Code References", self)
+        dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
+        self.uncertain_code_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_code_references_table = create_table_widget(self.uncertain_code_references_model)
+        self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
+        dock.setWidget(self.uncertain_code_references_table)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+        self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-uncertain-code-references") # State/geometry persistence requirement.
+        dock.hide()
+        # Double-click on a row to scroll the view to the address for that row.
+        def uncertain_code_references_doubleClicked(index):
+            row_index = index.row()
+            new_address = self.uncertain_code_references_model._lookup_cell_value(row_index, 0)
+            self.scroll_to_address(new_address)
+        self.uncertain_code_references_table.doubleClicked.connect(uncertain_code_references_doubleClicked)
+
+        # The "Uncertain Data References" list is currently hidden by default.
+        dock = QtGui.QDockWidget("Uncertain Data References", self)
+        dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
+        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Block Size", int), ])
+        self.uncertain_data_references_table = create_table_widget(self.uncertain_data_references_model)
+        self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
+        dock.setWidget(self.uncertain_data_references_table)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+        self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-uncertain-data-references") # State/geometry persistence requirement.
+        dock.hide()
+        # Double-click on a row to scroll the view to the address for that row.
+        def uncertain_data_references_doubleClicked(index):
+            row_index = index.row()
+            new_address = self.uncertain_data_references_model._lookup_cell_value(row_index, 0)
+            self.scroll_to_address(new_address)
+        self.uncertain_data_references_table.doubleClicked.connect(uncertain_data_references_doubleClicked)
+
+        dock = QtGui.QDockWidget("Segment List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.segments_model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
         self.segments_table = create_table_widget(self.segments_model)
@@ -407,7 +484,7 @@ class MainWindow(QtGui.QMainWindow):
         self.reset_state()
 
     def reset_ui(self):
-        for model in (self.list_model, self.symbols_model, self.segments_model, self.log_model):
+        for model in (self.list_model, self.symbols_model, self.uncertain_references_model, self.segments_model, self.log_model):
             model._clear_data()
 
     def reset_state(self):
@@ -463,10 +540,7 @@ class MainWindow(QtGui.QMainWindow):
                 if new_address is None:
                     new_address = int(text)
             if new_address is not None:
-                new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
-                logger.debug("goto line: %d address: $%X", new_line_idx, new_address)
-                self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-                self.list_table.selectRow(new_line_idx)
+                self.scroll_to_address(new_address)
 
     def menu_search_goto_previous_data_block(self):
         line_idx = self.list_table.currentIndex().row()
@@ -489,10 +563,11 @@ class MainWindow(QtGui.QMainWindow):
         self.list_table.selectRow(new_line_idx)
 
     def menu_settings_choose_font(self):
-        # TODO: Could identify the current font and pass it in to be initial selection.
         font, ok = QtGui.QFontDialog.getFont(self.list_table.font(), self)
         if font and ok:
             self.list_table.setFont(font)
+            self.uncertain_code_references_table.setFont(font)
+            self.uncertain_data_references_table.setFont(font)
             self._set_setting("font-info", font.toString())
 
     ## INTERACTION FUNCTIONS
@@ -616,6 +691,12 @@ class MainWindow(QtGui.QMainWindow):
         self.set_data_type(address, disassembly.DATA_TYPE_ASCII)
 
     ## MISCELLANEIA
+
+    def scroll_to_address(self, new_address):
+        new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
+        logger.debug("goto line: %d address: $%X", new_line_idx, new_address)
+        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
+        self.list_table.selectRow(new_line_idx)
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
@@ -767,49 +848,71 @@ class MainWindow(QtGui.QMainWindow):
 
         ## SEGMENTS
  
-        # Populate the segments dockable window with the loaded segment information.
-        model = self.segments_model
-        loader_segments = self.disassembly_data.loader_segments
-        for segment_id in range(len(loader_segments)):
-            model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-            
-            if loaderlib.is_segment_type_code(loader_segments, segment_id):
-                segment_type = "code"
-            elif loaderlib.is_segment_type_data(loader_segments, segment_id):
-                segment_type = "data"
-            elif loaderlib.is_segment_type_bss(loader_segments, segment_id):
-                segment_type = "bss"
-            length = loaderlib.get_segment_length(loader_segments, segment_id)
-            data_length = loaderlib.get_segment_data_length(loader_segments, segment_id)
-            if loaderlib.get_segment_data_file_offset(loader_segments, segment_id) == -1:
-                data_length = "-"
-            reloc_count = "-"#len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
-            symbol_count = "-"#len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
+        if False:
+            # Populate the segments dockable window with the loaded segment information.
+            model = self.segments_model
+            loader_segments = self.disassembly_data.loader_segments
+            for segment_id in range(len(loader_segments)):
+                model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
+                
+                if loaderlib.is_segment_type_code(loader_segments, segment_id):
+                    segment_type = "code"
+                elif loaderlib.is_segment_type_data(loader_segments, segment_id):
+                    segment_type = "data"
+                elif loaderlib.is_segment_type_bss(loader_segments, segment_id):
+                    segment_type = "bss"
+                length = loaderlib.get_segment_length(loader_segments, segment_id)
+                data_length = loaderlib.get_segment_data_length(loader_segments, segment_id)
+                if loaderlib.get_segment_data_file_offset(loader_segments, segment_id) == -1:
+                    data_length = "-"
+                reloc_count = "-"#len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
+                symbol_count = "-"#len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
 
-            model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
-            for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
-                model.setData(model.index(segment_id, i+1, QtCore.QModelIndex()), column_value)
+                model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
+                for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
+                    model.setData(model.index(segment_id, i+1, QtCore.QModelIndex()), column_value)
 
-        self.segments_table.resizeColumnsToContents()
-        self.segments_table.horizontalHeader().setStretchLastSection(True)
+            self.segments_table.resizeColumnsToContents()
+            self.segments_table.horizontalHeader().setStretchLastSection(True)
 
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
         disassembly.set_symbol_insert_func(self.disassembly_data, self.disassembly_symbol_added)
 
-        model = self.symbols_model
-        model.insertRows(model.rowCount(), len(self.disassembly_data.symbols_by_address), QtCore.QModelIndex())
-        row_index = 0
-        for symbol_address, symbol_label in self.disassembly_data.symbols_by_address.iteritems():
-            self._add_symbol_to_model(symbol_address, symbol_label, row_index)
-            row_index += 1
-
+        row_data = self.disassembly_data.symbols_by_address.items()
+        self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
+        ## UNCERTAIN REFERENCES
+
+        """
+        What API do I need?
+        - Iterate over all code statements and return those with values which ambiguous (are within address ranges).
+        - Iterate over all data statements and return those with values which are possible address references.
+
+        TODO:
+        - on block data type change, notify ui.
+        """
+
+        disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self.disassembly_uncertain_reference_modification)
+
+        results = disassembly.get_uncertain_code_references(self.disassembly_data)
+        self.uncertain_code_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
+        self.uncertain_code_references_table.resizeColumnsToContents()
+        self.uncertain_code_references_table.horizontalHeader().setStretchLastSection(True)
+
+        results = disassembly.get_uncertain_data_references(self.disassembly_data)
+        self.uncertain_data_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
+        self.uncertain_data_references_table.resizeColumnsToContents()
+        self.uncertain_data_references_table.horizontalHeader().setStretchLastSection(True)
+
+        ## DONE LOADING ##
+
         self.loaded_signal.emit(0)
 
+    # TODO: FIX
     def disassembly_symbol_added(self, symbol_address, symbol_label):
         model = self.symbols_model
         model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
@@ -818,6 +921,54 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
+    def disassembly_uncertain_reference_modification(self, data_type_from, data_type_to, address, length):
+        if data_type_from == disassembly.DATA_TYPE_CODE:
+            from_model = self.uncertain_code_references_model
+        else:
+            from_model = self.uncertain_data_references_model
+        from_row_data = from_model._get_row_data()
+        removal_idx0 = None
+        removal_idxN = len(from_row_data)
+        for i, entry in enumerate(from_row_data):
+            if entry[0] < address:
+                continue
+            if entry[0] >= address + length:
+                removal_idxN = i
+                break
+            if removal_idx0 is None:
+                removal_idx0 = i
+        if removal_idx0 is None:
+            removal_idx0 = 0
+        from_row_data[removal_idx0:removal_idxN] = []
+        from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
+
+        addition_rows = disassembly.get_uncertain_references_by_address(self.disassembly_data, address)
+        if len(addition_rows):
+            if data_type_to == disassembly.DATA_TYPE_CODE:
+                to_model = self.uncertain_code_references_model
+            else:
+                to_model = self.uncertain_data_references_model
+            to_row_data = to_model._get_row_data()
+
+            from_idx = 0
+            to_idx = 0
+            insert_ranges = []
+            while to_idx < len(to_row_data) and from_idx < len(addition_rows):
+                insert_value = addition_rows[from_idx]
+                if insert_value < to_row_data[to_idx]:
+                    to_row_data.insert(to_idx, insert_value)
+                    if len(insert_ranges) and insert_ranges[-1][1] == to_idx-1:
+                        insert_ranges[-1][1] = to_idx
+                    else:
+                        if len(insert_ranges):
+                            to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
+                        insert_ranges.append([ to_idx, to_idx ])
+                    from_idx += 1
+                to_idx += 1
+            if len(insert_ranges):
+                to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
+
+    # TODO: FIX
     def _add_symbol_to_model(self, symbol_address, symbol_label, row_index=None):
         model = self.symbols_model
         if row_index is None:
@@ -1269,6 +1420,8 @@ def _initialise_logging(window):
         def emit(self, record):
             msg = self.format(record)
             # These logging events may be happening in the worker thread, ensure they only get displayed in the UI thread.
+            print msg
+            return
             window.log_signal.emit((record.created, record.levelname, record.name, msg))
 
     handler = LogHandler()
@@ -1277,6 +1430,7 @@ def _initialise_logging(window):
     root_logger = logging.root
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(handler)
+    root_logger.debug("Logging redirected to standard output as inter-thread logging is slow.")
 
 
 if __name__ == '__main__':

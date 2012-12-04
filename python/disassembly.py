@@ -61,6 +61,10 @@ def get_block_data_type(block):
     return (block.flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
 
 def set_block_data_type(block, data_type):
+    """
+    NOTE: If this function is called after loading of an input file is complete, then it is 
+          the responsibility of the caller to update the uncertain reference lists.
+    """
     block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
     block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
 
@@ -248,6 +252,22 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
         return [ k for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems() if k in program_data.symbols_by_address ]
     return []
 
+
+"""
+This may be of future use, but what it should return remains to be decided.
+
+def get_all_references(program_data):
+    for target_address, referring_addresses in program_data.reference_addresses.iteritems():
+        target_block, target_block_idx = lookup_block_by_address(program_data, target_address)
+        if target_block.address != target_address:
+            logger.error("get_all_references: analysing reference referrers, target address mismatch: %X != %X", target_block.address, target_address)
+            continue
+        if get_block_data_type(target_block) == DATA_TYPE_LONGWORD:
+            for source_address in referring_addresses:
+                source_block, source_block_idx = lookup_block_by_address(program_data, source_address)
+                if get_block_data_type(source_block) == DATA_TYPE_CODE:
+                    line_number, match = get_code_block_info_for_address(program_data, source_address)
+"""
 
 def get_data_type_sizes(block):
     data_type = get_block_data_type(block)
@@ -471,7 +491,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     return "-"
 
 
-def insert_address_check(program_data, address):
+def check_known_address(program_data, address):
     pre_ids = set()
     for address0, addressN, segment_ids in program_data.address_ranges:
         if address < address0:
@@ -495,25 +515,27 @@ def insert_address_check(program_data, address):
                 addresses.sort()
         return True
     else:
-        logger.debug("Found address not within segment address spaces: %X, excess: %d, pre segment_id: %s", address, address - addressN, pre_ids)
+        pass # logger.debug("Found address not within segment address spaces: %X, excess: %d, pre segment_id: %s", address, address - addressN, pre_ids)
     return False
 
 def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_addresses):
-    if not insert_address_check(program_data, address):
-        return
+    if not check_known_address(program_data, address):
+        return False
     # These get split as their turn to be disassembled comes up.
-    referring_addresses = program_data.branch_addresses.get(address, set())
+    referring_addresses = program_data.branch_addresses.setdefault(address, set())
     referring_addresses.add(src_abs_idx)
-    program_data.branch_addresses[address] = referring_addresses
+    #program_data.branch_addresses[address] = referring_addresses
     pending_symbol_addresses.add(address)
+    return True
 
 def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_addresses):
-    if not insert_address_check(program_data, address):
-        return
-    referring_addresses = program_data.reference_addresses.get(address, set())
+    if not check_known_address(program_data, address):
+        return False
+    referring_addresses = program_data.reference_addresses.setdefault(address, set())
     referring_addresses.add(src_abs_idx)
-    program_data.reference_addresses[address] = referring_addresses
+    #program_data.reference_addresses[address] = referring_addresses
     pending_symbol_addresses.add(address)
+    return True
 
 def get_referring_addresses(program_data, address):
     referring_addresses = set()
@@ -534,7 +556,7 @@ def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
 
 def insert_symbol(program_data, address, name):
-    if not insert_address_check(program_data, address):
+    if not check_known_address(program_data, address):
         return
     program_data.symbols_by_address[address] = name
     if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
@@ -547,8 +569,7 @@ def get_symbol_for_address(program_data, address, absolute_info=None):
         if program_data.flags & PDF_BINARY_FILE == PDF_BINARY_FILE:
             # This gets called for values.  All values of the given kind, not just the ones that
             # actually were picked up as references.  We need to verify they are known references.
-            referring_addresses = program_data.reference_addresses.get(address)
-            if referring_addresses and referring_instruction_address in referring_addresses:
+            if referring_instruction_address in get_referring_addresses(program_data, address):
                 valid_address = True
         elif address in program_data.loader_relocated_addresses:
             # For now, check all instruction bytes as addresses to see if they were relocated within.
@@ -564,9 +585,6 @@ def get_symbol_for_address(program_data, address, absolute_info=None):
         return program_data.symbols_by_address.get(address)
 
 def set_symbol_for_address(program_data, address, symbol):
-    if address == 0x20:
-        import traceback
-        traceback.print_stack(limit=3)
     program_data.symbols_by_address[address] = symbol
 
 def recalculate_line_count_index(program_data, dirtyidx=None):
@@ -660,14 +678,24 @@ def split_block(program_data, address, own_midinstruction=False):
                         logger.debug("Attempting to split block mid-instruction (not handled here): %06X", address)
                     return block, ERR_SPLIT_MIDINSTRUCTION
 
-        # Divide the line data at the given point.
+        # Line data: divide between blocks at the given point.
         block_line_data = block.line_data[:i]
         split_block_line_data = block.line_data[i:]
 
-        # Rebase block offsets within line data entries.
+        # Line data: rebase block offsets within new block entries.
         for i, (type_id, entry) in enumerate(split_block_line_data):
             if type_id in (SLD_EQU_LOCATION_RELATIVE, SLD_INSTRUCTION) and type(entry) is int:
                 split_block_line_data[i] = (type_id, entry-split_offset)
+
+        # References: divide between blocks at the given address.
+        if block.references is not None:
+            for i, entry in enumerate(block.references):
+                if entry[0] >= address:
+                    break
+            new_block_references = block.references[i:]
+            block.references[i:] = []
+        else:
+            new_block_references = None
 
         if address & 1:
             logger.debug("Splitting code block at odd address: %06X", address)
@@ -687,12 +715,84 @@ def split_block(program_data, address, own_midinstruction=False):
     if block_data_type == DATA_TYPE_CODE:
         block.line_data = block_line_data
         new_block.line_data = split_block_line_data
+        new_block.references = new_block_references
 
     calculate_line_count(program_data, block)
     calculate_line_count(program_data, new_block)
 
     return new_block, block_idx + 1
 
+def _locate_uncertain_data_references(program_data, address, block=None):
+    """ Check for valid 32 bit addresses at all 16 bit aligned offsets within the data block from address onwards. """
+    if block is None:
+        block, block_idx = lookup_block_by_address(program_data, address)
+    data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
+    data_idx_start = block.segment_offset + (address - block.address)
+    data_idx_end = block.segment_offset + block.length
+    address_offset = 0
+    matches = []
+    data_type = get_block_data_type(block)
+    if data_type == DATA_TYPE_LONGWORD:
+        bit_size = 32
+    elif data_type == DATA_TYPE_WORD:
+        bit_size = 16
+    else:
+        bit_size = 8
+    f = program_data.loader_data_types.uint32_value
+    while data_idx_start + address_offset + 4 <= data_idx_end:
+        value = f(data, data_idx_start + address_offset)
+        if check_known_address(program_data, value):
+            matches.append((address + address_offset, value, bit_size))
+        address_offset += 2
+    return matches
+
+def get_uncertain_data_references(program_data):
+    results = []
+    for block in program_data.blocks:
+        data_type = get_block_data_type(block)
+        if data_type != DATA_TYPE_CODE and block.references:
+            results.extend(block.references)
+    return results
+
+def _locate_uncertain_code_references(program_data, address, block=None):
+    """ Check for candidate operand values in instructions within the data block from address onwards. """
+    if block is None:
+        block, block_idx = lookup_block_by_address(program_data, address)
+    matches = []
+    addressN = block.address
+    for i, (type_id, entry) in enumerate(block.line_data):
+        if type_id == SLD_INSTRUCTION:
+            if type(entry) is int:
+                entry = realise_instruction_entry(program_data, block, entry)
+            address0 = addressN
+            addressN += entry.num_bytes
+            if addressN >= address:
+                # Is this statement suitable?  Need an 
+                for value, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
+                    if flags & 2: # MAF_ABSOLUTE
+                        line_idx = get_line_number_for_address(program_data, address0)
+                        code_string = get_file_line(program_data, line_idx, LI_INSTRUCTION)
+                        operands_text = get_file_line(program_data, line_idx, LI_OPERANDS)
+                        if len(operands_text):
+                            code_string += " "+ operands_text
+                        matches.append((address0, value, code_string))
+    return matches
+
+def get_uncertain_code_references(program_data):
+    results = []
+    for block in program_data.blocks:
+        data_type = get_block_data_type(block)
+        if data_type == DATA_TYPE_CODE and block.references:
+            results.extend(block.references)
+    return results
+
+def get_uncertain_references_by_address(program_data, address):
+    # That the block is a data block is known.
+    block, block_idx = lookup_block_by_address(program_data, address)
+    return block.references
+
+def set_uncertain_reference_modification_func(program_data, f):
+    program_data.uncertain_reference_modification_func = f
 
 def set_data_type_at_address(program_data, address, data_type):
     block, block_idx = lookup_block_by_address(program_data, address)
@@ -709,34 +809,39 @@ def set_data_type_at_address(program_data, address, data_type):
     else:
         block, block_idx = result
 
+    # At this point we are attempting to change a block from one data type to another.
     if data_type == DATA_TYPE_CODE:
-        process_address_as_code(program_data, address, set([ ]))
+        new_code_blocks = _process_address_as_code(program_data, address, set([ ]))
+        for block in new_code_blocks:
+            block.references = _locate_uncertain_code_references(program_data, block.address, block)
     else:
         set_block_data_type(block, data_type)
         block.line_data = None
         # Is this correct?
         block.flags &= ~BLOCK_FLAG_PROCESSED
+        block.references = _locate_uncertain_data_references(program_data, address)
 
     program_data.block_line0s_dirtyidx = block_idx
     calculate_line_count(program_data, block)
 
     logger.debug("Changed data type at %X to %d", address, data_type)
 
-def process_address_as_code(program_data, address, pending_symbol_addresses):
+    if program_data.uncertain_reference_modification_func is not None:
+        program_data.uncertain_reference_modification_func(block_data_type, data_type, block.address, block.length)
+
+def _process_address_as_code(program_data, address, pending_symbol_addresses):
     debug_offsets = set()
     disassembly_offsets = set([ address ])
+    new_code_block_addresses = []
     while len(disassembly_offsets):
         address = disassembly_offsets.pop()
-        if address == 0xD60:
-            logger.debug("Processing address: %X", address)
-
         block, block_idx = lookup_block_by_address(program_data, address)
         block_data_type = get_block_data_type(block)
         # When the address is mid-block, split the associated portion of the block off.
         if address - block.address > 0:
             result = split_block(program_data, address)
             if IS_SPLIT_ERR(result[1]):
-                logger.debug("process_address_as_code/focus: At $%06X unexpected splitting error #%d", address, result[1])
+                logger.debug("_process_address_as_code/focus: At $%06X unexpected splitting error #%d", address, result[1])
                 continue
             block, block_idx = result
             # address = block.address Superfluous due to it being the split address.
@@ -788,7 +893,7 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
             else:
                 result = split_block(program_data, address + bytes_consumed)
                 if IS_SPLIT_ERR(result[1]):
-                    logger.error("process_address_as_code/unrecognised-code: At $%06X unexpected splitting error #%d", address + bytes_consumed, result[1])
+                    logger.error("_process_address_as_code/unrecognised-code: At $%06X unexpected splitting error #%d", address + bytes_consumed, result[1])
                     block.flags |= BLOCK_FLAG_PROCESSED
                     continue
                 trailing_block, trailing_block_idx = result
@@ -812,7 +917,7 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
                         if not trailing_block.flags & BLOCK_FLAG_PROCESSED:
                             disassembly_offsets.add(new_code_address)
                     else:
-                        logger.error("process_address_as_code/skipped-data: At $%06X unexpected splitting error #%d", new_code_address, result[1])
+                        logger.error("_process_address_as_code/skipped-data: At $%06X unexpected splitting error #%d", new_code_address, result[1])
                         block.flags |= BLOCK_FLAG_PROCESSED
                         continue
                 else:
@@ -830,13 +935,12 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
         set_block_data_type(block, DATA_TYPE_CODE)
         block.line_data = line_data
         calculate_line_count(program_data, block)
+        new_code_block_addresses.append(block)
 
         # Extract any addresses which are referred to, for later use.
         for type_id, entry in line_data:
             if type_id == SLD_INSTRUCTION:
                 for match_address, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
-                    if match_address == 0x2000:
-                        print "0x2000", flags
                     if flags & 1: # MAF_CODE
                         disassembly_offsets.add(match_address)
                         insert_branch_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
@@ -851,8 +955,6 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
                                 search_address += 1
                     elif flags & 4 != 4: # !MAF_UNCERTAIN
                         insert_reference_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
-                    else:
-                        print "XXX", match_address
 
         # DEBUG BLOCK SPILLING BASED ON LOGICAL ASSUMPTION OF MORE CODE.
         if bytes_consumed == block.length and not found_terminating_instruction and not data_bytes_to_skip:
@@ -872,7 +974,7 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
                     elif result[1] == ERR_SPLIT_MIDINSTRUCTION:
                         insert_symbol(program_data, address, "SYM%06X" % address)
                     else:
-                        logger.error("process_address_as_code/labeling: At $%06X unexpected splitting error #%d", address, result[1])
+                        logger.error("_process_address_as_code/labeling: At $%06X unexpected splitting error #%d", address, result[1])
                     continue
                 block, block_idx = result
             label = "lb"+ { DATA_TYPE_CODE: "C", DATA_TYPE_ASCII: "A", DATA_TYPE_BYTE: "B", DATA_TYPE_WORD: "W", DATA_TYPE_LONGWORD: "L" }[get_block_data_type(block)] + ("%06X" % address)
@@ -883,6 +985,9 @@ def process_address_as_code(program_data, address, pending_symbol_addresses):
         if get_block_data_type(block) == DATA_TYPE_CODE and block.flags & BLOCK_FLAG_PROCESSED:
             continue
         logger.debug("%06X (%06X): Found end of block boundary with processed code and no end instruction (data type: %d, processed: %d)", address, block.address, get_block_data_type(block), block.flags & BLOCK_FLAG_PROCESSED)
+
+    print "process code:", len(new_code_block_addresses)
+    return new_code_block_addresses
 
 def _make_inputfile_name(savefile_path):
     savedir_path, savefile_name = os.path.split(savefile_path)
@@ -961,6 +1066,7 @@ def load_project(savefile_path):
 
     onload_set_disassemblylib_functions(program_data)
     onload_make_address_ranges(program_data)
+    onload_cache_uncertain_references(program_data)
 
     DEBUG_log_load_stats(program_data)
 
@@ -1066,7 +1172,7 @@ def load_file(file_path, new_options):
     pending_symbol_addresses.add(entrypoint_address)
 
     # Follow the disassembly at the given address, as far as it takes us.
-    process_address_as_code(program_data, entrypoint_address, pending_symbol_addresses)
+    _process_address_as_code(program_data, entrypoint_address, pending_symbol_addresses)
 
     # Split the blocks for existing symbols (so their label appears).
     for address in existing_symbol_addresses:
@@ -1076,12 +1182,16 @@ def load_file(file_path, new_options):
                 continue
             logger.error("load_file: At $%06X unexpected splitting error #%d", address, result[1])
 
+    recalculate_line_count_index(program_data)
+
+    ## Any analysis / post-processing that does not change line count should go below.
+    onload_cache_uncertain_references(program_data)
+
     # Ensure the new project options are recorded and persisted.
     _set_project_shared_options(program_data, new_options)
 
     DEBUG_log_load_stats(program_data)
 
-    recalculate_line_count_index(program_data)
     return program_data, get_line_count(program_data)
 
 
@@ -1106,6 +1216,16 @@ def onload_make_address_ranges(program_data):
                 break
         else:
             program_data.address_ranges.append((new_address0, new_addressN-1, set([segment_id])))
+
+def onload_cache_uncertain_references(program_data):
+    if program_data.flags & PDF_BINARY_FILE == PDF_BINARY_FILE:
+        for block in program_data.blocks:
+            data_type = get_block_data_type(block)
+            if data_type == DATA_TYPE_CODE:
+                block.references = _locate_uncertain_code_references(program_data, block.address, block)
+            else:
+                block.references = _locate_uncertain_data_references(program_data, block.address, block)
+
 
 def calculate_file_checksum(file_path):
     hasher = hashlib.md5()
