@@ -36,6 +36,7 @@ http://qt-project.org/wiki/Signals_and_Slots_in_PySide
 import collections
 import cPickle
 import logging
+import new
 import os
 import sys
 import time
@@ -57,6 +58,9 @@ SOURCE_CODE_FILTER = "Source code (*.s *.asm)"
 
 
 logger = logging.getLogger("UI")
+
+
+UNCERTAIN_ADDRESS_IDX = 1
 
 
 class WorkThread(QtCore.QThread):
@@ -383,7 +387,7 @@ class MainWindow(QtGui.QMainWindow):
         # The "Uncertain Code References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_code_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_code_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.uncertain_code_references_table = create_table_widget(self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_code_references_table)
@@ -394,7 +398,7 @@ class MainWindow(QtGui.QMainWindow):
         # Double-click on a row to scroll the view to the address for that row.
         def uncertain_code_references_doubleClicked(index):
             row_index = index.row()
-            new_address = self.uncertain_code_references_model._lookup_cell_value(row_index, 0)
+            new_address = self.uncertain_code_references_model._lookup_cell_value(row_index, UNCERTAIN_ADDRESS_IDX)
             self.scroll_to_address(new_address)
         self.uncertain_code_references_table.doubleClicked.connect(uncertain_code_references_doubleClicked)
         def uncertain_code_references_customContextMenuRequested(pos):
@@ -410,7 +414,7 @@ class MainWindow(QtGui.QMainWindow):
         # The "Uncertain Data References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_data_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.uncertain_data_references_table = create_table_widget(self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_data_references_table)
@@ -421,7 +425,7 @@ class MainWindow(QtGui.QMainWindow):
         # Double-click on a row to scroll the view to the address for that row.
         def uncertain_data_references_doubleClicked(index):
             row_index = index.row()
-            new_address = self.uncertain_data_references_model._lookup_cell_value(row_index, 0)
+            new_address = self.uncertain_data_references_model._lookup_cell_value(row_index, UNCERTAIN_ADDRESS_IDX)
             self.scroll_to_address(new_address)
         self.uncertain_data_references_table.doubleClicked.connect(uncertain_data_references_doubleClicked)
         if False:
@@ -451,11 +455,17 @@ class MainWindow(QtGui.QMainWindow):
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
 
-        self.edit_set_datatype_code_action = QtGui.QAction("Set datatype code", self, statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
-        self.edit_set_datatype_32bit_action = QtGui.QAction("Set datatype 32 bit", self, statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
-        self.edit_set_datatype_16bit_action = QtGui.QAction("Set datatype 16 bit", self, statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
-        self.edit_set_datatype_8bit_action = QtGui.QAction("Set datatype 8 bit", self, statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
-        self.edit_set_datatype_ascii_action = QtGui.QAction("Set datatype ascii", self, statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
+        self.edit_datatype_submenu_action = QtGui.QAction("Change address datatype", self, statusTip="Change data type at current address")
+        self.edit_set_datatype_code_action = QtGui.QAction("Code", self, statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
+        self.edit_set_datatype_32bit_action = QtGui.QAction("32 bit", self, statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
+        self.edit_set_datatype_16bit_action = QtGui.QAction("16 bit", self, statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
+        self.edit_set_datatype_8bit_action = QtGui.QAction("8 bit", self, statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
+        self.edit_set_datatype_ascii_action = QtGui.QAction("ASCII", self, statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
+
+        self.edit_numericbase_submenu_action = QtGui.QAction("Operand numeric base", self, statusTip="Change numeric base of selected operand")
+        self.edit_set_numericbase_decimal_action = QtGui.QAction("Decimal", self, statusTip="Change numeric base to decimal", triggered=lambda: None)
+        self.edit_set_numericbase_hexadecimal_action = QtGui.QAction("Hexadecimal", self, statusTip="Change numeric base to hexadecimal", triggered=lambda: None)
+        self.edit_set_numericbase_binary_action = QtGui.QAction("Binary", self, statusTip="Change numeric base to binary", triggered=lambda: None)
 
         self.search_find = QtGui.QAction("Find..", self, shortcut="Ctrl+F", statusTip="Find some specific text", triggered=self.menu_search_find)
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
@@ -472,11 +482,26 @@ class MainWindow(QtGui.QMainWindow):
         self.file_menu.addAction(self.quit_action)
 
         self.edit_menu = self.menuBar().addMenu("&Edit")
-        self.edit_menu.addAction(self.edit_set_datatype_code_action)
-        self.edit_menu.addAction(self.edit_set_datatype_32bit_action)
-        self.edit_menu.addAction(self.edit_set_datatype_16bit_action)
-        self.edit_menu.addAction(self.edit_set_datatype_8bit_action)
-        self.edit_menu.addAction(self.edit_set_datatype_ascii_action)
+        self.edit_menu.addAction(self.edit_datatype_submenu_action)
+        self.edit_menu.addAction(self.edit_numericbase_submenu_action)
+        if True:
+            self.edit_datatype_submenu = QtGui.QMenu(self.edit_menu)
+            self.edit_datatype_submenu.addAction(self.edit_set_datatype_code_action)
+            self.edit_datatype_submenu.addAction(self.edit_set_datatype_32bit_action)
+            self.edit_datatype_submenu.addAction(self.edit_set_datatype_16bit_action)
+            self.edit_datatype_submenu.addAction(self.edit_set_datatype_8bit_action)
+            self.edit_datatype_submenu.addAction(self.edit_set_datatype_ascii_action)
+            self.edit_set_datatype_ascii_action.setEnabled(False)
+            self.edit_datatype_submenu_action.setMenu(self.edit_datatype_submenu)
+        if True:
+            self.edit_numericbase_submenu = QtGui.QMenu(self.edit_menu)
+            self.edit_numericbase_submenu.addAction(self.edit_set_numericbase_decimal_action)
+            self.edit_set_numericbase_decimal_action.setEnabled(False)
+            self.edit_numericbase_submenu.addAction(self.edit_set_numericbase_hexadecimal_action)
+            self.edit_set_numericbase_hexadecimal_action.setEnabled(False)
+            self.edit_numericbase_submenu.addAction(self.edit_set_numericbase_binary_action)
+            self.edit_set_numericbase_binary_action.setEnabled(False)
+            self.edit_numericbase_submenu_action.setMenu(self.edit_numericbase_submenu)
 
         self.search_menu = self.menuBar().addMenu("&Search")
         self.search_menu.addAction(self.search_find)
@@ -643,7 +668,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_code_references_table.currentIndex().row()
-        address = self.uncertain_code_references_model._lookup_cell_value(row_idx, 0)
+        address = self.uncertain_code_references_model._lookup_cell_value(row_idx, UNCERTAIN_ADDRESS_IDX)
         self.functionality_view_push_address(current_address, address)
 
     def interaction_uncertain_data_references_view_push_symbol(self):
@@ -658,7 +683,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_data_references_table.currentIndex().row()
-        address = self.uncertain_data_references_model._lookup_cell_value(row_idx, 0)
+        address = self.uncertain_data_references_model._lookup_cell_value(row_idx, UNCERTAIN_ADDRESS_IDX)
         self.functionality_view_push_address(current_address, address)
 
     def interaction_view_push_symbol(self):
@@ -945,12 +970,19 @@ class MainWindow(QtGui.QMainWindow):
 
         disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self.disassembly_uncertain_reference_modification)
 
+        def _lookup_cell_value(self, row, column):
+            if column == 0:
+                return u"\u2713"
+            return CustomItemModel._lookup_cell_value(self, row, column-1)
+
         results = disassembly.get_uncertain_code_references(self.disassembly_data)
+        self.uncertain_code_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_code_references_model, CustomItemModel)
         self.uncertain_code_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_code_references_table.resizeColumnsToContents()
         self.uncertain_code_references_table.horizontalHeader().setStretchLastSection(True)
 
         results = disassembly.get_uncertain_data_references(self.disassembly_data)
+        self.uncertain_data_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_data_references_model, CustomItemModel)
         self.uncertain_data_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_data_references_table.resizeColumnsToContents()
         self.uncertain_data_references_table.horizontalHeader().setStretchLastSection(True)
