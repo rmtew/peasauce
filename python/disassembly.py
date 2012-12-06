@@ -731,18 +731,16 @@ def _locate_uncertain_data_references(program_data, address, block=None):
     data_idx_end = block.segment_offset + block.length
     address_offset = 0
     matches = []
-    data_type = get_block_data_type(block)
-    if data_type == DATA_TYPE_LONGWORD:
-        bit_size = 32
-    elif data_type == DATA_TYPE_WORD:
-        bit_size = 16
-    else:
-        bit_size = 8
     f = program_data.loader_data_types.uint32_value
     while data_idx_start + address_offset + 4 <= data_idx_end:
         value = f(data, data_idx_start + address_offset)
         if check_known_address(program_data, value):
-            matches.append((address + address_offset, value, bit_size))
+            line_idx = get_line_number_for_address(program_data, address + address_offset)
+            code_string = get_file_line(program_data, line_idx, LI_INSTRUCTION)
+            operands_text = get_file_line(program_data, line_idx, LI_OPERANDS)
+            if len(operands_text):
+                code_string += " "+ operands_text
+            matches.append((address + address_offset, value, code_string))
         address_offset += 2
     return matches
 

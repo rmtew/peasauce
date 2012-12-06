@@ -253,7 +253,7 @@ class CustomQTableView(QtGui.QTableView):
         self.verticalHeader().setDefaultSectionSize(fontMetrics.lineSpacing() + 2)
         return result
 
-def create_table_widget(model):
+def create_table_widget(model, multiselect=False):
     # Need a custom table view to get selected row.
     table = CustomQTableView()
     table.setModel(model)
@@ -270,7 +270,8 @@ def create_table_widget(model):
     table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
     # No selection of individual cells, but rather line specific selection.
     table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-    table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+    if not multiselect:
+        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
     table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
     return table
 
@@ -383,7 +384,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_code_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
-        self.uncertain_code_references_table = create_table_widget(self.uncertain_code_references_model)
+        self.uncertain_code_references_table = create_table_widget(self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_code_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
@@ -396,12 +397,21 @@ class MainWindow(QtGui.QMainWindow):
             new_address = self.uncertain_code_references_model._lookup_cell_value(row_index, 0)
             self.scroll_to_address(new_address)
         self.uncertain_code_references_table.doubleClicked.connect(uncertain_code_references_doubleClicked)
+        def uncertain_code_references_customContextMenuRequested(pos):
+            relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda*args:None)
+            clear_action = QtGui.QAction("Clear labelisation", self, statusTip="Clear any specified rows label usage", triggered=lambda*args:None)
+            menu = QtGui.QMenu(self)
+            menu.addAction(relocate_action)
+            menu.addAction(clear_action)
+            menu.exec_(self.uncertain_code_references_table.mapToGlobal(pos))
+        self.uncertain_code_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.uncertain_code_references_table.customContextMenuRequested.connect(uncertain_code_references_customContextMenuRequested)
 
         # The "Uncertain Data References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Block Size", int), ])
-        self.uncertain_data_references_table = create_table_widget(self.uncertain_data_references_model)
+        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_data_references_table = create_table_widget(self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_data_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
@@ -414,6 +424,16 @@ class MainWindow(QtGui.QMainWindow):
             new_address = self.uncertain_data_references_model._lookup_cell_value(row_index, 0)
             self.scroll_to_address(new_address)
         self.uncertain_data_references_table.doubleClicked.connect(uncertain_data_references_doubleClicked)
+        if False:
+            def uncertain_data_references_customContextMenuRequested(pos):
+                relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda*args:None)
+                clear_action = QtGui.QAction("Clear labelisation", self, statusTip="Clear any specified rows label usage", triggered=lambda*args:None)
+                menu = QtGui.QMenu(self)
+                menu.addAction(relocate_action)
+                menu.addAction(clear_action)
+                menu.exec_(self.uncertain_data_references_table.mapToGlobal(pos))
+            self.uncertain_data_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self.uncertain_data_references_table.customContextMenuRequested.connect(uncertain_data_references_customContextMenuRequested)
 
         dock = QtGui.QDockWidget("Segment List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
@@ -470,14 +490,20 @@ class MainWindow(QtGui.QMainWindow):
         self.settings_menu.addAction(self.choose_font_action)
 
     def create_shortcuts(self):
+        ## Main disassembly list table.
         # Place the current location on the browsing stack, and go to the address of the referenced symbol.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_view_push_symbol)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Go back in the browsing stack.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_view_pop_symbol)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_view_pop_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Display referring addresses.
-        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols)
+        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
         # Edit the name of a label.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol).setContext(QtCore.Qt.WidgetShortcut)
+
+        ## Uncertain code references list table.
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        ## Uncertain data references list table.
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
 
     def reset_all(self):
         self.reset_ui()
@@ -604,6 +630,36 @@ class MainWindow(QtGui.QMainWindow):
                     logger.info("Renamed symbol '%s' to '%s' at address $%06X.", symbol_name, new_symbol_name, current_address)
                 else:
                     QtGui.QMessageBox.information(self, "Invalid symbol name", "The symbol name needs to match standard practices.")
+
+    def interaction_uncertain_code_references_view_push_symbol(self):
+        if self.program_state != STATE_LOADED:
+            return
+
+        # Place current address on the stack.
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+
+        # View selected uncertain code reference address.
+        row_idx = self.uncertain_code_references_table.currentIndex().row()
+        address = self.uncertain_code_references_model._lookup_cell_value(row_idx, 0)
+        self.functionality_view_push_address(current_address, address)
+
+    def interaction_uncertain_data_references_view_push_symbol(self):
+        if self.program_state != STATE_LOADED:
+            return
+
+        # Place current address on the stack.
+        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
+        if not len(selected_line_numbers):
+            return
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+
+        # View selected uncertain code reference address.
+        row_idx = self.uncertain_data_references_table.currentIndex().row()
+        address = self.uncertain_data_references_model._lookup_cell_value(row_idx, 0)
+        self.functionality_view_push_address(current_address, address)
 
     def interaction_view_push_symbol(self):
         if self.program_state != STATE_LOADED:
@@ -886,15 +942,6 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
         ## UNCERTAIN REFERENCES
-
-        """
-        What API do I need?
-        - Iterate over all code statements and return those with values which ambiguous (are within address ranges).
-        - Iterate over all data statements and return those with values which are possible address references.
-
-        TODO:
-        - on block data type change, notify ui.
-        """
 
         disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self.disassembly_uncertain_reference_modification)
 
