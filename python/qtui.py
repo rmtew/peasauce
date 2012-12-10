@@ -245,8 +245,7 @@ class CustomQTableView(QtGui.QTableView):
 
     def paintEvent(self, event):
         if self._initial_line_idx is not None:
-            self.scrollTo(window.list_model.index(self._initial_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-            self.selectRow(self._initial_line_idx)
+            window.scroll_to_line(self._initial_line_idx)
             self._initial_line_idx = None
         super(CustomQTableView, self).paintEvent(event)
 
@@ -257,9 +256,21 @@ class CustomQTableView(QtGui.QTableView):
         self.verticalHeader().setDefaultSectionSize(fontMetrics.lineSpacing() + 2)
         return result
 
-def create_table_widget(model, multiselect=False):
+
+class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super(DisassemblyItemDelegate, self).__init__(parent)
+
+    def paint(self, painter, option, index):
+        super(DisassemblyItemDelegate, self).paint(painter, option, index)
+
+    def sizeHint(self, option, index):
+        return super(DisassemblyItemDelegate, self).sizeHint(option, index)
+
+
+def create_table_widget(parent, model, multiselect=False):
     # Need a custom table view to get selected row.
-    table = CustomQTableView()
+    table = CustomQTableView(parent)
     table.setModel(model)
     table.setCornerButtonEnabled(False)
     table.setGridStyle(QtCore.Qt.NoPen)
@@ -302,8 +313,9 @@ class MainWindow(QtGui.QMainWindow):
 
         self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
-        self.list_table = create_table_widget(self.list_model)
-
+        self.list_table = create_table_widget(self, self.list_model)
+        self.list_table.setItemDelegate(DisassemblyItemDelegate())
+        self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
         self.setCentralWidget(self.list_table)
 
         self.create_menus()
@@ -361,7 +373,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Log", self)
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
         self.log_model = create_table_model(self, [ ("Time", str), ("Level", str), ("System", str), ("Description", str), ])
-        self.log_table = create_table_widget(self.log_model)
+        self.log_table = create_table_widget(dock, self.log_model)
         self.log_table.setAlternatingRowColors(True) # Non-standard
         dock.setWidget(self.log_table)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
@@ -371,7 +383,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Symbol List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.symbols_model = create_table_model(self, [ ("Address", hex), ("Symbol", str), ])
-        self.symbols_table = create_table_widget(self.symbols_model)
+        self.symbols_table = create_table_widget(dock, self.symbols_model)
         self.symbols_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
@@ -388,7 +400,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_code_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
-        self.uncertain_code_references_table = create_table_widget(self.uncertain_code_references_model, multiselect=True)
+        self.uncertain_code_references_table = create_table_widget(dock, self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_code_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
@@ -415,7 +427,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_data_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
-        self.uncertain_data_references_table = create_table_widget(self.uncertain_data_references_model, multiselect=True)
+        self.uncertain_data_references_table = create_table_widget(dock, self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_data_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
@@ -442,7 +454,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Segment List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.segments_model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
-        self.segments_table = create_table_widget(self.segments_model)
+        self.segments_table = create_table_widget(dock, self.segments_model)
         dock.setWidget(self.segments_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
@@ -517,11 +529,11 @@ class MainWindow(QtGui.QMainWindow):
     def create_shortcuts(self):
         ## Main disassembly list table.
         # Place the current location on the browsing stack, and go to the address of the referenced symbol.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Go back in the browsing stack.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_view_pop_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Left")), self.list_table, self.interaction_view_pop_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Display referring addresses.
-        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Shift+Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
         # Edit the name of a label.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol).setContext(QtCore.Qt.WidgetShortcut)
 
@@ -661,10 +673,8 @@ class MainWindow(QtGui.QMainWindow):
             return
 
         # Place current address on the stack.
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
-            return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        row_idx = self.list_table.currentIndex().row()
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_code_references_table.currentIndex().row()
@@ -676,10 +686,8 @@ class MainWindow(QtGui.QMainWindow):
             return
 
         # Place current address on the stack.
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
-            return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        row_idx = self.list_table.currentIndex().row()
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_data_references_table.currentIndex().row()
@@ -691,14 +699,12 @@ class MainWindow(QtGui.QMainWindow):
             return
 
         # Place current address on the stack.
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
-            return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        row_idx = self.list_table.currentIndex().row()
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             return
-        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, row_idx)
         if len(operand_addresses) == 1:
             self.functionality_view_push_address(current_address, operand_addresses[0])
         elif len(operand_addresses) == 2:
@@ -713,19 +719,14 @@ class MainWindow(QtGui.QMainWindow):
 
         if len(self.view_address_stack):
             address = self.view_address_stack.pop()
-            line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
-            logger.info("view pop symbol going to address %06X / line number %d %s." % (address, line_number, str(self.view_address_stack)))
-            self.list_table.scrollTo(self.list_model.index(line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-            self.list_table.selectRow(line_number)
+            self.scroll_to_address(address)
         else:
             logger.error("view pop symbol has empty stack and nowhere to go to.")
 
     def interaction_view_referring_symbols(self):
         # Place current address on the stack.
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
-            return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        row_idx = self.list_table.currentIndex().row()
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             return
@@ -775,16 +776,25 @@ class MainWindow(QtGui.QMainWindow):
 
     def scroll_to_address(self, new_address):
         new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
-        logger.debug("goto line: %d address: $%X", new_line_idx, new_address)
-        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-        self.list_table.selectRow(new_line_idx)
+        logger.debug("scroll_to_address: line=%d address=$%X", new_line_idx, new_address)
+        self.scroll_to_line(new_line_idx, True)
+
+    def scroll_to_line(self, new_line_idx, other=False):
+        if not other:
+            logger.debug("scroll_to_line line=%d", new_line_idx)
+        index = self.list_model.index(new_line_idx, 2, QtCore.QModelIndex())
+        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
+        self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
         next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
         if next_line_number is not None:
-            self.list_table.scrollTo(self.list_model.index(next_line_number, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-            self.list_table.selectRow(next_line_number)
+            #self.list_table.selectRow(next_line_number)
+            self.scroll_to_line(next_line_number)
+            #index = self.list_model.index(next_line_number, 2, QtCore.QModelIndex())
+            #self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
+            #self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         else:
             logger.error("view push symbol for address %06X unable to resolve line number." % address)
@@ -920,6 +930,7 @@ class MainWindow(QtGui.QMainWindow):
         ## Proceed with display of loaded data.
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
+        print "line for entry", hex(entrypoint_address), new_line_idx
 
         self.list_table._initial_line_idx = new_line_idx
 
@@ -1464,7 +1475,7 @@ class NewProjectDialog(QtGui.QDialog):
         if self.new_options.is_binary_file:
             self.new_options.dis_name = self.file_arch_value_combobox.currentText()
             self.new_options.loader_load_address = to_int(self.processing_loadaddress_value_textedit.text())
-            self.new_options.loader_entrypoint_address = to_int(self.processing_entryaddress_value_textedit.text())
+            self.new_options.loader_entrypoint_offset = to_int(self.processing_entryaddress_value_textedit.text()) - self.new_options.loader_load_address
         return super(NewProjectDialog, self).accept()
 
 # TODO: int(, 16) chokes on $ prefix.  Done elsewhere too.

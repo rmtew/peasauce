@@ -241,13 +241,12 @@ class FileInfo(object):
             self.load_address = 0
 
         """ The segment id and offset in that segment of the program entrypoint. """
-        self.entrypoint_segment_id = 0
-        self.entrypoint_offset = 0
-        """ Overrides the segment id and offset. """
         if loader_options is not None:
-            self.entrypoint_address = loader_options.entrypoint_address
+            self.entrypoint_segment_id = loader_options.entrypoint_segment_id
+            self.entrypoint_offset = loader_options.entrypoint_offset
         else:
-            self.entrypoint_address = None
+            self.entrypoint_segment_id = 0
+            self.entrypoint_offset = 0
 
     ## Query..
 
@@ -310,4 +309,5 @@ class BinaryFileOptions(object):
     is_binary_file = True
     dis_name = None
     load_address = None
-    entrypoint_address = None
+    entrypoint_segment_id = 0
+    entrypoint_offset = None
