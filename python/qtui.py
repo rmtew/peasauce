@@ -258,15 +258,80 @@ class CustomQTableView(QtGui.QTableView):
 
 
 class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
+    default_style_sheet = """
+        div.operand1 {
+            xbackground-color: red;
+        }
+        div.operand2 {
+            xbackground-color: green;
+        }
+        table {
+            padding: 0px;
+            border-style: none;
+        }
+    """
+
     def __init__(self, parent=None):
         super(DisassemblyItemDelegate, self).__init__(parent)
 
     def paint(self, painter, option, index):
-        super(DisassemblyItemDelegate, self).paint(painter, option, index)
+        if index.column() == 4:
+            options = QtGui.QStyleOptionViewItemV4(option)
+            self.initStyleOption(options, index)
+
+            style = QtGui.QApplication.style() if options.widget is None else options.widget.style()
+            doc = QtGui.QTextDocument()
+            doc.setDefaultFont(self.parent().font())
+            doc.setDefaultStyleSheet(self.default_style_sheet)
+            text = options.text
+            bits = text.split(", ")
+            if options.state & QtGui.QStyle.State_Selected:
+                if False:
+                    text = ""
+                    for i, bit in enumerate(bits):
+                        if i == 1:
+                            text += ", "
+                        text += "<div class="
+                        if i == 0:
+                            text += "operand1"
+                        else:
+                            text += "operand2"
+                        text += ">"+ bit +"</div>"
+                    if index.row() == 0:
+                        print text
+                else:
+                    bits[0] += ", "
+                    text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
+            doc.setHtml(text)
+            doc.setTextWidth(option.rect.width())
+            doc.setDocumentMargin(0)
+            options.text = ""
+            style.drawControl(QtGui.QStyle.CE_ItemViewItem, options, painter)
+            ctx = QtGui.QAbstractTextDocumentLayout.PaintContext()
+            # Ensures that the selection colours are correct.
+            if options.state & QtGui.QStyle.State_Selected:
+                ctx.palette.setColor(QtGui.QPalette.Text, options.palette.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+
+            textRect = style.subElementRect(QtGui.QStyle.SE_ItemViewItemText, options)
+            painter.save()
+            painter.translate(textRect.topLeft())
+            painter.setClipRect(textRect.translated(-textRect.topLeft()))
+            doc.documentLayout().draw(painter, ctx)
+            painter.restore()
+        else:
+            super(DisassemblyItemDelegate, self).paint(painter, option, index)
 
     def sizeHint(self, option, index):
+        if index.column() == 4:
+            options = QtGui.QStyleOptionViewItemV4(option)
+            self.initStyleOption(options, index)
+            doc = QtGui.QTextDocument()
+            doc.setHtml(options.text)
+            doc.setTextWidth(option.rect.width())
+            return QtCore.QSize(doc.idealWidth(), doc.size().height())
         return super(DisassemblyItemDelegate, self).sizeHint(option, index)
 
+    shflag = False
 
 def create_table_widget(parent, model, multiselect=False):
     # Need a custom table view to get selected row.
@@ -314,7 +379,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self, self.list_model)
-        self.list_table.setItemDelegate(DisassemblyItemDelegate())
+        self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table))
         self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
         self.setCentralWidget(self.list_table)
 
@@ -503,7 +568,6 @@ class MainWindow(QtGui.QMainWindow):
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_16bit_action)
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_8bit_action)
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_ascii_action)
-            self.edit_set_datatype_ascii_action.setEnabled(False)
             self.edit_datatype_submenu_action.setMenu(self.edit_datatype_submenu)
         if True:
             self.edit_numericbase_submenu = QtGui.QMenu(self.edit_menu)
@@ -547,7 +611,7 @@ class MainWindow(QtGui.QMainWindow):
         self.reset_state()
 
     def reset_ui(self):
-        for model in (self.list_model, self.symbols_model, self.uncertain_references_model, self.segments_model, self.log_model):
+        for model in (self.list_model, self.symbols_model, self.uncertain_data_references_model, self.uncertain_code_references_model, self.segments_model, self.log_model):
             model._clear_data()
 
     def reset_state(self):
@@ -590,9 +654,9 @@ class MainWindow(QtGui.QMainWindow):
         if line_idx == -1:
             line_idx = 0
         address = disassembly.get_address_for_line_number(self.disassembly_data, line_idx)
-        # Skip lines which are purely for visual effect.
-        if address is None:            
-            return
+        # Current line does not have an address.
+        if address is None:
+            address = 0
         text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
         if ok and text != '':
             new_address = None
@@ -804,11 +868,8 @@ class MainWindow(QtGui.QMainWindow):
 
     def get_current_address(self):
         # Place current address on the stack.
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
-            logger.debug("Failed to get current address, no selected lines.")
-            return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
+        row_idx = self.list_table.currentIndex().row()
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             logger.debug("Failed to get current address, no address for line.")

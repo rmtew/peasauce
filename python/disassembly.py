@@ -57,18 +57,6 @@ display_configuration = DisplayConfiguration()
 
 ## SegmentBlock flag helpers
 
-def get_block_data_type(block):
-    return (block.flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
-
-def set_block_data_type(block, data_type):
-    """
-    NOTE: If this function is called after loading of an input file is complete, then it is 
-          the responsibility of the caller to update the uncertain reference lists.
-    """
-    block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
-    block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
-
-
 def realise_instruction_entry(program_data, block, block_offset):
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     data_offset_start = block.segment_offset + block_offset
@@ -111,6 +99,8 @@ def calculate_line_count(program_data, block):
         sizes = get_data_type_sizes(block)
         for size_char, num_bytes, size_count, size_lines in sizes:
             block.line_count += size_lines
+    elif get_block_data_type(block) == DATA_TYPE_ASCII:
+        block.line_count = len(block.line_data)
     else:
         block.line_count = None
         return block.line_count - old_line_count
@@ -173,7 +163,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
         if type_id == SLD_INSTRUCTION:
             # Within but not at the start of the previous instruction.
             if line_number < line_count:
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, hex(previous_result[0]))
+                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, None if previous_result is None else hex(previous_result[0]))
                 return previous_result
 
             if type(entry) is int:
@@ -216,7 +206,17 @@ def get_line_number_for_address(program_data, address):
             block_lineN += size_lines
             if address_block_offset >= block_offset0 and address_block_offset < block_offsetN:
                 return block_line0 + (address_block_offset - block_offset0) / num_bytes
-
+    elif data_type == DATA_TYPE_ASCII:
+        block_lineN = program_data.block_line0s[block_idx] + calculate_block_leading_line_count(program_data, block)
+        block_offsetN = 0
+        address_block_offset = address - block.address
+        for byte_offset, byte_length in block.line_data:
+            block_offset0 = block_offsetN
+            block_offsetN += byte_length
+            block_line0 = block_lineN
+            block_lineN += 1
+            if address_block_offset >= block_offset0 and address_block_offset < block_offsetN:
+                return block_line0
     return None
 
 
@@ -242,6 +242,18 @@ def get_address_for_line_number(program_data, line_number):
             block_lineN += size_lines
             if line_number >= block_line0 and line_number < block_lineN:
                 return block.address + block_offset0 + (line_number - block_line0) * num_bytes
+    elif data_type == DATA_TYPE_ASCII:
+        base_line_count = program_data.block_line0s[block_idx] + calculate_block_leading_line_count(program_data, block)
+        block_lineN = base_line_count
+        block_offsetN = 0
+        for byte_offset, byte_length in block.line_data:
+            block_offset0 = block_offsetN
+            block_offsetN += byte_length
+            block_line0 = block_lineN
+            block_lineN += 1
+            if line_number >= block_line0 and line_number < block_lineN:
+                return block.address + block_offset0
+
     return None
 
 
@@ -301,6 +313,10 @@ def get_line_count(program_data):
 
 
 def get_file_line(program_data, line_idx, column_idx): # Zero-based
+    if line_idx is None:
+        return "BAD ROW"
+    if column_idx is None:
+        return "BAD COLUMN"
     block, block_idx = lookup_block_by_line_count(program_data, line_idx)
     block_line_count0 = program_data.block_line0s[block_idx]
     block_line_countN = block_line_count0 + block.line_count
@@ -487,6 +503,58 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     if label is None:
                         label = ("$%0"+ str(num_bytes<<1) +"X") % value
                     return label
+                elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
+                    return "-"
+    elif data_type == DATA_TYPE_ASCII:
+        block_lineN = block_line_count0 + leading_line_count
+        block_offsetN = block.segment_offset
+        for i, (byte_offset, byte_length) in enumerate(block.line_data):
+            block_offset0 = block_offsetN
+            block_offsetN += byte_length
+            block_line0 = block_lineN
+            block_lineN += 1
+
+            if line_idx >= block_line0 and line_idx < block_lineN:
+                data_idx = block_offset0
+                if column_idx == LI_OFFSET:
+                    return "%08X" % (loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
+                elif column_idx == LI_BYTES:
+                    data = loaderlib.get_segment_data(segments, block.segment_id)
+                    return "".join([ "%02X" % c for c in data[data_idx:data_idx+byte_length] ])
+                elif column_idx == LI_LABEL:
+                    label = get_symbol_for_address(program_data, loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
+                    if label is None:
+                        return ""
+                    return label
+                elif column_idx == LI_INSTRUCTION:
+                    name = loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, True)
+                    return name +".B"
+                elif column_idx == LI_OPERANDS:
+                    string = ""
+                    last_value = None
+                    data = loaderlib.get_segment_data(segments, block.segment_id)
+                    for byte in data[data_idx:data_idx+byte_length]:
+                        if byte >= 32 and byte < 127:
+                            # Sequential displayable characters get collected into a contiguous string.
+                            value = chr(byte)
+                            if type(last_value) is not str:
+                                if last_value is not None:
+                                    string += ","
+                                string += "'"
+                            string += value
+                        else:
+                            # Non-displayable characters are appended as separate pieces of data.
+                            value = byte
+                            if last_value is not None:
+                                if type(last_value) is str:
+                                    string += "'"
+                                string += ","
+                            string += _get_byte_representation(byte)
+                        last_value = value
+                    if last_value is not None:
+                        if type(last_value) is str:
+                            string += "'"
+                    return string
                 elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
                     return "-"
 
@@ -716,6 +784,9 @@ def split_block(program_data, address, own_midinstruction=False):
         block.line_data = block_line_data
         new_block.line_data = split_block_line_data
         new_block.references = new_block_references
+    elif block_data_type == DATA_TYPE_ASCII:
+        _process_block_as_ascii(program_data, block)
+        _process_block_as_ascii(program_data, new_block)
 
     calculate_line_count(program_data, block)
     calculate_line_count(program_data, new_block)
@@ -809,13 +880,16 @@ def set_data_type_at_address(program_data, address, data_type):
 
     # At this point we are attempting to change a block from one data type to another.
     if data_type == DATA_TYPE_CODE:
+        # This can fail, so we do not explicitly change the block ourselves.
         new_code_blocks = _process_address_as_code(program_data, address, set([ ]))
         for block in new_code_blocks:
             block.references = _locate_uncertain_code_references(program_data, block.address, block)
     else:
         set_block_data_type(block, data_type)
-        block.line_data = None
-        # Is this correct?
+        if data_type == DATA_TYPE_ASCII:
+            _process_block_as_ascii(program_data, block)
+        else:
+            block.line_data = None
         block.flags &= ~BLOCK_FLAG_PROCESSED
         block.references = _locate_uncertain_data_references(program_data, address)
 
@@ -826,6 +900,65 @@ def set_data_type_at_address(program_data, address, data_type):
 
     if program_data.uncertain_reference_modification_func is not None:
         program_data.uncertain_reference_modification_func(block_data_type, data_type, block.address, block.length)
+
+def _process_block_as_ascii(program_data, block):
+    """
+    Ensure that the block line data contans metadata suitable for rendering the lines,
+    and counting how many there are for the given data.
+    """
+    data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
+    data_offset_start = block.segment_offset
+    bytes_consumed = 0
+    bytes_consumed0 = bytes_consumed
+    block_line_data = []
+    line_width = 0
+    line_width_max = 40
+    last_value = None
+    while bytes_consumed < block.length:
+        byte = data[data_offset_start+bytes_consumed]
+        comma_separated = False
+        char_line_width = 0
+        if byte >= 32 and byte < 127:
+            # Sequential displayable characters get collected into a contiguous string.
+            value = chr(byte)
+            if type(last_value) is not str:
+                comma_separated = True
+                char_line_width += 2 # start and end quoting characters for this character and all appended to it.
+            char_line_width += 1 # char
+        else:
+            # Non-displayable characters are appended as separate pieces of data.
+            value = byte
+            comma_separated = last_value is not None
+            byte_string = _get_byte_representation(byte)
+            char_line_width += len(byte_string)
+        if comma_separated:
+            char_line_width += 1
+        bytes_consumed += 1
+
+        # Append to current line or start a new one?
+        force_new_line = False
+        # Trailing null bytes indicate the end of each string in the block.
+        if last_value != 0 and value == 0:
+            force_new_line = True
+        if line_width + char_line_width > line_width_max or force_new_line:
+            # Would make the current line too long, store the current one and make a new one.
+            block_line_data.append((bytes_consumed0, bytes_consumed-bytes_consumed0))
+            bytes_consumed0 = bytes_consumed
+            line_width = char_line_width
+            last_value = None
+        else:
+            # Still room in this line, add it on.
+            line_width += char_line_width
+            last_value = value
+    if bytes_consumed != bytes_consumed0:
+        block_line_data.append((bytes_consumed0, bytes_consumed-bytes_consumed0))
+    block.line_data = block_line_data
+
+def _get_byte_representation(byte):
+    if byte < 16:
+        return "%d" % byte
+    else:
+        return "$%X" % byte
 
 def _process_address_as_code(program_data, address, pending_symbol_addresses):
     debug_offsets = set()
@@ -984,7 +1117,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses):
             continue
         logger.debug("%06X (%06X): Found end of block boundary with processed code and no end instruction (data type: %d, processed: %d)", address, block.address, get_block_data_type(block), block.flags & BLOCK_FLAG_PROCESSED)
 
-    print "process code:", len(new_code_block_addresses)
+    #print "process code:", len(new_code_block_addresses)
     return new_code_block_addresses
 
 def _make_inputfile_name(savefile_path):
@@ -1054,13 +1187,17 @@ def save_project(savefile_path, program_data, save_options):
 
 def load_project(savefile_path):
     program_data = disassembly_persistence.load_project(savefile_path)
-    recalculate_line_count_index(program_data)
 
     # Try and cache the input file data automatically.
     if program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA:
         cachefile_path = _make_cached_inputfile_path(savefile_path)
         if validate_cached_file(program_data, cachefile_path):
             cache_segment_data(program_data, cachefile_path)
+
+    for block in program_data.blocks:
+        if get_block_data_type(block) == DATA_TYPE_ASCII:
+            _process_block_as_ascii(program_data, block)
+    recalculate_line_count_index(program_data)
 
     onload_set_disassemblylib_functions(program_data)
     onload_make_address_ranges(program_data)

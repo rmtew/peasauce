@@ -159,8 +159,8 @@ def get_load_address(file_info):
     return file_info.load_address
 
 def get_entrypoint_address(file_info):
-    if file_info.entrypoint_address is not None:
-        return file_info.entrypoint_address
+    #if file_info.entrypoint_address is not None:
+    #    return file_info.entrypoint_address
     return get_segment_address(file_info.segments, file_info.entrypoint_segment_id) + file_info.entrypoint_offset
 
 

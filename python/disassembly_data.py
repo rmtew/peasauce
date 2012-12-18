@@ -54,6 +54,17 @@ BLOCK_SPLIT_BITMASK     = BLOCK_FLAG_ALLOC | DATA_TYPE_BITMASK | BLOCK_FLAG_PROC
 
 NUMERIC_DATA_TYPES = (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE)
 
+def get_block_data_type(block):
+    return (block.flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
+
+def set_block_data_type(block, data_type):
+    """
+    NOTE: If this function is called after loading of an input file is complete, then it is 
+          the responsibility of the caller to update the uncertain reference lists.
+    """
+    block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
+    block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
+
 ## SegmentBlock line data entry type ids.
 
 SLD_INSTRUCTION = 1
@@ -141,7 +152,8 @@ class SegmentBlock(object):
     length = None
     """ The data type of this block (DATA_TYPE_*) and more """
     flags = 0
-    """ DATA_TYPE_CODE: [ line0_match, ... lineN_match ]. """
+    """ DATA_TYPE_CODE: [ line0_match, ... lineN_match ]. 
+        DATA_TYPE_ASCII: [ (offset, length), ... ]. """
     line_data = None
     """ Calculated number of lines. """
     line_count = 0

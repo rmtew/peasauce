@@ -42,32 +42,33 @@ def write_SegmentBlock(f, block):
     f.write(s)
 
     if line_data_count > 0:
-        block_offset = 0
-        for i, (type_id, entry) in enumerate(block.line_data):
-            persistence.write_uint8(f, type_id)
-            if type_id == SLD_INSTRUCTION:
-                if type(entry) is int:
-                    persistence.write_uint16(f, entry)
-                    # The length of this instruction is not stored, so we calculate it relative to the next one. 
-                    j = i+1
-                    while j < len(block.line_data):
-                        next_type_id, next_entry = block.line_data[j]
-                        if next_type_id == SLD_INSTRUCTION:
-                            if type(next_entry) is int:
-                                block_offset = next_entry
-                            else:
-                                block_offset = next_entry.pc-2
-                            break
-                        j += 1
+        if get_block_data_type(block) == DATA_TYPE_CODE:
+            block_offset = 0
+            for i, (type_id, entry) in enumerate(block.line_data):
+                persistence.write_uint8(f, type_id)
+                if type_id == SLD_INSTRUCTION:
+                    if type(entry) is int:
+                        persistence.write_uint16(f, entry)
+                        # The length of this instruction is not stored, so we calculate it relative to the next one. 
+                        j = i+1
+                        while j < len(block.line_data):
+                            next_type_id, next_entry = block.line_data[j]
+                            if next_type_id == SLD_INSTRUCTION:
+                                if type(next_entry) is int:
+                                    block_offset = next_entry
+                                else:
+                                    block_offset = next_entry.pc-2
+                                break
+                            j += 1
+                    else:
+                        persistence.write_uint16(f, block_offset)
+                        block_offset += entry.num_bytes
+                elif type_id == SLD_EQU_LOCATION_RELATIVE:
+                    persistence.write_uint32(f, entry) # block offset
+                elif type_id in (SLD_COMMENT_TRAILING, SLD_COMMENT_FULL_LINE):
+                    persistence.write_string(f, entry) # string
                 else:
-                    persistence.write_uint16(f, block_offset)
-                    block_offset += entry.num_bytes
-            elif type_id == SLD_EQU_LOCATION_RELATIVE:
-                persistence.write_uint32(f, entry) # block offset
-            elif type_id in (SLD_COMMENT_TRAILING, SLD_COMMENT_FULL_LINE):
-                persistence.write_string(f, entry) # string
-            else:
-                logger.error("Trying to save a savefile, did not know how to handle entry of type_id: %d, entry value: %s", type_id, entry)
+                    logger.error("Trying to save a savefile, did not know how to handle entry of type_id: %d, entry value: %s", type_id, entry)
 
 def read_SegmentBlock(f):
     block = SegmentBlock()
@@ -75,18 +76,19 @@ def read_SegmentBlock(f):
     block.segment_id, block.segment_offset, block.address, block.length, block.flags, block.line_count, line_data_count = struct.unpack(SEGMENTBLOCK_PACK_FORMAT, f.read(bytes_to_read))
 
     if line_data_count > 0:
-        block.line_data = [ None ] * line_data_count
-        for i in xrange(line_data_count):
-            type_id = persistence.read_uint8(f)
-            if type_id == SLD_INSTRUCTION:
-                block_offset = persistence.read_uint16(f)
-                block.line_data[i] = (type_id, block_offset)
-            elif type_id == SLD_EQU_LOCATION_RELATIVE:
-                block_offset = persistence.read_uint32(f)
-                block.line_data[i] = (type_id, block_offset)
-            elif type_id in (SLD_COMMENT_TRAILING, SLD_COMMENT_FULL_LINE):
-                text = persistence.read_string(f)
-                block.line_data[i] = (type_id, text)
+        if get_block_data_type(block) == DATA_TYPE_CODE:
+            block.line_data = [ None ] * line_data_count
+            for i in xrange(line_data_count):
+                type_id = persistence.read_uint8(f)
+                if type_id == SLD_INSTRUCTION:
+                    block_offset = persistence.read_uint16(f)
+                    block.line_data[i] = (type_id, block_offset)
+                elif type_id == SLD_EQU_LOCATION_RELATIVE:
+                    block_offset = persistence.read_uint32(f)
+                    block.line_data[i] = (type_id, block_offset)
+                elif type_id in (SLD_COMMENT_TRAILING, SLD_COMMENT_FULL_LINE):
+                    text = persistence.read_string(f)
+                    block.line_data[i] = (type_id, text)
     return block
 
 def read_segment_list(f):

@@ -79,7 +79,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Functionality
 
-* Functionality/Disassembly: DATA_TYPE_ASCII is not supported (calculate_line_count, get_line_number_for_address, get_address_for_line_number, get_file_line).
 * UI: Ala Resource, change the numeric base of a value.
 * UI: Ala Resource, edit/override values.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
@@ -95,7 +94,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Technical Debt
 
-* Binary files: Tag all uncertain references and put them in a list view for the user to work through.
 * Binary files: Separate platform and file loading.  Then binary files can be assigned a platform.
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
