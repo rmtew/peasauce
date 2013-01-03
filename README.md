@@ -108,7 +108,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Debugging: Connect to WinUAE, browse files, and select a file to run and debug.
 * Decompilation: Look into IRs.  LLVM?
 * Disassembly: Handle more / differentiate between different M680x0 instructions.
-* File loading: Use 'vamos' to run amiga packer detection and unpacking.
+* File loading: Use 'vamos' or Toni Wilen's WinUAE example to run amiga packer detection and unpacking.
 
 ### Long Term Tasks
 

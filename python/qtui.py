@@ -240,6 +240,7 @@ def create_table_model(parent, columns, _class=None):
     return _class(columns, parent)
 
 class CustomQTableView(QtGui.QTableView):
+    selection_change_signal = QtCore.Signal(tuple)
     _initial_line_idx = None
 
     def paintEvent(self, event):
@@ -254,6 +255,10 @@ class CustomQTableView(QtGui.QTableView):
         # Whenever the font is changed, resize the row heights to suit.
         self.verticalHeader().setDefaultSectionSize(fontMetrics.lineSpacing() + 2)
         return result
+
+    def selectionChanged(self, selected, deselected):
+        super(CustomQTableView, self).selectionChanged(selected, deselected)
+        self.selection_change_signal.emit((selected, deselected))
 
 
 class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
@@ -396,12 +401,19 @@ class QTUIEditorClient(editor_state.ClientAPI):
 
     def request_address(self, default_address):
         text, ok = QtGui.QInputDialog.getText(self.owner, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
+        text = text.strip()
         if ok and text != '':
-            new_address = None
             if text.startswith("0x") or text.startswith("$"):
                 return int(text, 16)
             else:
                 return text
+
+    def request_label_name(self, default_label_name):
+        text, ok = QtGui.QInputDialog.getText(self.owner, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
+        text = text.strip()
+        if ok and text != default_label_name:
+            return text
+
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -428,6 +440,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table))
         self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
+        self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
         self.setCentralWidget(self.list_table)
 
         self.create_menus()
@@ -478,6 +491,16 @@ class MainWindow(QtGui.QMainWindow):
 
         # Let the window close.
         event.accept()
+
+    def list_table_selection_change_event(self, result):
+        """
+        The goal of this method is to notify the editor state when the user changes the selected line number.
+        At this time, it assumes single row selection, as that is what our code above configures.
+        """
+        selected_indexes = result[0].indexes()        
+        if len(selected_indexes) == 1:
+            index = selected_indexes[0]
+            self.editor_state.set_line_number(index.row())
 
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
@@ -679,9 +702,6 @@ class MainWindow(QtGui.QMainWindow):
             self.close()
 
     def menu_search_find(self):
-        line_idx = self.list_table.currentIndex().row()
-        if line_idx == -1:
-            line_idx = 0
         text, ok = QtGui.QInputDialog.getText(self, "Find what?", "Text:", QtGui.QLineEdit.Normal, "")
         if ok and text != '':
             pass
@@ -692,24 +712,18 @@ class MainWindow(QtGui.QMainWindow):
             self.scroll_to_address(new_address)
 
     def menu_search_goto_previous_data_block(self):
-        line_idx = self.list_table.currentIndex().row()
-        if line_idx == -1:
-            line_idx = 0
-        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
-        if new_line_idx is None:
-            return
-        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-        self.list_table.selectRow(new_line_idx)
+        errmsg = self.editor_state.goto_previous_data_block()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number())
 
     def menu_search_goto_next_data_block(self):
-        line_idx = self.list_table.currentIndex().row()
-        if line_idx == -1:
-            line_idx = 0
-        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, 1)
-        if new_line_idx is None:
-            return
-        self.list_table.scrollTo(self.list_model.index(new_line_idx, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtCenter)
-        self.list_table.selectRow(new_line_idx)
+        errmsg = self.editor_state.goto_next_data_block()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number())
 
     def menu_settings_choose_font(self):
         font, ok = QtGui.QFontDialog.getFont(self.list_table.font(), self)
@@ -732,24 +746,9 @@ class MainWindow(QtGui.QMainWindow):
             QtGui.QMessageBox.information(self, "Unable to export source", errmsg)
 
     def interaction_rename_symbol(self):
-        if not self.editor_state.in_loaded_state():
-            return
-
-        current_address = self.editor_state.get_address()
-        if current_address is None:
-            return
-        symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
-        if symbol_name is not None:
-            text, ok = QtGui.QInputDialog.getText(self, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, symbol_name)
-            if ok and text != symbol_name:
-                # TODO: Move this to the platform or architecture level.
-                regExp = QtCore.QRegExp("([a-zA-Z_]+[a-zA-Z0-9_\.]*)")
-                if regExp.exactMatch(text):
-                    new_symbol_name = regExp.cap(1)
-                    disassembly.set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
-                    logger.info("Renamed symbol '%s' to '%s' at address $%06X.", symbol_name, new_symbol_name, current_address)
-                else:
-                    QtGui.QMessageBox.information(self, "Invalid symbol name", "The symbol name needs to match standard practices.")
+        errmsg = self.editor_state.set_label_name()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
 
     def interaction_uncertain_code_references_view_push_symbol(self):
         if not self.editor_state.in_loaded_state():
@@ -780,32 +779,20 @@ class MainWindow(QtGui.QMainWindow):
         self.functionality_view_push_address(current_address, address)
 
     def interaction_view_push_symbol(self):
-        if not self.editor_state.in_loaded_state():
+        errmsg = self.editor_state.push_address()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-
-        # Place current address on the stack.
-        current_address = self.editor_state.get_address()
-        # Whether a non-disassembly "readability" line was selected.
-        if current_address is None:
-            return
-        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, self.editor_state.get_line_number())
-        if len(operand_addresses) == 1:
-            self.functionality_view_push_address(current_address, operand_addresses[0])
-        elif len(operand_addresses) == 2:
-            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.  %s", operand_addresses)
-        else:
-            logger.warning("No addresses, nothing to go to.")
+        line_idx = self.editor_state.get_line_number()
+        self.scroll_to_line(line_idx, True)
 
     def interaction_view_pop_symbol(self):
-        if not self.editor_state.in_loaded_state():
-            logger.error("view pop symbol called with incorrect program state, want loaded, are loading: %s initial: %s.", self.editor_state.in_loading_state(), self.editor_state.in_initial_state())
+        errmsg = self.editor_state.pop_address()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-
-        if len(self.view_address_stack):
-            address = self.view_address_stack.pop()
-            self.scroll_to_address(address)
-        else:
-            logger.error("view pop symbol has empty stack and nowhere to go to.")
+        line_idx = self.editor_state.get_line_number()
+        self.scroll_to_line(line_idx, True)
 
     def interaction_view_referring_symbols(self):
         # Place current address on the stack.
@@ -826,34 +813,29 @@ class MainWindow(QtGui.QMainWindow):
             logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
 
     def interaction_set_datatype_code(self):
-        address = self.get_current_address()
-        if address is None:
-            return
-        self.set_data_type(address, disassembly.DATA_TYPE_CODE)
+        errmsg = self.editor_state.set_datatype_code()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_32bit(self):
-        address = self.get_current_address()
-        if address is None:
-            return
-        self.set_data_type(address, disassembly.DATA_TYPE_LONGWORD)
+        errmsg = self.editor_state.set_datatype_32bit()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_16bit(self):
-        address = self.get_current_address()
-        if address is None:
-            return
-        self.set_data_type(address, disassembly.DATA_TYPE_WORD)
+        errmsg = self.editor_state.set_datatype_16bit()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_8bit(self):
-        address = self.get_current_address()
-        if address is None:
-            return
-        self.set_data_type(address, disassembly.DATA_TYPE_BYTE)
+        errmsg = self.editor_state.set_datatype_8bit()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_ascii(self):
-        address = self.get_current_address()
-        if address is None:
-            return
-        self.set_data_type(address, disassembly.DATA_TYPE_ASCII)
+        errmsg = self.editor_state.set_datatype_ascii()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     ## MISCELLANEIA
 
@@ -1076,47 +1058,6 @@ class MainWindow(QtGui.QMainWindow):
             row_index = model.rowCount()-1
         model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
         model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
-
-    def save_disassembled_source(self, file_path):
-        line_count = self.editor_state.get_line_count()
-
-        # Display a modal dialog.
-        progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
-        progressDialog.setCancelButtonText("&Cancel")
-        progressDialog.setRange(0, line_count)
-        progressDialog.setWindowTitle("Saving source code")
-        progressDialog.setMinimumDuration(1)
-        progressDialog.setAutoClose(True)
-        progressDialog.setWindowModality(QtCore.Qt.WindowModal)
-
-        # Initialise the dialog status.
-        progressDialog.setLabelText("Writing source code..")
-
-        # Note: Writing to cStringIO is not faster than writing directly to file.
-        with open(file_path, "w") as f:
-            for i in xrange(line_count):
-                progressDialog.setValue(i)
-
-                label_text = self.editor_state.get_file_line(i, disassembly.LI_LABEL)
-                instruction_text = self.editor_state.get_file_line(i, disassembly.LI_INSTRUCTION)
-                operands_text = self.editor_state.get_file_line(i, disassembly.LI_OPERANDS)
-                if label_text:
-                    f.write(label_text)
-                f.write("\t")
-                f.write(instruction_text)
-                if operands_text:
-                    f.write("\t")
-                    f.write(operands_text)
-                f.write("\n")
-
-                QtGui.qApp.processEvents()
-                if progressDialog.wasCanceled():
-                    # If the process was aborted, delete the partially exported file.
-                    f.close()
-                    os.remove(file_path)
-                    break
-            else:
-                progressDialog.setValue(line_count)        
 
 
 ## Option dialogs.

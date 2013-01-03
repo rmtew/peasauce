@@ -31,14 +31,19 @@ import disassembly_persistence
 
 ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT = "The file does not appear to be a supported executable file format."
 ERRMSG_NO_IDENTIFIABLE_DESTINATION = "Nowhere to go."
-ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH = "ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH"
-ERRMSG_INPUT_FILE_SIZE_DIFFERS = "ERRMSG_INPUT_FILE_SIZE_DIFFERS"
+ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH = "File does not match (checksum differs)"
+ERRMSG_INPUT_FILE_SIZE_DIFFERS = "File does not match (size differs)"
+ERRMSG_INVALID_LABEL_NAME = "Invalid label name"
 
 ERRMSG_BUG_UNKNOWN_ADDRESS = "Unable to determine address at current line, this is a bug."
 ERRMSG_BUG_NO_OPERAND_SELECTION_MECHANISM = "Too many valid operands, this is a bug."
 ERRMSG_BUG_UNABLE_TO_GOTO_LINE = "Unable to go to the given line, this is a bug."
 
 ERRMSG_TODO_BAD_STATE_FUNCTIONALITY = "TODO: Work out you can do this in the current program state."
+
+import re
+
+RE_LABEL = re.compile("([a-zA-Z_]+[a-zA-Z0-9_\.]*)$")
 
 
 class ClientAPI(object):
@@ -70,12 +75,8 @@ class ClientAPI(object):
             Returns None if cancel chosen. """
         raise NotImplementedError
 
-    def edit_label_name(self, label_name):
+    def request_label_name(self, label_name):
         """ Returns an error message on failure. """
-        raise NotImplementedError
-
-    def validate_label_name(self, label_name):
-        """ Returns a message on error, or None on success. """
         raise NotImplementedError
 
     def reset_state(self):
@@ -124,7 +125,9 @@ class EditorState(object):
     def get_line_number(self):
         return self.line_number
 
-    def _set_line_number(self, line_number):
+    def set_line_number(self, line_number):
+        if type(line_number) is not int:
+            raise ValueError("expected int, got %s" % line_number.__class__.__name__)
         self.line_number = line_number
 
     def get_line_count(self):
@@ -136,6 +139,126 @@ class EditorState(object):
         if self.disassembly_data is None:
             return ""
         return disassembly.get_file_line(self.disassembly_data, row, column)
+
+    def push_address(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if current_address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+
+        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, self.line_number)
+        if len(operand_addresses) == 1:
+            next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, operand_addresses[0])
+            if next_line_number is None:
+                return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
+
+            self.set_line_number(next_line_number)
+            self.address_stack.append(current_address)
+            return
+        elif len(operand_addresses) == 2:
+            return ERRMSG_BUG_NO_OPERAND_SELECTION_MECHANISM
+
+        return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
+    def pop_address(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        if not len(self.address_stack):
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
+        address = self.address_stack.pop()
+        # It is expected that if you can have pushed the address, there was a line number for it.
+        line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        self.set_line_number(line_number)
+
+    def goto_address(self):
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None: # Current line does not have an address.
+            address = 0
+        result = self.client.request_address(address)
+        if result is None: # Cancelled / aborted.
+            return
+        # Convert an entered symbol name to it's address.
+        if type(result) in types.StringType:
+            result = disassembly.get_address_for_symbol(self.disassembly_data, result)
+        line_number = disassembly.get_line_number_for_address(self.disassembly_data, result)
+        self.set_line_number(line_number)
+
+    def goto_previous_data_block(self):
+        line_idx = self.get_line_number()
+        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
+        if new_line_idx is None:
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+        self.set_line_number(new_line_idx)
+
+    def goto_next_data_block(self):
+        line_idx = self.get_line_number()
+        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
+        if new_line_idx is None:
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+        self.set_line_number(new_line_idx)
+
+    def set_label_name(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
+        # TODO: Prompt user to edit the current label, or add a new one.
+        new_symbol_name = self.client.request_label_name(symbol_name)
+        if new_symbol_name is not None and new_symbol_name != symbol_name:
+            match = RE_LABEL.match(new_symbol_name)
+            if match is None:
+                return ERRMSG_INVALID_LABEL_NAME
+            disassembly.set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
+
+    def set_datatype_code(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+        self.set_data_type(address, disassembly.DATA_TYPE_CODE)
+
+    def set_datatype_32bit(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+        self.set_data_type(address, disassembly.DATA_TYPE_LONGWORD)
+
+    def set_datatype_16bit(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+        self.set_data_type(address, disassembly.DATA_TYPE_WORD)
+
+    def set_datatype_8bit(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+        self.set_data_type(address, disassembly.DATA_TYPE_BYTE)
+
+    def set_datatype_ascii(self):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        if address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+        self.set_data_type(address, disassembly.DATA_TYPE_ASCII)
 
     def load_file(self, load_call_proxy=None):
         if load_call_proxy is None:
@@ -186,101 +309,8 @@ class EditorState(object):
 
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
-        self._set_line_number(line_number)
+        self.set_line_number(line_number)
         return result
-
-    def push_address(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if current_address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-
-        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, self.line_number)
-        if len(operand_addresses) == 1:
-            next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, operand_addresses[0])
-            if next_line_number is None:
-                return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
-
-            self._set_line_number(next_line_number)
-            self.address_stack.append(current_address)
-        elif len(operand_addresses) == 2:
-            return ERRMSG_BUG_NO_OPERAND_SELECTION_MECHANISM
-
-        return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-
-    def pop_address(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        if not len(self.address_stack):
-            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-
-        address = self.address_stack.pop()
-        # It is expected that if you can have pushed the address, there was a line number for it.
-        line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
-        self._set_line_number(line_number)
-
-    def set_label_name(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
-        # TODO: Prompt user to edit the current label, or add a new one.
-        new_symbol_name = self.client.edit_label_name(symbol_name)
-        if new_symbol_name is not None and new_symbol_name != symbol_name:
-            # TODO: Validate that the label is valid syntactically for the given platform.
-            errmsg = self.client.validate_label_name(new_symbol_name)
-            if errmsg is not None:
-                return errmsg
-            disassembly.set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
-
-    def set_datatype_code(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self.set_data_type(address, disassembly.DATA_TYPE_CODE)
-
-    def set_datatype_32bit(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self.set_data_type(address, disassembly.DATA_TYPE_LONGWORD)
-
-    def set_datatype_16bit(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self.set_data_type(address, disassembly.DATA_TYPE_WORD)
-
-    def set_datatype_8bit(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self.set_data_type(address, disassembly.DATA_TYPE_BYTE)
-
-    def set_datatype_ascii(self):
-        if self.state_id != EditorState.STATE_LOADED:
-            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
-
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        if address is None:
-            return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self.set_data_type(address, disassembly.DATA_TYPE_ASCII)
 
     def save_project(self):
         if self.state_id != EditorState.STATE_LOADED:
@@ -323,15 +353,3 @@ class EditorState(object):
                     save_file.write(operands_text)
                 save_file.write("\n")
             save_file.close()
-
-    def goto_address(self):
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
-        # Current line does not have an address.
-        if address is None:
-            address = 0
-        new_address = self.client.request_address(address)
-        if new_address is None:
-            return
-        if type(new_address) in types.StringType:
-            new_address = disassembly.get_address_for_symbol(self.disassembly_data, new_address)
-        return new_address
