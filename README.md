@@ -79,7 +79,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Functionality
 
-* UI: Ala Resource, change the numeric base of a value.
+* UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
 * Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.

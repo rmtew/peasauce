@@ -104,18 +104,17 @@ class HunkFile(object):
     _hunk_segments = None
 
 
-def identify_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        if load_hunk_file(file_info, data_types, f):
-            return "Amiga hunk-based executable"
+def identify_input_file(input_file, file_info, data_types):
+    if load_hunk_file(file_info, data_types, input_file):
+        return "Amiga hunk-based executable"
 
-def load_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        return load_hunk_file(file_info, data_types, f)
+def load_input_file(input_file, file_info, data_types):
+    return load_hunk_file(file_info, data_types, input_file)
 
 def load_hunk_file(file_info, data_types, f):
     data = HunkFile()
 
+    f.seek(0, os.SEEK_SET)
     hunk_id = data_types.uint32(f.read(4))
     if hunk_id != HUNK_HEADER:
         logger.debug("amiga/hunkfile.py: _process_file: Unrecognised file.")

@@ -26,11 +26,11 @@ class System(object):
     def get_arch_name(self):
         return "m68k"
 
-    def load_input_file(self, file_info, data_types):
-        return hunkfile.load_input_file(file_info, data_types)
+    def load_input_file(self, input_file, file_info, data_types):
+        return hunkfile.load_input_file(input_file, file_info, data_types)
 
-    def identify_input_file(self, file_info, data_types):
-        return hunkfile.identify_input_file(file_info, data_types)
+    def identify_input_file(self, input_file, file_info, data_types):
+        return hunkfile.identify_input_file(input_file, file_info, data_types)
 
     def load_project_data(self, f):
         return hunkfile.load_project_data(f)

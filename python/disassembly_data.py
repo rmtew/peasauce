@@ -73,10 +73,8 @@ SLD_COMMENT_FULL_LINE = 3
 SLD_EQU_LOCATION_RELATIVE = 4
 
 
-PDF_CACHE_INPUT_DATA = 1
-PDF_BINARY_FILE = 2
+PDF_BINARY_FILE = 1
 
-DEFAULT_PROGRAMDATA_FLAGS = PDF_CACHE_INPUT_DATA
 
 class ProgramData(object):
     def __init__(self):
@@ -111,6 +109,9 @@ class ProgramData(object):
         self.loader_entrypoint_offset = None
         self.loader_internal_data = None # PERSISTED VIA LOADERLIB
 
+        # persistence exposed information:
+        self.save_count = 0
+
         ## Non-persisted state.
         # Local:
         "List of ascending block addresses (used by bisect for address based lookups)."
@@ -137,8 +138,11 @@ class ProgramData(object):
         self.dis_disassemble_as_data_func = None
 
         # loaderlib:
-        self.loader_file_path = None
         self.loader_data_types = None
+
+        # persistence exposed information:
+        """ Whether the saved project embeds the input file in it's entirety. """
+        self.input_file_cached = False
 
 
 class SegmentBlock(object):
@@ -162,8 +166,6 @@ class SegmentBlock(object):
 
 
 class NewProjectOptions:
-    cache_input_data = True
-
     # Binary file options.
     dis_name = None
     loader_load_address = None
@@ -173,8 +175,6 @@ class LoadProjectOptions:
     valid_file_size = False
     valid_file_checksum = False
 
-    cache_input_data = True
-    loader_file_path = None
-
 class SaveProjectOptions:
-    cache_input_data = True
+    input_file = None
+    save_file_path = None

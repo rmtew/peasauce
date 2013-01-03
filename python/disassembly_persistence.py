@@ -133,189 +133,192 @@ def write_segment_list_entry(f, v):
     persistence.write_uint32(f, v[loaderlib.SI_ADDRESS])
 
 
-SAVEFILE_VERSION = 1
+SAVEFILE_ID = 0x5053504a
+SAVEFILE_VERSION = 2
 
-def save_project(savefile_path, program_data):
-    program_data.savefile_path = savefile_path
+SAVEFILE_HUNK_SOURCEDATA = 2001            # The entire source input file that the disassembly was created from.
+SAVEFILE_HUNK_SOURCEDATAINFO = 2002        # The metadata about the source input file.
+SAVEFILE_HUNK_LOADER = 2003                # Loader related data used by the disassembly logic.
+SAVEFILE_HUNK_LOADERINTERNAL = 2004        # Internal loader data.
+SAVEFILE_HUNK_DISASSEMBLY = 2005           # General disassembly state.
 
-    t0 = time.time()
-    logger.debug("saving 'savefile' to: %s", savefile_path)
+# 4: Save file ID.
+# 4: Save file version.
+# ...
+# 2: Hunk ID.
+# 4: Hunk data length in bytes (N).
+# N: Hunk data.
+# ...
 
-    with open(savefile_path, "wb") as f:
-        persistence.write_uint16(f, SAVEFILE_VERSION)
-        size_offset = f.tell()
+
+def check_is_project_file(f):
+    f.seek(0, os.SEEK_SET)
+    return persistence.read_uint32(f) == SAVEFILE_ID
+
+def save_project(f, program_data, save_options):
+    f.seek(0, os.SEEK_SET)
+
+    persistence.write_uint32(f, SAVEFILE_ID)
+    persistence.write_uint16(f, SAVEFILE_VERSION)
+    program_data.save_count += 1
+    persistence.write_uint32(f, program_data.save_count)
+
+    # The input file / source data is saved in the first hunk, so we can skip repersisting it in subsequent saves to the same file.
+    for hunk_id in (SAVEFILE_HUNK_SOURCEDATA, SAVEFILE_HUNK_SOURCEDATAINFO, SAVEFILE_HUNK_LOADER, SAVEFILE_HUNK_LOADERINTERNAL, SAVEFILE_HUNK_DISASSEMBLY):
+        if SAVEFILE_HUNK_SOURCEDATA == hunk_id and save_options.input_file is None:
+            continue
+
+        persistence.write_uint16(f, hunk_id)
+        # Remember the hunk length offset and write a dummy value.
+        length_offset = f.tell()
         persistence.write_uint32(f, 0)
+        hunk_data_offset = f.tell()
+        if SAVEFILE_HUNK_DISASSEMBLY == hunk_id:
+            save_disassembly_hunk(f, program_data)
+        elif SAVEFILE_HUNK_LOADER == hunk_id:
+            save_loader_hunk(f, program_data)
+        elif SAVEFILE_HUNK_LOADERINTERNAL == hunk_id:
+            save_loaderinternaldata_hunk(f, program_data)
+        elif SAVEFILE_HUNK_SOURCEDATAINFO == hunk_id:
+            save_sourcedatainfo_hunk(f, program_data)
+        elif SAVEFILE_HUNK_SOURCEDATA == hunk_id:
+            save_sourcedata_hunk(f, program_data, save_options.input_file)
+        else:
+            raise RuntimeError("Trying to save a hunk with no handling to do so")
+        hunk_length = f.tell() - hunk_data_offset
+        # Go back and fill in the hunk length field.
+        f.seek(length_offset, os.SEEK_SET)
+        persistence.write_uint32(f, hunk_length)
+        # Return to the end of the hunk to perhaps write the next.
+        f.seek(hunk_length, os.SEEK_CUR)
 
-        data_start_offset = item_offset = f.tell()
-        persistence.write_dict_uint32_to_set_of_uint32s(f, program_data.branch_addresses)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: branch_addresses", item_length)
-            item_offset = f.tell()
-        persistence.write_dict_uint32_to_set_of_uint32s(f, program_data.reference_addresses)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: reference_addresses", item_length)
-            item_offset = f.tell()
-        persistence.write_dict_uint32_to_string(f, program_data.symbols_by_address)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: symbols_by_address", item_length)
-            item_offset = f.tell()
-        persistence.write_dict_uint32_to_list_of_uint32s(f, program_data.post_segment_addresses)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: post_segment_addresses", item_length)
-            item_offset = f.tell()
-        persistence.write_uint32(f, program_data.flags)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: dis_name", item_length)
-            item_offset = f.tell()
-        persistence.write_string(f, program_data.dis_name)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: dis_name", item_length)
-            item_offset = f.tell()
-        persistence.write_string(f, program_data.file_name)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: file_name", item_length)
-            item_offset = f.tell()
-        persistence.write_uint32(f, program_data.file_size)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: file_size", item_length)
-            item_offset = f.tell()
-        persistence.write_bytes(f, program_data.file_checksum, 16)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: file_checksum", item_length)
-            item_offset = f.tell()
-        persistence.write_string(f, program_data.loader_system_name)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_system_name", item_length)
-            item_offset = f.tell()
-        write_segment_list(f, program_data.loader_segments)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_segments", item_length)
-            item_offset = f.tell()
-        persistence.write_set_of_uint32s(f, program_data.loader_relocated_addresses)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_relocated_addresses", item_length)
-            item_offset = f.tell()
-        persistence.write_set_of_uint32s(f, program_data.loader_relocatable_addresses)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_relocatable_addresses", item_length)
-            item_offset = f.tell()
-        persistence.write_uint16(f, program_data.loader_entrypoint_segment_id)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_entrypoint_segment_id", item_length)
-            item_offset = f.tell()
-        persistence.write_uint32(f, program_data.loader_entrypoint_offset)
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: loader_entrypoint_offset", item_length)
-            item_offset = f.tell()
-
-        persistence.write_uint32(f, len(program_data.blocks))
-        for block in program_data.blocks:
-            write_SegmentBlock(f, block)
-        data_end_offset = f.tell()
-        if True:
-            item_length = f.tell() - item_offset
-            logger.debug("save item length: %d name: blocks", item_length)
-            item_offset = f.tell()
-
-        # Go back and write the size.
-        f.seek(size_offset, os.SEEK_SET)
-        persistence.write_uint32(f, data_end_offset - data_start_offset)
-
-        f.seek(data_end_offset, os.SEEK_SET)
-        persistence.write_uint32(f, 0)
-
-        loader_data_start_offset = f.tell()
-        system = loaderlib.get_system(program_data.loader_system_name)
-        system.save_project_data(f, program_data.loader_internal_data)
-        loader_data_end_offset = f.tell()
-
-        # Go back and write the size.
-        f.seek(data_end_offset, os.SEEK_SET)
-        persistence.write_uint32(f, loader_data_end_offset - loader_data_start_offset)
-
-    seconds_taken = time.time() - t0
-    logger.info("Saved working data to: %s (length: %d, time taken: %0.1fs)", savefile_path, loader_data_end_offset, seconds_taken)
+    logger.info("Saved project (%d bytes)", f.tell())
 
 
-def load_project(savefile_path):
-    t0 = time.time()
-    logger.debug("loading 'savefile' from: %s", savefile_path)
+def save_disassembly_hunk(f, program_data):
+    persistence.write_dict_uint32_to_set_of_uint32s(f, program_data.branch_addresses)
+    persistence.write_dict_uint32_to_set_of_uint32s(f, program_data.reference_addresses)
+    persistence.write_dict_uint32_to_string(f, program_data.symbols_by_address)
+    persistence.write_dict_uint32_to_list_of_uint32s(f, program_data.post_segment_addresses)
+    persistence.write_uint32(f, program_data.flags)
+    persistence.write_string(f, program_data.dis_name)
+
+    persistence.write_uint32(f, len(program_data.blocks))
+    for block in program_data.blocks:
+        write_SegmentBlock(f, block)
+
+def save_loader_hunk(f, program_data):
+    persistence.write_string(f, program_data.loader_system_name)
+    write_segment_list(f, program_data.loader_segments)
+    persistence.write_set_of_uint32s(f, program_data.loader_relocated_addresses)
+    persistence.write_set_of_uint32s(f, program_data.loader_relocatable_addresses)
+    persistence.write_uint16(f, program_data.loader_entrypoint_segment_id)
+    persistence.write_uint32(f, program_data.loader_entrypoint_offset)
+
+def save_loaderinternaldata_hunk(f, program_data):
+    system = loaderlib.get_system(program_data.loader_system_name)
+    system.save_project_data(f, program_data.loader_internal_data)
+
+def save_sourcedatainfo_hunk(f, program_data):
+    persistence.write_uint32(f, program_data.file_size)
+    persistence.write_bytes(f, program_data.file_checksum, 16)
+
+def save_sourcedata_hunk(f, program_data, input_file):
+    data = input_file.read(256 * 1024)
+    while len(data):
+        f.write(data)
+        data = input_file.read(256 * 1024)
+
+
+def load_project(f):
+    f.seek(0, os.SEEK_END)
+    file_size = f.tell()
+    f.seek(0, os.SEEK_SET)
+
+    savefile_id = persistence.read_uint32(f)
+    if savefile_id != SAVEFILE_ID:
+        logger.error("Save-file does not have first four bytes of '%X', has '%X' instead.", SAVEFILE_ID, savefile_id)
+        return None
+    savefile_version = persistence.read_uint16(f)
+    if savefile_version != SAVEFILE_VERSION:
+        logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
+        return None
 
     program_data = ProgramData()
-    with open(savefile_path, "rb") as f:
-        savefile_version = persistence.read_uint16(f)
-        if savefile_version != SAVEFILE_VERSION:
-            logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
-            return None, 0
+    program_data.save_count = persistence.read_uint32(f)
 
-        localdata_size = persistence.read_uint32(f)
+    sourcedata_offset = sourcedata_length = None
+    while f.tell() < file_size:
+        hunk_id = persistence.read_uint16(f)
+        hunk_length = persistence.read_uint32(f)
+        offset0 = f.tell()
+        if SAVEFILE_HUNK_DISASSEMBLY == hunk_id:
+            load_disassembly_hunk(f, program_data)
+        elif SAVEFILE_HUNK_LOADER == hunk_id:
+            load_loader_hunk(f, program_data)
+        elif SAVEFILE_HUNK_LOADERINTERNAL == hunk_id:
+            load_loaderinternaldata_hunk(f, program_data)
+        elif SAVEFILE_HUNK_SOURCEDATAINFO == hunk_id:
+            load_sourcedatainfo_hunk(f, program_data)
+        elif SAVEFILE_HUNK_SOURCEDATA == hunk_id:
+            sourcedata_offset, sourcedata_length = offset0, hunk_length
+            f.seek(sourcedata_length, os.SEEK_CUR)
+        else:
+            logger.error("load_project encountered unknown hunk, with id: %d", hunk_id)
+            return None
 
-        data_start_offset = f.tell()
-        program_data.branch_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
-        program_data.reference_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
-        program_data.symbols_by_address = persistence.read_dict_uint32_to_string(f)
-        program_data.post_segment_addresses = persistence.read_dict_uint32_to_list_of_uint32s(f)
-        program_data.flags = persistence.read_uint32(f)
-        program_data.dis_name = persistence.read_string(f)
-        program_data.file_name = persistence.read_string(f)
-        program_data.file_size = persistence.read_uint32(f)
-        program_data.file_checksum = persistence.read_bytes(f, 16)
-        program_data.loader_system_name = persistence.read_string(f)
-        program_data.loader_segments = read_segment_list(f)
-        program_data.loader_relocated_addresses = persistence.read_set_of_uint32s(f)
-        program_data.loader_relocatable_addresses = persistence.read_set_of_uint32s(f)
-        program_data.loader_entrypoint_segment_id = persistence.read_uint16(f)
-        program_data.loader_entrypoint_offset = persistence.read_uint32(f)
+        offsetN = f.tell()
+        if offsetN - offset0 != hunk_length:
+            logger.error("load_project encountered hunk length mismatch, expected: %d, got: %d, hunk id: %d", hunk_length, offsetN - offset0, hunk_id)
+            return None
 
-        # Reconstitute the segment block list.
-        num_blocks = persistence.read_uint32(f)
-        program_data.blocks = [ None ] * num_blocks
-        for i in xrange(num_blocks):
-            program_data.blocks[i] = read_SegmentBlock(f)
-        data_end_offset = f.tell()
+    if sourcedata_offset is not None:
+        logger.info("Caching input file segments from embedded source file.")
+        segments = program_data.loader_segments
+        for i in range(len(segments)):
+            loaderlib.cache_segment_data(f, segments, i, sourcedata_offset)
+        program_data.input_file_cached = True
 
-        if localdata_size != data_end_offset - data_start_offset:
-            logger.error("Save-file localdata length mismatch, got: %d wanted: %d", data_end_offset - data_start_offset, localdata_size)
-            return None, 0
+    logger.info("Project loaded")
+    return program_data
 
-        # Rebuild the segment block list indexing lists.
-        program_data.block_addresses = [ 0 ] * num_blocks
-        program_data.block_line0s_dirtyidx = 0
-        program_data.block_line0s = program_data.block_addresses[:]
-        for i in xrange(num_blocks):
-            program_data.block_addresses[i] = program_data.blocks[i].address
+def load_disassembly_hunk(f, program_data):
+    program_data.branch_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
+    program_data.reference_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
+    program_data.symbols_by_address = persistence.read_dict_uint32_to_string(f)
+    program_data.post_segment_addresses = persistence.read_dict_uint32_to_list_of_uint32s(f)
+    program_data.flags = persistence.read_uint32(f)
+    program_data.dis_name = persistence.read_string(f)
 
-        # The loaders internal data comes next, hand off reading that in as we do not use or care about it.
-        loaderdata_size = persistence.read_uint32(f)
-        loader_data_start_offset = f.tell()
-        system = loaderlib.get_system(program_data.loader_system_name)
-        program_data.loader_internal_data = system.load_project_data(f)
-        loader_data_end_offset = f.tell()
+    # Reconstitute the segment block list.
+    num_blocks = persistence.read_uint32(f)
+    program_data.blocks = [ None ] * num_blocks
+    for i in xrange(num_blocks):
+        program_data.blocks[i] = read_SegmentBlock(f)
 
-        if loaderdata_size != loader_data_end_offset - loader_data_start_offset:
-            logger.error("Save-file loaderdata length mismatch, got: %d wanted: %d", loader_data_end_offset - loader_data_start_offset, loaderdata_size)
-            return None, 0
+    ## POST PROCESSING
+    # Rebuild the segment block list indexing lists.
+    program_data.block_addresses = [ 0 ] * num_blocks
+    program_data.block_line0s_dirtyidx = 0
+    program_data.block_line0s = program_data.block_addresses[:]
+    for i in xrange(num_blocks):
+        program_data.block_addresses[i] = program_data.blocks[i].address
 
+def load_loader_hunk(f, program_data):
+    program_data.loader_system_name = persistence.read_string(f)
+    program_data.loader_segments = read_segment_list(f)
+    program_data.loader_relocated_addresses = persistence.read_set_of_uint32s(f)
+    program_data.loader_relocatable_addresses = persistence.read_set_of_uint32s(f)
+    program_data.loader_entrypoint_segment_id = persistence.read_uint16(f)
+    program_data.loader_entrypoint_offset = persistence.read_uint32(f)
+
+    ## POST PROCESSING
     program_data.loader_data_types = loaderlib.get_system_data_types(program_data.loader_system_name)
 
-    seconds_taken = time.time() - t0
-    logger.info("Loaded working data from: %s (time taken: %0.1fs)", savefile_path, seconds_taken)
+def load_loaderinternaldata_hunk(f, program_data):
+    system = loaderlib.get_system(program_data.loader_system_name)
+    program_data.loader_internal_data = system.load_project_data(f)
 
-    program_data.savefile_path = savefile_path
-
-    return program_data
+def load_sourcedatainfo_hunk(f, program_data):
+    program_data.file_size = persistence.read_uint32(f)
+    program_data.file_checksum = persistence.read_bytes(f, 16)

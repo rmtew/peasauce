@@ -79,16 +79,15 @@ class PRGFile(object):
     _fixup_offsets = None
 
 
-def identify_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        if load_prg_file(file_info, data_types, f):
-            return "Atari GEMDOS executable"
+def identify_input_file(input_file, file_info, data_types):
+    if load_prg_file(file_info, data_types, input_file):
+        return "Atari GEMDOS executable"
 
-def load_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        return load_prg_file(file_info, data_types, f)
+def load_input_file(input_file, file_info, data_types):
+    return load_prg_file(file_info, data_types, input_file)
 
 def load_prg_file(file_info, data_types, f):
+    f.seek(0, os.SEEK_SET)
     magic_word = data_types.uint16(f.read(2))
     if magic_word != MAGIC_WORD:
         logger.debug("atarist/prgfile.py: _process_file: Unrecognised file.")

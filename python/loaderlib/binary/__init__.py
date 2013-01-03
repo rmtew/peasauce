@@ -30,18 +30,19 @@ class System(object):
     def set_arch_name(self, arch_name):
         self.arch_name = arch_name
 
-    def load_input_file(self, file_info, data_types):
-        if not file_info.loader_options.is_binary_file:
+    def load_input_file(self, input_file, file_info, data_types):
+        if file_info.loader_options is None or not file_info.loader_options.is_binary_file:
             return False
         self.set_arch_name(file_info.loader_options.dis_name)
 
-        file_size = os.path.getsize(file_info.file_path)
+        input_file.seek(0, os.SEEK_END)
+        file_size = input_file.tell()
         relocations = []
         symbols = []
         file_info.add_code_segment(0, file_size, file_size, relocations, symbols)
         return True
 
-    def identify_input_file(self, file_info, data_types):
+    def identify_input_file(self, input_file, file_info, data_types):
         """ User selected files should not be identified as binary. """
         return None
 

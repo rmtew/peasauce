@@ -41,12 +41,14 @@ import os
 import sys
 import time
 import traceback
+import types
 
 from PySide import QtCore, QtGui
 
 import disassembly
 import disassemblylib
 import loaderlib
+import editor_state
 
 
 SETTINGS_FILE = "settings.pikl"
@@ -56,6 +58,7 @@ PROJECT_SUFFIX = "psproj"
 PROJECT_FILTER = APPLICATION_NAME +" project (*."+ PROJECT_SUFFIX +")"
 SOURCE_CODE_FILTER = "Source code (*.s *.asm)"
 
+ERRMSG_BAD_NEW_PROJECT_OPTIONS = "ERRMSG_BAD_NEW_PROJECT_OPTIONS"
 
 logger = logging.getLogger("UI")
 
@@ -199,14 +202,10 @@ class DisassemblyItemModel(BaseItemModel):
         super(DisassemblyItemModel, self).__init__(columns, parent)
 
     def rowCount(self, parent=None):
-        if self.window.disassembly_data is not None:
-            return disassembly.get_line_count(self.window.disassembly_data)
-        return 0
+        return self.window.editor_state.get_line_count()
 
     def _lookup_cell_value(self, row, column):
-        if self.window.disassembly_data is not None:
-            return disassembly.get_file_line(self.window.disassembly_data, row, column)
-        return ""
+        return self.window.editor_state.get_file_line(row, column)
 
 
 class CustomItemModel(BaseItemModel):
@@ -286,22 +285,9 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             text = options.text
             bits = text.split(", ")
             if options.state & QtGui.QStyle.State_Selected:
-                if False:
-                    text = ""
-                    for i, bit in enumerate(bits):
-                        if i == 1:
-                            text += ", "
-                        text += "<div class="
-                        if i == 0:
-                            text += "operand1"
-                        else:
-                            text += "operand2"
-                        text += ">"+ bit +"</div>"
-                    if index.row() == 0:
-                        print text
-                else:
+                if len(bits) > 1:
                     bits[0] += ", "
-                    text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
+                text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
             doc.setHtml(text)
             doc.setTextWidth(option.rect.width())
             doc.setDocumentMargin(0)
@@ -356,9 +342,67 @@ def create_table_widget(parent, model, multiselect=False):
     return table
 
 
-STATE_INITIAL   = 0
-STATE_LOADING   = 1
-STATE_LOADED    = 2
+class QTUIEditorClient(editor_state.ClientAPI):
+    def __init__(self, *args, **kwargs):
+        super(QTUIEditorClient, self).__init__(*args, **kwargs)
+
+        self.file_path = None
+
+    def reset_state(self):
+        # TODO: owner.reset_all() or just owner.reset_state()
+        self.file_path = None
+        self.owner.reset_state()
+
+    def request_load_file(self):
+        # Request the user select a file.
+        options = QtGui.QFileDialog.Options()
+        file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self.owner, "Select a file to disassemble", options=options)
+        if not len(file_path):
+            return
+        # Cover the case of a command-line startup with a current directory file name.
+        if os.path.dirname(file_path) == "":
+            file_path = os.path.join(os.getcwd(), file_path)
+        self.file_path = file_path
+        return self.get_load_file()
+
+    def get_load_file(self):
+        return open(self.file_path, "rb")
+
+    def request_new_project_option_values(self, options):
+        result = NewProjectDialog(options, self.file_path, self.owner).exec_()
+        if result != QtGui.QDialog.Accepted:
+            return ERRMSG_BAD_NEW_PROJECT_OPTIONS
+        return options
+
+    def validate_new_project_option_values(self, options):
+        return None
+
+    def request_save_project_option_values(self, save_options):
+        options = QtGui.QFileDialog.Options()
+        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner, caption="Save to...", filter=PROJECT_FILTER, options=options)
+        if not len(save_file_path):
+            return
+        result = SaveProjectDialog(save_options, save_file_path, self.owner).exec_()
+        if result != QtGui.QDialog.Accepted:
+            return
+        save_options.save_file_path = save_file_path
+        return save_options
+
+    def request_code_save_file(self):
+        options = QtGui.QFileDialog.Options()
+        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner, caption="Export source code to...", filter=SOURCE_CODE_FILTER, options=options)
+        if len(save_file_path):
+            return open(save_file_path, "wb")
+
+    def request_address(self, default_address):
+        text, ok = QtGui.QInputDialog.getText(self.owner, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
+        if ok and text != '':
+            new_address = None
+            if text.startswith("0x") or text.startswith("$"):
+                return int(text, 16)
+            else:
+                return text
+
 
 class MainWindow(QtGui.QMainWindow):
     _settings = None
@@ -369,6 +413,9 @@ class MainWindow(QtGui.QMainWindow):
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
+
+        self.editor_client = QTUIEditorClient(self)
+        self.editor_state = editor_state.EditorState(self.editor_client)
 
         self.thread = WorkThread()
 
@@ -416,8 +463,6 @@ class MainWindow(QtGui.QMainWindow):
         ## INITIALISE APPLICATION STATE
 
         # State related to having something loaded.
-        self.file_path = None
-        self.program_state = STATE_INITIAL
         self.view_address_stack = []
 
     def closeEvent(self, event):
@@ -528,7 +573,7 @@ class MainWindow(QtGui.QMainWindow):
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
         self.save_project_action = QtGui.QAction("&Save project", self, statusTip="Save currently loaded project", triggered=self.interaction_request_save_project)
-        self.save_project_as_action = QtGui.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
+        #self.save_project_as_action = QtGui.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
 
@@ -553,7 +598,7 @@ class MainWindow(QtGui.QMainWindow):
         self.file_menu = self.menuBar().addMenu("&File")
         self.file_menu.addAction(self.open_action)
         self.file_menu.addAction(self.save_project_action)
-        self.file_menu.addAction(self.save_project_as_action)
+        #self.file_menu.addAction(self.save_project_as_action)
         self.file_menu.addAction(self.export_source_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
@@ -616,26 +661,18 @@ class MainWindow(QtGui.QMainWindow):
 
     def reset_state(self):
         """ Called to clear out all state related to loaded data. """
-        self.program_state = STATE_INITIAL
-        self.file_path = None
         self.disassembly_data = None
 
     def menu_file_open(self):
-        if self.program_state == STATE_LOADED:
+        if self.editor_state.in_loaded_state():
             ret = QtGui.QMessageBox.question(self, "Abandon work?", "You have existing work loaded, do you wish to abandon it?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
             if ret != QtGui.QMessageBox.Ok:
                 return
             self.reset_all()
-        elif self.program_state != STATE_INITIAL:
+        elif not self.editor_state.in_initial_state():
             return
 
-        # Request the user select a file.
-        options = QtGui.QFileDialog.Options()
-        file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self, "Select a file to disassemble", options=options)
-        if not len(file_path):
-            return
-
-        self.attempt_open_file(file_path)
+        self.attempt_open_file()
 
     def menu_file_quit(self):
         if QtGui.QMessageBox.question(self, "Quit..", "Are you sure you wish to quit?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel):
@@ -650,24 +687,9 @@ class MainWindow(QtGui.QMainWindow):
             pass
 
     def menu_search_goto_address(self):
-        line_idx = self.list_table.currentIndex().row()
-        if line_idx == -1:
-            line_idx = 0
-        address = disassembly.get_address_for_line_number(self.disassembly_data, line_idx)
-        # Current line does not have an address.
-        if address is None:
-            address = 0
-        text, ok = QtGui.QInputDialog.getText(self, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % address)
-        if ok and text != '':
-            new_address = None
-            if text.startswith("0x") or text.startswith("$"):
-                new_address = int(text, 16)
-            else:
-                new_address = disassembly.get_address_for_symbol(self.disassembly_data, text)
-                if new_address is None:
-                    new_address = int(text)
-            if new_address is not None:
-                self.scroll_to_address(new_address)
+        new_address = self.editor_state.goto_address()
+        if new_address is not None:
+            self.scroll_to_address(new_address)
 
     def menu_search_goto_previous_data_block(self):
         line_idx = self.list_table.currentIndex().row()
@@ -700,25 +722,22 @@ class MainWindow(QtGui.QMainWindow):
     ## INTERACTION FUNCTIONS
 
     def interaction_request_save_project(self):
-        if self.program_state == STATE_LOADED:
-            self.request_and_save_file({ PROJECT_FILTER : "save-file", })
-
-    def interaction_request_save_project_as(self):
-        if self.program_state == STATE_LOADED:
-            self.request_and_save_file({ PROJECT_FILTER : "save-file", })
+        errmsg = self.editor_state.save_project()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to save project", errmsg)
 
     def interaction_request_export_source(self):
-        if self.program_state == STATE_LOADED:
-            self.request_and_save_file({ SOURCE_CODE_FILTER : "code", })
+        errmsg = self.editor_state.export_source_code()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to export source", errmsg)
 
     def interaction_rename_symbol(self):
-        if self.program_state != STATE_LOADED:
+        if not self.editor_state.in_loaded_state():
             return
 
-        selected_line_numbers = [ index.row() for index in self.list_table.selectionModel().selectedRows() ]
-        if not len(selected_line_numbers):
+        current_address = self.editor_state.get_address()
+        if current_address is None:
             return
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, selected_line_numbers[0])
         symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
         if symbol_name is not None:
             text, ok = QtGui.QInputDialog.getText(self, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, symbol_name)
@@ -733,12 +752,13 @@ class MainWindow(QtGui.QMainWindow):
                     QtGui.QMessageBox.information(self, "Invalid symbol name", "The symbol name needs to match standard practices.")
 
     def interaction_uncertain_code_references_view_push_symbol(self):
-        if self.program_state != STATE_LOADED:
+        if not self.editor_state.in_loaded_state():
             return
 
         # Place current address on the stack.
-        row_idx = self.list_table.currentIndex().row()
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
+        current_address = self.editor_state.get_address()
+        if current_address is None:
+            return
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_code_references_table.currentIndex().row()
@@ -746,12 +766,13 @@ class MainWindow(QtGui.QMainWindow):
         self.functionality_view_push_address(current_address, address)
 
     def interaction_uncertain_data_references_view_push_symbol(self):
-        if self.program_state != STATE_LOADED:
+        if not self.editor_state.in_loaded_state():
             return
 
         # Place current address on the stack.
-        row_idx = self.list_table.currentIndex().row()
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
+        current_address = self.editor_state.get_address()
+        if current_address is None:
+            return
 
         # View selected uncertain code reference address.
         row_idx = self.uncertain_data_references_table.currentIndex().row()
@@ -759,16 +780,15 @@ class MainWindow(QtGui.QMainWindow):
         self.functionality_view_push_address(current_address, address)
 
     def interaction_view_push_symbol(self):
-        if self.program_state != STATE_LOADED:
+        if not self.editor_state.in_loaded_state():
             return
 
         # Place current address on the stack.
-        row_idx = self.list_table.currentIndex().row()
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
+        current_address = self.editor_state.get_address()
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             return
-        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, row_idx)
+        operand_addresses = disassembly.get_referenced_symbol_addresses_for_line_number(self.disassembly_data, self.editor_state.get_line_number())
         if len(operand_addresses) == 1:
             self.functionality_view_push_address(current_address, operand_addresses[0])
         elif len(operand_addresses) == 2:
@@ -777,8 +797,8 @@ class MainWindow(QtGui.QMainWindow):
             logger.warning("No addresses, nothing to go to.")
 
     def interaction_view_pop_symbol(self):
-        if self.program_state != STATE_LOADED:
-            logger.error("view pop symbol called with incorrect program state, want: %d, have: %d.", STATE_LOADED, self.program_state)
+        if not self.editor_state.in_loaded_state():
+            logger.error("view pop symbol called with incorrect program state, want loaded, are loading: %s initial: %s.", self.editor_state.in_loading_state(), self.editor_state.in_initial_state())
             return
 
         if len(self.view_address_stack):
@@ -789,8 +809,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def interaction_view_referring_symbols(self):
         # Place current address on the stack.
-        row_idx = self.list_table.currentIndex().row()
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
+        current_address = self.editor_state.get_address()
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             return
@@ -868,8 +887,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def get_current_address(self):
         # Place current address on the stack.
-        row_idx = self.list_table.currentIndex().row()
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, row_idx)
+        current_address = self.editor_state.get_address()
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             logger.debug("Failed to get current address, no address for line.")
@@ -890,143 +908,75 @@ class MainWindow(QtGui.QMainWindow):
                 self._settings = {}
         return self._settings.get(setting_name, default_value)
 
-        filter_strings = ";;".join(filters.iterkeys())
-        """
-                # options = QtGui.QFileDialog.Options()
-                # file_path, filter_text = QtGui.QFileDialog.getOpenFileName(self, caption="Load from...", filter=filter_strings, options=options)
-                # if not len(file_path):
-                    # return
-                # if filters[filter_text] == "load-file":
-                    # self.load_work(file_path)
-                # self.request_and_load_file({ "Load file (*.wrk)" : "load-file", })
-        """
-    def attempt_open_file(self, file_path):
-        # Cover the case of a command-line startup with a current directory file name.
-        if os.path.dirname(file_path) == "":
-            file_path = os.path.join(os.getcwd(), file_path)
-
-        # An attempt will be made to load an existing file.
-        self.program_state = STATE_LOADING
-        self.file_path = file_path
-
-        # Start the disassembly on the worker thread.
-        self.thread.result.connect(self.attempt_display_file)
-        if file_path.endswith("."+ PROJECT_SUFFIX):
-            # We display the load project dialog after loading.
-            self.thread.add_work(disassembly.load_project, file_path)
-            progress_title = "Load Project"
-            progress_text = "Loading project"
-        else:
-            new_options = disassembly.get_new_project_options(self.disassembly_data)
-            result = NewProjectDialog(new_options, file_path, self).exec_()
-            if result != QtGui.QDialog.Accepted:
-                self.reset_state()
-                return
-            self.thread.add_work(disassembly.load_file, file_path, new_options)
-            progress_title = "New Project"
-            progress_text = "Creating initial project"
-
-        # Display a modal dialog.
-        progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
-        progressDialog.setCancelButtonText("&Cancel")
-        progressDialog.setWindowTitle(progress_title)
-        progressDialog.setAutoClose(True)
-        progressDialog.setWindowModality(QtCore.Qt.WindowModal)
-        progressDialog.setRange(0, 100)
-        progressDialog.setMinimumDuration(0)
-        progressDialog.setValue(20)
-        progressDialog.setLabelText(progress_text +"..")
-
-        # Register to hear if the cancel button is pressed.
-        def canceled():
-            # Clean up our use of the worker thread.
-            self.thread.result.disconnect(self.attempt_display_file)
-            self.reset_state()
-            self.progressDialog = None
-        progressDialog.canceled.connect(canceled)
-        
-        # Wait until cancel or the work is complete.
-        t0 = time.time()
-        progressDialog.show()
-        while self.progressDialog is not None:
-            QtGui.qApp.processEvents()
-        logger.debug("Loading file finished in %0.1fs", time.time() - t0)
-
-    def attempt_display_file(self, result):
-        # This isn't really good enough, as long loading files may send mixed signals.
-        if self.file_path is None:
-            return
-
-        self.program_state = STATE_LOADED
-
-        # Close the progress dialog without canceling it.
-        self.progressDialog.setValue(100)
-        self.progressDialog = None
-
-        # Clean up our use of the worker thread.
-        self.thread.result.disconnect(self.attempt_display_file)
-
-        self.disassembly_data, line_count = result
-
-        if line_count == 0:
-            self.reset_state()
-            QtGui.QMessageBox.information(self, "Unable to open file", "The file does not appear to be a supported executable file format.")
-            return
-
-        ## Last minute steps before display of loaded data.
-        if self.file_path.endswith("."+ PROJECT_SUFFIX):
-            load_options = disassembly.get_load_project_options(self.disassembly_data)
-            ##if disassembly.is_project_inputfile_cached(self.disassembly_data):
-            ##    disassembly.validate_cached_file_size(self.disassembly_data, load_options)
-            ##    disassembly.validate_cached_file_checksum(self.disassembly_data, load_options)
-            # If the input file is cached, it's data should have been cached by the project loading.
-            if not disassembly.is_segment_data_cached(self.disassembly_data):
-                result = LoadProjectDialog(load_options, self.file_path, self).exec_()
-                if result != QtGui.QDialog.Accepted:
-                    self.reset_state()
+    def attempt_open_file(self, file_path=None):
+        def load_call_proxy(f, input_file, *args, **kwargs):
+            result_list = []
+            def on_work_complete(result):
+                if not self.editor_state.in_loading_state():
                     return
 
-                disassembly.cache_segment_data(self.disassembly_data, load_options.loader_file_path)
+                result_list[:] = result
 
-        ## Proceed with display of loaded data.
-        entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
-        new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
-        print "line for entry", hex(entrypoint_address), new_line_idx
+                # Remove registration as we got our result.
+                self.thread.result.disconnect(on_work_complete)
 
-        self.list_table._initial_line_idx = new_line_idx
+                # Close the progress dialog without canceling it.
+                self.progressDialog.setValue(100)
+                self.progressDialog = None
+
+            # Start the loading on the worker thread.
+            self.thread.result.connect(on_work_complete)
+            self.thread.add_work(f, input_file, *args, **kwargs)
+
+            is_project_file = self.editor_state.is_project_file(input_file)
+
+            # Display a modal dialog.
+            progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
+            progressDialog.setCancelButtonText("&Cancel")
+            if is_project_file:
+                progressDialog.setWindowTitle("Load Project")
+                progressDialog.setLabelText("Loading project..")
+            else:
+                progressDialog.setWindowTitle("New Project")
+                progressDialog.setLabelText("Creating initial project..")
+            progressDialog.setAutoClose(True)
+            progressDialog.setWindowModality(QtCore.Qt.WindowModal)
+            progressDialog.setRange(0, 100)
+            progressDialog.setMinimumDuration(0)
+            progressDialog.setValue(20)
+
+            # Register to hear if the cancel button is pressed.
+            def canceled():
+                # Clean up our use of the worker thread.
+                self.thread.result.disconnect(on_work_complete)
+                self.editor_state.reset_state()
+                self.progressDialog = None
+            progressDialog.canceled.connect(canceled)
+            
+            # Wait until cancel or the work is complete.
+            t0 = time.time()
+            progressDialog.show()
+            while self.progressDialog is not None:
+                QtGui.qApp.processEvents()
+            logger.debug("qtui.py:load_call_proxy %0.1fs", time.time() - t0)
+
+            return result_list
+
+        result = self.editor_state.load_file(load_call_proxy=load_call_proxy)
+        if type(result) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Unable to open file", result)
+            return
+        self.disassembly_data, line_count = result
+
+        # This isn't really good enough, as long loading files may conflict with cancellation and subsequent load attempts.
+        if not self.editor_state.in_loaded_state():
+            return
+
+        self.list_table._initial_line_idx = self.editor_state.get_line_number()
 
         ## Populate the disassembly view with the loaded data.
         model = self.list_model
         model._data_ready()
-
-        ## SEGMENTS
- 
-        if False:
-            # Populate the segments dockable window with the loaded segment information.
-            model = self.segments_model
-            loader_segments = self.disassembly_data.loader_segments
-            for segment_id in range(len(loader_segments)):
-                model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-                
-                if loaderlib.is_segment_type_code(loader_segments, segment_id):
-                    segment_type = "code"
-                elif loaderlib.is_segment_type_data(loader_segments, segment_id):
-                    segment_type = "data"
-                elif loaderlib.is_segment_type_bss(loader_segments, segment_id):
-                    segment_type = "bss"
-                length = loaderlib.get_segment_length(loader_segments, segment_id)
-                data_length = loaderlib.get_segment_data_length(loader_segments, segment_id)
-                if loaderlib.get_segment_data_file_offset(loader_segments, segment_id) == -1:
-                    data_length = "-"
-                reloc_count = "-"#len(self.disassembly_data.file_info.relocations_by_segment_id[segment_id])
-                symbol_count = "-"#len(self.disassembly_data.file_info.symbols_by_segment_id[segment_id])
-
-                model.setData(model.index(segment_id, 0, QtCore.QModelIndex()), segment_id)
-                for i, column_value in enumerate((segment_type, length, data_length, reloc_count, symbol_count)):
-                    model.setData(model.index(segment_id, i+1, QtCore.QModelIndex()), column_value)
-
-            self.segments_table.resizeColumnsToContents()
-            self.segments_table.horizontalHeader().setStretchLastSection(True)
 
         ## SYMBOLS
 
@@ -1127,27 +1077,8 @@ class MainWindow(QtGui.QMainWindow):
         model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
         model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
 
-    def request_and_save_file(self, filters):
-        filter_strings = ";;".join(filters.iterkeys())
-
-        options = QtGui.QFileDialog.Options()
-        file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self, caption="Save to...", filter=filter_strings, options=options)
-        if not len(file_path):
-            return
-        if filters[filter_text] == "code":
-            self.save_disassembled_source(file_path)
-        elif filters[filter_text] == "save-file":
-            save_options = disassembly.get_save_project_options(self.disassembly_data)
-            # Lightweight validation of whether there's the input file is cached.
-            if disassembly.is_project_inputfile_cached(self.disassembly_data):
-                if self.disassembly_data.savefile_path is None or not disassembly.validate_cached_file_size(self.disassembly_data, save_options):
-                    result = SaveProjectDialog(save_options, file_path, self).exec_()
-                    if result != QtGui.QDialog.Accepted:
-                        return
-            self.save_work(file_path, save_options)
-
     def save_disassembled_source(self, file_path):
-        line_count = disassembly.get_line_count(self.disassembly_data)
+        line_count = self.editor_state.get_line_count()
 
         # Display a modal dialog.
         progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
@@ -1166,9 +1097,9 @@ class MainWindow(QtGui.QMainWindow):
             for i in xrange(line_count):
                 progressDialog.setValue(i)
 
-                label_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_LABEL)
-                instruction_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_INSTRUCTION)
-                operands_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_OPERANDS)
+                label_text = self.editor_state.get_file_line(i, disassembly.LI_LABEL)
+                instruction_text = self.editor_state.get_file_line(i, disassembly.LI_INSTRUCTION)
+                operands_text = self.editor_state.get_file_line(i, disassembly.LI_OPERANDS)
                 if label_text:
                     f.write(label_text)
                 f.write("\t")
@@ -1187,11 +1118,6 @@ class MainWindow(QtGui.QMainWindow):
             else:
                 progressDialog.setValue(line_count)        
 
-    def load_work(self, file_path):
-        disassembly.load_project(file_path)
-
-    def save_work(self, file_path, save_options):
-        disassembly.save_project(file_path, self.disassembly_data, save_options)
 
 ## Option dialogs.
 
@@ -1399,7 +1325,7 @@ class SaveProjectDialog(QtGui.QDialog):
         self.setWindowModality(QtCore.Qt.WindowModal)
 
         ## File options layout.
-        inputdata_groupbox = _make_inputdata_options(self, "File Options", save_options.cache_input_data)
+        inputdata_groupbox = _make_inputdata_options(self, "File Options", save_options.cache_input_file)
 
         ## Buttons layout.
         save_button = QtGui.QPushButton("Save")
@@ -1418,7 +1344,7 @@ class SaveProjectDialog(QtGui.QDialog):
         self.setLayout(outer_vertical_layout)
 
     def accept(self):
-        self.save_options.cache_input_data = self.inputdata_do_radio.isChecked()
+        self.save_options.cache_input_file = self.inputdata_do_radio.isChecked()
         return super(SaveProjectDialog, self).accept()
 
 
@@ -1432,7 +1358,8 @@ class NewProjectDialog(QtGui.QDialog):
         dir_path, file_name = os.path.split(file_path)
 
         # Attempt to identify the file type.
-        identification_result = loaderlib.identify_file(file_path)
+        with open(file_path, "rb") as input_file:
+            identification_result = loaderlib.identify_file(input_file)
         if identification_result is not None:
             file_info, file_details = identification_result
             new_options.is_binary_file = False

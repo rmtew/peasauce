@@ -1120,79 +1120,32 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses):
     #print "process code:", len(new_code_block_addresses)
     return new_code_block_addresses
 
-def _make_inputfile_name(savefile_path):
-    savedir_path, savefile_name = os.path.split(savefile_path)
-    savefile_name0, savefile_name1 = os.path.splitext(savefile_name)
-    return savefile_name0 +"-file.cache"
-
-# TODO: Finicky mess of project option functions.  Need to clean this up.
-
-def _get_project_shared_options(program_data, options):
-    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
-    options.cache_input_data = flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA
-
-def _set_project_shared_options(program_data, options):
-    if options.cache_input_data:
-        program_data.flags |= PDF_CACHE_INPUT_DATA
-    else:
-        program_data.flags &= ~PDF_CACHE_INPUT_DATA
 
 def get_new_project_options(program_data):
-    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
-    options = NewProjectOptions()
-    _get_project_shared_options(program_data, options)
-    return options
+    return NewProjectOptions()
 
 def get_load_project_options(program_data):
-    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
-    options = LoadProjectOptions()
-    _get_project_shared_options(program_data, options)
-    return options
+    return LoadProjectOptions()
 
 def get_save_project_options(program_data):
-    flags = DEFAULT_PROGRAMDATA_FLAGS if program_data is None else program_data.flags
-    options = SaveProjectOptions()
-    _get_project_shared_options(program_data, options)
-    return options
-
-def _make_cached_inputfile_path(savefile_path):
-    savedir_path, savefile_name = os.path.split(savefile_path)
-    savefile_name0, discard = os.path.splitext(savefile_name)
-    return os.path.join(savedir_path, savefile_name0 +"-file.cache")
-
-def _cache_input_file(savefile_path, inputfile_path):
-    cachefile_path = _make_cached_inputfile_path(savefile_path)
-    logger.debug("_cache_input_file: %s", cachefile_path)
-    with open(inputfile_path, "rb") as rf:
-        with open(cachefile_path, "wb") as wf:
-            data = rf.read(256 * 1024)
-            while len(data):
-                wf.write(data)
-                data = rf.read(256 * 1024)
-    return True
+    return SaveProjectOptions()
 
 def is_project_inputfile_cached(program_data):
-    return program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA
+    return program_data.input_file_cached
+
+def get_project_save_count(program_data):
+    return program_data.save_count
 
 ## Project loading and saving.
 
-def save_project(savefile_path, program_data, save_options):
-    # Apply save project options to the program data fields.
-    _set_project_shared_options(program_data, save_options)
-    if program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA:
-        cachefile_path = _make_cached_inputfile_path(savefile_path)
-        if program_data.loader_file_path is not None and cachefile_path != program_data.loader_file_path:
-            _cache_input_file(savefile_path, program_data.loader_file_path)
-    return disassembly_persistence.save_project(savefile_path, program_data)
+def save_project_file(save_file, program_data, save_options):
+    return disassembly_persistence.save_project(save_file, program_data, save_options)
 
-def load_project(savefile_path):
-    program_data = disassembly_persistence.load_project(savefile_path)
 
-    # Try and cache the input file data automatically.
-    if program_data.flags & PDF_CACHE_INPUT_DATA == PDF_CACHE_INPUT_DATA:
-        cachefile_path = _make_cached_inputfile_path(savefile_path)
-        if validate_cached_file(program_data, cachefile_path):
-            cache_segment_data(program_data, cachefile_path)
+def load_project_file(save_file):
+    program_data = disassembly_persistence.load_project(save_file)
+    if program_data is None:
+        return None, 0
 
     for block in program_data.blocks:
         if get_block_data_type(block) == DATA_TYPE_ASCII:
@@ -1207,7 +1160,8 @@ def load_project(savefile_path):
 
     return program_data, get_line_count(program_data)
 
-def load_file(file_path, new_options):
+
+def load_file(input_file, new_options):
     loader_options = None
     if new_options.is_binary_file:
         loader_options = loaderlib.BinaryFileOptions()
@@ -1215,7 +1169,7 @@ def load_file(file_path, new_options):
         loader_options.load_address = new_options.loader_load_address
         loader_options.entrypoint_offset = new_options.loader_entrypoint_offset
 
-    result = loaderlib.load_file(file_path, loader_options)
+    result = loaderlib.load_file(input_file, loader_options)
     if result is None:
         return None, 0
 
@@ -1231,14 +1185,13 @@ def load_file(file_path, new_options):
     program_data.block_line0s_dirtyidx = 0
     program_data.post_segment_addresses = {}
 
-    program_data.loader_file_path = file_path
     program_data.loader_system_name = file_info.system.system_name
     program_data.loader_relocatable_addresses = set()
     program_data.loader_relocated_addresses = set()
 
-    program_data.file_name = os.path.split(file_path)[-1]
-    program_data.file_size = os.path.getsize(file_path)
-    program_data.file_checksum = calculate_file_checksum(file_path)
+    input_file.seek(0, os.SEEK_END)
+    program_data.file_size = input_file.tell()
+    program_data.file_checksum = calculate_file_checksum(input_file)
     program_data.dis_name = file_info.system.get_arch_name()
 
     segments = program_data.loader_segments = file_info.segments
@@ -1253,7 +1206,7 @@ def load_file(file_path, new_options):
     program_data.loader_entrypoint_segment_id = file_info.entrypoint_segment_id
     program_data.loader_entrypoint_offset = file_info.entrypoint_offset
     for i in range(len(segments)):
-        loaderlib.cache_segment_data(file_path, segments, i)
+        loaderlib.cache_segment_data(input_file, segments, i)
     loaderlib.relocate_segment_data(segments, data_types, file_info.relocations_by_segment_id, program_data.loader_relocatable_addresses, program_data.loader_relocated_addresses)
 
     # Start disassembling.
@@ -1322,9 +1275,6 @@ def load_file(file_path, new_options):
     ## Any analysis / post-processing that does not change line count should go below.
     onload_cache_uncertain_references(program_data)
 
-    # Ensure the new project options are recorded and persisted.
-    _set_project_shared_options(program_data, new_options)
-
     DEBUG_log_load_stats(program_data)
 
     return program_data, get_line_count(program_data)
@@ -1362,39 +1312,22 @@ def onload_cache_uncertain_references(program_data):
                 block.references = _locate_uncertain_data_references(program_data, block.address, block)
 
 
-def calculate_file_checksum(file_path):
+def calculate_file_checksum(input_file):
+    input_file.seek(0, os.SEEK_SET)
     hasher = hashlib.md5()
-    with open(file_path, "rb") as f:
-        data = f.read(256 * 1024)
-        while len(data) > 0:
-            hasher.update(data)
-            data = f.read(256 * 1024)
+    data = input_file.read(256 * 1024)
+    while len(data) > 0:
+        hasher.update(data)
+        data = input_file.read(256 * 1024)
     return hasher.digest()
 
-def validate_cached_file_size(program_data, load_options):
-    cachefile_path = _make_cached_inputfile_path(program_data.savefile_path)
-    result = os.path.isfile(cachefile_path) and os.path.getsize(cachefile_path) == program_data.file_size
-    load_options.valid_file_size = result
-    return result
 
-def validate_cached_file_checksum(program_data, load_options):
-    cachefile_path = _make_cached_inputfile_path(program_data.savefile_path)
-    result = False
-    if os.path.isfile(cachefile_path):
-        result = program_data.file_checksum == calculate_file_checksum(cachefile_path)
-    load_options.valid_file_checksum = result
-    return result
-
-def validate_cached_file(program_data, cachefile_path):
-    if os.path.isfile(cachefile_path) and os.path.getsize(cachefile_path) == program_data.file_size:
-        return program_data.file_checksum == calculate_file_checksum(cachefile_path)
-    return False
-
-def cache_segment_data(program_data, file_path):
+def cache_segment_data(program_data, f):
     segments = program_data.loader_segments
     for i in range(len(segments)):
-        loaderlib.cache_segment_data(file_path, segments, i)
-    program_data.loader_file_path = file_path
+        loaderlib.cache_segment_data(f, segments, i)
+    # program_data.loader_file_path = file_path
+    # TODO: reconcile
 
 def is_segment_data_cached(program_data):
     segments = program_data.loader_segments

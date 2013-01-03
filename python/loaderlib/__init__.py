@@ -46,18 +46,18 @@ def get_system_data_types(system_name):
     system = systems_by_name[system_name]
     return DataTypes(system.big_endian)
  
-def load_file(file_path, loader_options=None):
+def load_file(input_file, loader_options=None):
     for system_name, system in systems_by_name.iteritems():
-        file_info = FileInfo(system, file_path, loader_options)
+        file_info = FileInfo(system, loader_options)
         data_types = get_system_data_types(system_name)
-        if system.load_input_file(file_info, data_types):
+        if system.load_input_file(input_file, file_info, data_types):
             return file_info, data_types
 
-def identify_file(file_path):
+def identify_file(input_file):
     for system_name, system in systems_by_name.iteritems():
-        file_info = FileInfo(system, file_path)
+        file_info = FileInfo(system)
         data_types = get_system_data_types(system_name)
-        filetype_name = system.identify_input_file(file_info, data_types)
+        filetype_name = system.identify_input_file(input_file, file_info, data_types)
         if filetype_name is not None:
             result = {}
             result["processor"] = system.get_arch_name()
@@ -109,16 +109,18 @@ def is_segment_type_data(segments, segment_id):
 def is_segment_type_bss(segments, segment_id):
     return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_BSS
 
-def cache_segment_data(file_path, segments, segment_id):
+def cache_segment_data(input_file, segments, segment_id, base_file_offset=0):
+    """
+    base_file_offset: when the input file is located within a containing file.
+    """
     data = None
     file_offset = get_segment_data_file_offset(segments, segment_id)
     # No data for segments that have no data..
     if file_offset != -1:
         file_length = get_segment_data_length(segments, segment_id)
 
-        f = open(file_path, "rb")
-        f.seek(file_offset, os.SEEK_SET)
-        file_data = f.read(file_length)
+        input_file.seek(base_file_offset + file_offset, os.SEEK_SET)
+        file_data = input_file.read(file_length)
         if len(file_data) == file_length:
             data = bytearray(file_data)
         else:
@@ -225,17 +227,17 @@ class FileInfo(object):
     internal_data = None
     savefile_data = None
 
-    def __init__(self, system, file_path, loader_options=None):
+    def __init__(self, system, loader_options=None):
         self.system = system
         self.loader_options = loader_options
 
-        self.file_path = file_path
+        # self.file_path = file_path # TODO: reconcile
 
         self.segments = []
         self.relocations_by_segment_id = []
         self.symbols_by_segment_id = []
 
-        if loader_options is not None:
+        if loader_options is not None and loader_options.is_binary_file:
             self.load_address = loader_options.load_address
         else:
             self.load_address = 0

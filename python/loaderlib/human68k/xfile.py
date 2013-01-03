@@ -89,16 +89,15 @@ class XFile(object):
     _symbol_table_entries = None
 
 
-def identify_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        if load_x_file(file_info, data_types, f):
-            return "Sharp X68000 executable"
+def identify_input_file(input_file, file_info, data_types):
+    if load_x_file(file_info, data_types, input_file):
+        return "Sharp X68000 executable"
 
-def load_input_file(file_info, data_types):
-    with open(file_info.file_path, "rb") as f:
-        return load_x_file(file_info, data_types, f)
+def load_input_file(input_file, file_info, data_types):
+    return load_x_file(file_info, data_types, input_file)
 
 def load_x_file(file_info, data_types, f):
+    f.seek(0, os.SEEK_SET)
     magic_word = data_types.uint16(f.read(2))
     if magic_word != MAGIC_WORD:
         logger.debug("human68k/xfile.py: _process_file: Unrecognised file.")

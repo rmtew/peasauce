@@ -1,2 +1,3 @@
 #!/bin/bash
-/c/python27/python.exe python/test.py $@
+[ -f /c/python27/python.exe ] && export PYTHON=/c/python27/python.exe || export PYTHON=python
+$PYTHON python/test.py $@
