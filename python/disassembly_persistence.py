@@ -134,13 +134,21 @@ def write_segment_list_entry(f, v):
 
 
 SAVEFILE_ID = 0x5053504a
-SAVEFILE_VERSION = 2
+SAVEFILE_VERSION = 3
 
 SAVEFILE_HUNK_SOURCEDATA = 2001            # The entire source input file that the disassembly was created from.
 SAVEFILE_HUNK_SOURCEDATAINFO = 2002        # The metadata about the source input file.
 SAVEFILE_HUNK_LOADER = 2003                # Loader related data used by the disassembly logic.
 SAVEFILE_HUNK_LOADERINTERNAL = 2004        # Internal loader data.
 SAVEFILE_HUNK_DISASSEMBLY = 2005           # General disassembly state.
+
+CURRENT_HUNK_VERSIONS = {
+    SAVEFILE_HUNK_SOURCEDATA: 1,
+    SAVEFILE_HUNK_SOURCEDATAINFO: 1,
+    SAVEFILE_HUNK_LOADER: 1,
+    SAVEFILE_HUNK_LOADERINTERNAL: 1,
+    SAVEFILE_HUNK_DISASSEMBLY: 1,
+}
 
 # 4: Save file ID.
 # 4: Save file version.
@@ -173,6 +181,7 @@ def save_project(f, program_data, save_options):
         length_offset = f.tell()
         persistence.write_uint32(f, 0)
         hunk_data_offset = f.tell()
+        persistence.write_uint16(f, CURRENT_HUNK_VERSIONS[hunk_id])
         if SAVEFILE_HUNK_DISASSEMBLY == hunk_id:
             save_disassembly_hunk(f, program_data)
         elif SAVEFILE_HUNK_LOADER == hunk_id:
@@ -230,19 +239,88 @@ def save_sourcedata_hunk(f, program_data, input_file):
         data = input_file.read(256 * 1024)
 
 
-def load_project(f):
-    f.seek(0, os.SEEK_END)
-    file_size = f.tell()
-    f.seek(0, os.SEEK_SET)
+import tempfile
 
-    savefile_id = persistence.read_uint32(f)
-    if savefile_id != SAVEFILE_ID:
-        logger.error("Save-file does not have first four bytes of '%X', has '%X' instead.", SAVEFILE_ID, savefile_id)
+def convert_project_format_2_to_3(input_file):
+    """
+    This function should encapsulate all application-specific logic involved to
+    make it independent of as many changes as possible.
+
+    From version: 2.
+    To version: 3.
+    Modifications:
+    - Inserts a version number into all hunks.
+    """
+    SNAPSHOT_HUNK_VERSIONS = {
+        SAVEFILE_HUNK_SOURCEDATA: 1,
+        SAVEFILE_HUNK_SOURCEDATAINFO: 1,
+        SAVEFILE_HUNK_LOADER: 1,
+        SAVEFILE_HUNK_LOADERINTERNAL: 1,
+        SAVEFILE_HUNK_DISASSEMBLY: 1,
+    }
+
+    input_file.seek(0, os.SEEK_END)
+    file_size = input_file.tell()
+    input_file.seek(0, os.SEEK_SET)
+
+    savefile_id = persistence.read_uint32(input_file)
+    savefile_version = persistence.read_uint16(input_file)
+    if savefile_version != 2:
         return None
-    savefile_version = persistence.read_uint16(f)
-    if savefile_version != SAVEFILE_VERSION:
-        logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
-        return None
+
+    logger.info("Upgrading save-file from version 2 to version 3: Hunk versioning..")
+    save_count = persistence.read_uint32(input_file)
+
+    output_file = tempfile.TemporaryFile()
+    persistence.write_uint32(output_file, savefile_id)
+    persistence.write_uint16(output_file, 3)
+    persistence.write_uint32(output_file, save_count)
+
+    while input_file.tell() < file_size:
+        # This should be pretty straightforward.
+        hunk_id = persistence.read_uint16(input_file)
+        persistence.write_uint16(output_file, hunk_id)
+
+        input_hunk_length = persistence.read_uint32(input_file)
+        output_length_offset = output_file.tell()
+        persistence.write_uint32(output_file, 0)
+        output_data_offset = output_file.tell()
+        # Modification.
+        persistence.write_uint16(output_file, CURRENT_HUNK_VERSIONS[hunk_id])
+
+        input_data = input_file.read(input_hunk_length)
+        output_file.write(input_data)
+        output_hunk_length = output_file.tell() - output_data_offset
+        output_file.seek(output_length_offset, os.SEEK_SET)
+        persistence.write_uint32(output_file, output_hunk_length)
+        output_file.seek(output_hunk_length, os.SEEK_CUR)
+
+    return output_file
+
+
+def load_project(f):
+    while True:
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        f.seek(0, os.SEEK_SET)
+
+        savefile_id = persistence.read_uint32(f)
+        if savefile_id != SAVEFILE_ID:
+            logger.error("Save-file does not have first four bytes of '%X', has '%X' instead.", SAVEFILE_ID, savefile_id)
+            return None
+        savefile_version = persistence.read_uint16(f)
+        if savefile_version != SAVEFILE_VERSION:
+            new_f = None
+            if savefile_version == 2:
+                new_f = convert_project_format_2_to_3(f)
+                savefile_version = 3
+            if new_f is None or savefile_version != SAVEFILE_VERSION:
+                logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
+                return None
+            f = new_f
+            logger.info("Save-file upgraded to version %d", SAVEFILE_VERSION)
+            continue
+        break
 
     program_data = ProgramData()
     program_data.save_count = persistence.read_uint32(f)
@@ -251,7 +329,9 @@ def load_project(f):
     while f.tell() < file_size:
         hunk_id = persistence.read_uint16(f)
         hunk_length = persistence.read_uint32(f)
+        expected_hunk_version = CURRENT_HUNK_VERSIONS[hunk_id]
         offset0 = f.tell()
+        actual_hunk_version = persistence.read_uint16(f)
         if SAVEFILE_HUNK_DISASSEMBLY == hunk_id:
             load_disassembly_hunk(f, program_data)
         elif SAVEFILE_HUNK_LOADER == hunk_id:

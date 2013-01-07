@@ -45,10 +45,10 @@ import types
 
 from PySide import QtCore, QtGui
 
-import disassembly
 import disassemblylib
-import loaderlib
 import editor_state
+import loaderlib
+import util
 
 
 SETTINGS_FILE = "settings.pikl"
@@ -370,6 +370,7 @@ class QTUIEditorClient(editor_state.ClientAPI):
         self.file_path = file_path
         return self.get_load_file()
 
+    # TODO: Should this be an internal function?  editor state uses it at the moment.
     def get_load_file(self):
         return open(self.file_path, "rb")
 
@@ -408,12 +409,22 @@ class QTUIEditorClient(editor_state.ClientAPI):
             else:
                 return text
 
+    def request_address_selection(self, addresses):
+        """
+        For now just show a dialog that allows the user to select the given addresses.
+        Instructions to click on an address to select it, scrollable list of addresses, cancel button.
+        """
+        raise NotImplementedError
+
     def request_label_name(self, default_label_name):
         text, ok = QtGui.QInputDialog.getText(self.owner, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
         text = text.strip()
         if ok and text != default_label_name:
             return text
 
+    def request_confirmation(self, title, text):
+        ret = QtGui.QMessageBox.question(self.owner, title, text, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
+        return ret == QtGui.QMessageBox.Ok
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -707,9 +718,11 @@ class MainWindow(QtGui.QMainWindow):
             pass
 
     def menu_search_goto_address(self):
-        new_address = self.editor_state.goto_address()
-        if new_address is not None:
-            self.scroll_to_address(new_address)
+        errmsg = self.editor_state.goto_address()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number())
 
     def menu_search_goto_previous_data_block(self):
         errmsg = self.editor_state.goto_previous_data_block()
@@ -795,22 +808,12 @@ class MainWindow(QtGui.QMainWindow):
         self.scroll_to_line(line_idx, True)
 
     def interaction_view_referring_symbols(self):
-        # Place current address on the stack.
-        current_address = self.editor_state.get_address()
-        # Whether a non-disassembly "readability" line was selected.
-        if current_address is None:
+        errmsg = self.editor_state.goto_referring_address()
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-        addresses = disassembly.get_referring_addresses(self.disassembly_data, current_address)
-        for address in addresses:
-            logger.debug("%06X: Referring address %06X", current_address, address)
-        # One address -> goto?
-        # Going to an address should push the current.
-        if len(addresses) == 0:
-            logger.warning("No addresses, nothing to go to.")
-        elif len(addresses) == 1:
-            self.functionality_view_push_address(current_address, addresses.pop())
-        else:
-            logger.error("Too many addresses, unexpected situation.  Need some selection mechanism.")
+        line_idx = self.editor_state.get_line_number()
+        self.scroll_to_line(line_idx, True)
 
     def interaction_set_datatype_code(self):
         errmsg = self.editor_state.set_datatype_code()
@@ -840,7 +843,7 @@ class MainWindow(QtGui.QMainWindow):
     ## MISCELLANEIA
 
     def scroll_to_address(self, new_address):
-        new_line_idx = disassembly.get_line_number_for_address(self.disassembly_data, new_address)
+        new_line_idx = self.editor_state.get_line_number_for_address(new_address)
         logger.debug("scroll_to_address: line=%d address=$%X", new_line_idx, new_address)
         self.scroll_to_line(new_line_idx, True)
 
@@ -853,7 +856,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
-        next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        next_line_number = self.editor_state.get_line_number_for_address(address)
         if next_line_number is not None:
             #self.list_table.selectRow(next_line_number)
             self.scroll_to_line(next_line_number)
@@ -863,9 +866,6 @@ class MainWindow(QtGui.QMainWindow):
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         else:
             logger.error("view push symbol for address %06X unable to resolve line number." % address)
-
-    def set_data_type(self, address, data_type):
-        disassembly.set_data_type_at_address(self.disassembly_data, address, data_type)
 
     def get_current_address(self):
         # Place current address on the stack.
@@ -945,14 +945,20 @@ class MainWindow(QtGui.QMainWindow):
             return result_list
 
         result = self.editor_state.load_file(load_call_proxy=load_call_proxy)
+        # Cancelled?
+        if result is None:
+            return
+        # Error message?
         if type(result) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to open file", result)
             return
-        self.disassembly_data, line_count = result
 
         # This isn't really good enough, as long loading files may conflict with cancellation and subsequent load attempts.
         if not self.editor_state.in_loaded_state():
             return
+
+        # Successfully completed.
+        self.disassembly_data, line_count = result
 
         self.list_table._initial_line_idx = self.editor_state.get_line_number()
 
@@ -963,7 +969,7 @@ class MainWindow(QtGui.QMainWindow):
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
-        disassembly.set_symbol_insert_func(self.disassembly_data, self.disassembly_symbol_added)
+        self.editor_state.set_symbol_insert_func(self.disassembly_symbol_added)
 
         row_data = self.disassembly_data.symbols_by_address.items()
         self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
@@ -972,20 +978,20 @@ class MainWindow(QtGui.QMainWindow):
 
         ## UNCERTAIN REFERENCES
 
-        disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self.disassembly_uncertain_reference_modification)
+        self.editor_state.set_uncertain_reference_modification_func(self.disassembly_uncertain_reference_modification)
 
         def _lookup_cell_value(self, row, column):
             if column == 0:
                 return u"\u2713"
             return CustomItemModel._lookup_cell_value(self, row, column-1)
 
-        results = disassembly.get_uncertain_code_references(self.disassembly_data)
+        results = self.editor_state.get_uncertain_code_references()
         self.uncertain_code_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_code_references_model, CustomItemModel)
         self.uncertain_code_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_code_references_table.resizeColumnsToContents()
         self.uncertain_code_references_table.horizontalHeader().setStretchLastSection(True)
 
-        results = disassembly.get_uncertain_data_references(self.disassembly_data)
+        results = self.editor_state.get_uncertain_data_references()
         self.uncertain_data_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_data_references_model, CustomItemModel)
         self.uncertain_data_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_data_references_table.resizeColumnsToContents()
@@ -1005,7 +1011,8 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
     def disassembly_uncertain_reference_modification(self, data_type_from, data_type_to, address, length):
-        if data_type_from == disassembly.DATA_TYPE_CODE:
+        # logger.info("disassembly_uncertain_reference_modification: %s %s %s %s", data_type_from, data_type_to, address, length)
+        if data_type_from == "CODE":
             from_model = self.uncertain_code_references_model
         else:
             from_model = self.uncertain_data_references_model
@@ -1025,9 +1032,9 @@ class MainWindow(QtGui.QMainWindow):
         from_row_data[removal_idx0:removal_idxN] = []
         from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
 
-        addition_rows = disassembly.get_uncertain_references_by_address(self.disassembly_data, address)
+        addition_rows = self.editor_state.get_uncertain_references_by_address(address)
         if len(addition_rows):
-            if data_type_to == disassembly.DATA_TYPE_CODE:
+            if data_type_to == "CODE":
                 to_model = self.uncertain_code_references_model
             else:
                 to_model = self.uncertain_data_references_model
@@ -1195,7 +1202,7 @@ class LoadProjectDialog(QtGui.QDialog):
             if os.path.isfile(file_path):
                 if os.path.getsize(file_path) == original_filesize:
                     valid_size_checkbox.setChecked(True)
-                file_checksum = disassembly.calculate_file_checksum(file_path)
+                file_checksum = util.calculate_file_checksum(file_path)
                 if file_checksum == original_checksum:
                     valid_checksum_checkbox.setChecked(True)
                 if valid_size_checkbox.isChecked() and valid_checksum_checkbox.isChecked():

@@ -27,6 +27,7 @@ import unittest
 
 
 import disassembly
+import editor_state
 import qtui
 
 
@@ -53,8 +54,6 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
                 self._removal_rows = removal_rows
 
         class DisassemblyModule(object):
-            DATA_TYPE_CODE = disassembly.DATA_TYPE_CODE
-            DATA_TYPE_LONGWORD = disassembly.DATA_TYPE_LONGWORD
             _next_uncertain_references = None
 
             def get_uncertain_references_by_address(self, program_data, address):
@@ -65,71 +64,62 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         class DisassemblyData(object):
             pass
 
-        self.disassembly_data = DisassemblyData()
+        self.fake_disassembly_module = fake_disassembly_module = DisassemblyModule()
+        self.disassembly_data = disassembly_data = DisassemblyData()
+
+        if False:
+            class EditorState(object):
+                def get_uncertain_references_by_address(self, address):
+                    return fake_disassembly_module.get_uncertain_references_by_address(disassembly_data, address)
+
+        class EditorClient(object):
+            def reset_state(self):
+                pass
+
+        self.editor_state = editor_state.EditorState(EditorClient())
+        self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = self.fake_disassembly_module
+
         self.uncertain_code_references_model = Model()
         self.uncertain_data_references_model = Model()
-        if False:
-            # Some address rages
-            block_address = 0
-            code_rows, data_rows = [], []
-            while len(code_rows) < 10 or len(data_rows) < 10:
-                flags = 0
-                block_length = random.randint(10, 30)
-                if random.random() > 0.7:
-                    if random.random() > 0.5:
-                        code_rows.append((block_address, block_length, flags | self.CODE_F))
-                    else:
-                        data_rows.append((block_address, block_length, flags | self.DATA_F))
-                block_address += block_length
-            self.uncertain_code_references_model._row_data = code_rows
-            self.uncertain_data_references_model._row_data = data_rows
-            self.code_rows = set(code_rows)
-            self.data_rows = set(data_rows)
 
         self.code_rows = [ [1], [2], [5], [9], [10] ]
         self.uncertain_code_references_model._row_data = self.code_rows[:]
         self.data_rows = [ [3], [7], [8], [11] ]
         self.uncertain_data_references_model._row_data = self.data_rows[:]
 
-        self.fake_disassembly_module = DisassemblyModule()
         self.disassembly_uncertain_reference_modification = qtui.MainWindow.disassembly_uncertain_reference_modification.im_func
-        self.disassembly_uncertain_reference_modification.__globals__["disassembly"] = self.fake_disassembly_module
-
-    # TODO: Try edge cases.  Remove and readd first and last entries.  Verify works.
-    # TODO: Try switch type cases.  Go from code to data and back.  Manually set flag to force.
-    # TODO: Try only one type case.  Disappears from it's type list, and reappears.
 
     def test_leading_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 1, 1)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 1)
 
         self.assertEqual(self.code_rows[1:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_leading_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 1, 3)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 3)
 
         self.assertEqual(self.code_rows[2:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 10, 1)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 10, 1)
 
         self.assertEqual(self.code_rows[:-1], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 7, 4)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 7, 4)
 
         self.assertEqual(self.code_rows[:-2], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_mid_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 5, 3)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 3)
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:3] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -137,7 +127,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 5, 5)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 5)
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:4] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -145,21 +135,21 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_leading_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[0:1]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 1, 1)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 1)
 
         self.assertEqual(self.code_rows[1:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.code_rows[0:1] + self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_leading_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[0:2]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 1, 3)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 3)
 
         self.assertEqual(self.code_rows[2:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.code_rows[0:2] + self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[-1:]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 10, 1)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 10, 1)
 
         self.assertEqual(self.code_rows[:-1], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-1:]
@@ -168,7 +158,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_trailing_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[-2:]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 7, 4)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 7, 4)
 
         self.assertEqual(self.code_rows[:-2], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-2:]
@@ -177,7 +167,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[2:3]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 5, 3)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 3)
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:3] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -187,7 +177,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[2:4]
-        self.disassembly_uncertain_reference_modification(self, disassembly.DATA_TYPE_CODE, disassembly.DATA_TYPE_LONGWORD, 5, 5)
+        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 5)
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:4] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)

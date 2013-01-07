@@ -19,7 +19,6 @@
 DEBUG_ANNOTATE_DISASSEMBLY = True
 
 import bisect
-import hashlib
 import logging
 import os
 
@@ -28,6 +27,7 @@ import loaderlib
 import disassemblylib
 import disassembly_persistence
 import persistence
+import util
 
 
 logger = logging.getLogger("disassembly")
@@ -664,9 +664,9 @@ def recalculate_line_count_index(program_data, dirtyidx=None):
     if dirtyidx is not None:
         logger.debug("Recalculated line counts")
         line_count_start = 0
-        if program_data.block_line0s_dirtyidx > 0:
-            line_count_start = program_data.block_line0s[program_data.block_line0s_dirtyidx-1] + program_data.blocks[program_data.block_line0s_dirtyidx-1].line_count
-        for i in xrange(program_data.block_line0s_dirtyidx, len(program_data.block_line0s)):
+        if dirtyidx > 0:
+            line_count_start = program_data.block_line0s[dirtyidx-1] + program_data.blocks[dirtyidx-1].line_count
+        for i in xrange(dirtyidx, len(program_data.block_line0s)):
             program_data.block_line0s[i] = line_count_start
             line_count_start += program_data.blocks[i].line_count
         program_data.block_line0s_dirtyidx = None
@@ -882,6 +882,10 @@ def set_data_type_at_address(program_data, address, data_type):
     if data_type == DATA_TYPE_CODE:
         # This can fail, so we do not explicitly change the block ourselves.
         new_code_blocks = _process_address_as_code(program_data, address, set([ ]))
+
+        # This needs to be updated before operating on the new blocks.
+        recalculate_line_count_index(program_data, block_idx)
+
         for block in new_code_blocks:
             block.references = _locate_uncertain_code_references(program_data, block.address, block)
     else:
@@ -891,10 +895,11 @@ def set_data_type_at_address(program_data, address, data_type):
         else:
             block.line_data = None
         block.flags &= ~BLOCK_FLAG_PROCESSED
-        block.references = _locate_uncertain_data_references(program_data, address)
 
-    program_data.block_line0s_dirtyidx = block_idx
-    calculate_line_count(program_data, block)
+        calculate_line_count(program_data, block)
+        recalculate_line_count_index(program_data, block_idx)
+
+        block.references = _locate_uncertain_data_references(program_data, address)
 
     logger.debug("Changed data type at %X to %d", address, data_type)
 
@@ -1191,7 +1196,7 @@ def load_file(input_file, new_options):
 
     input_file.seek(0, os.SEEK_END)
     program_data.file_size = input_file.tell()
-    program_data.file_checksum = calculate_file_checksum(input_file)
+    program_data.file_checksum = util.calculate_file_checksum(input_file)
     program_data.dis_name = file_info.system.get_arch_name()
 
     segments = program_data.loader_segments = file_info.segments
@@ -1310,16 +1315,6 @@ def onload_cache_uncertain_references(program_data):
                 block.references = _locate_uncertain_code_references(program_data, block.address, block)
             else:
                 block.references = _locate_uncertain_data_references(program_data, block.address, block)
-
-
-def calculate_file_checksum(input_file):
-    input_file.seek(0, os.SEEK_SET)
-    hasher = hashlib.md5()
-    data = input_file.read(256 * 1024)
-    while len(data) > 0:
-        hasher.update(data)
-        data = input_file.read(256 * 1024)
-    return hasher.digest()
 
 
 def cache_segment_data(program_data, f):
