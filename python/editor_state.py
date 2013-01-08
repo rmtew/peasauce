@@ -33,6 +33,10 @@ import util
 TEXT_LOAD_INPUT_FILE_TITLE = "Input file not included"
 TEXT_LOAD_INPUT_FILE_BODY = "The save-file cannot be loaded unless you locate and provide the input file which was originally disassembled.  Do you wish to proceed?"
 
+TEXT_SELECT_REFERRING_ADDRESS_SHORT = "Go to which referring address?"
+TEXT_SELECT_REFERRING_ADDRESS_LONG = "Select on the following and press the enter key, or click on the button, to jump to the given referring address."
+TEXT_GO_TO_SELECTION = "Go to selection"
+
 ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT = "The file does not appear to be a supported executable file format."
 ERRMSG_NO_IDENTIFIABLE_DESTINATION = "Nowhere to go."
 ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH = "File does not match (checksum differs)"
@@ -93,7 +97,7 @@ class ClientAPI(object):
             Returns a symbol name as a string, if applicable. """
         raise NotImplementedError
 
-    def request_address_selection(self, addresses):
+    def request_address_selection(self, title_text, body_text, button_text, address_rows, row_keys):
         """ Prompts the user with a list of addresses (strings), which they can select one of.
             Returns None if cancel chosen.
             Returns the selected address otherwise. """
@@ -139,10 +143,25 @@ class EditorState(object):
         # TODO: Clear out related data.
         self.client.reset_state()
 
+    def _address_to_string(self, address):
+        # TODO: Make it disassembly specific e.g. $address, 0xaddress
+        return hex(address)
+
     def _convert_addresses_to_symbols_where_possible(self, addresses):
         for i, address in enumerate(addresses):
             symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, address)
-            addresses[i] = symbol_name
+            if symbol_name is not None:
+                addresses[i] = symbol_name
+            else:
+                addresses[i] = self._address_to_string(address)
+
+    def get_source_code_for_address(self, address):
+        line_idx = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        code_string = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION)
+        operands_text = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS)
+        if len(operands_text):
+            code_string += " "+ operands_text
+        return code_string
 
     def get_address(self):
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
@@ -220,22 +239,28 @@ class EditorState(object):
     def goto_referring_address(self):
         current_address = self.get_address()
         if current_address is None:
-            return
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         addresses = list(disassembly.get_referring_addresses(self.disassembly_data, current_address))
         if not len(addresses):
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         # Addresses appear in numerical order.
         addresses.sort()
         # Symbols appear in place of addresses where they exist.
-        self._convert_addresses_to_symbols_where_possible(addresses)
-        address = self.client.request_address_selection(addresses)
-        if address is None:
-            return
-        next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        converted_addresses = addresses[:]
+        self._convert_addresses_to_symbols_where_possible(converted_addresses)
+        address_rows = []
+        for i, address in enumerate(addresses):
+            code_string = self.get_source_code_for_address(address)
+            address_rows.append((self._address_to_string(address), converted_addresses[i], code_string))
+        selected_address = self.client.request_address_selection(TEXT_SELECT_REFERRING_ADDRESS_SHORT, TEXT_SELECT_REFERRING_ADDRESS_LONG, TEXT_GO_TO_SELECTION, address_rows, addresses)
+        if selected_address is None:
+            return False
+        next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, selected_address)
         if next_line_number is None:
             return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
         self.set_line_number(next_line_number)
         self.address_stack.append(current_address)
+        return True
 
     def goto_previous_data_block(self):
         line_idx = self.get_line_number()

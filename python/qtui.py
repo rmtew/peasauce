@@ -409,12 +409,16 @@ class QTUIEditorClient(editor_state.ClientAPI):
             else:
                 return text
 
-    def request_address_selection(self, addresses):
+    def request_address_selection(self, title_text, body_text, button_text, address_rows, row_keys):
         """
         For now just show a dialog that allows the user to select the given addresses.
         Instructions to click on an address to select it, scrollable list of addresses, cancel button.
         """
-        raise NotImplementedError
+        dialog = RowSelectionDialog(self.owner, title_text, body_text, button_text, address_rows, row_keys)
+        ret = dialog.exec_()
+        if ret == 1:
+            return dialog.selection_key
+        return False
 
     def request_label_name(self, default_label_name):
         text, ok = QtGui.QInputDialog.getText(self.owner, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
@@ -809,6 +813,8 @@ class MainWindow(QtGui.QMainWindow):
 
     def interaction_view_referring_symbols(self):
         errmsg = self.editor_state.goto_referring_address()
+        if errmsg is False:
+            return
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
             return
@@ -1294,6 +1300,90 @@ class SaveProjectDialog(QtGui.QDialog):
     def accept(self):
         self.save_options.cache_input_file = self.inputdata_do_radio.isChecked()
         return super(SaveProjectDialog, self).accept()
+
+
+class RowSelectionDialog(QtGui.QDialog):
+    selection_key = None
+
+    def __init__(self, parent, title_text, body_text, button_text, rows, row_keys):
+        super(RowSelectionDialog, self).__init__(parent)
+
+        self._row_keys = row_keys
+
+        _set_default_font(self)
+
+        self.setWindowTitle(title_text)
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        label_widget = QtGui.QLabel(body_text, self)
+
+        class Model(QtCore.QAbstractItemModel):
+            def __init__(self, parent, rows):
+                super(Model, self).__init__(parent)
+                self._rows = rows
+                self.beginInsertRows(QtCore.QModelIndex(), 0, len(rows)-1)
+                self.endInsertRows()
+            def data(self, index, role=QtCore.Qt.DisplayRole):
+                if not index.isValid():
+                    return None
+                if role == QtCore.Qt.DisplayRole:
+                    return self._rows[index.row()][index.column()]
+                return None
+            def columnCount(self, parent):
+                if parent.isValid():
+                    return 0
+                if len(self._rows):
+                    return len(self._rows[0])
+                return 0
+            def rowCount(self, parent):
+                if parent.isValid():
+                    return 0
+                return len(self._rows)
+            def parent(self, index):
+                return QtCore.QModelIndex()
+            def index(self, row, column, parent):
+                if not self.hasIndex(row, column, parent):
+                    return QtCore.QModelIndex()
+                return self.createIndex(row, column)
+
+        table = self.table_widget = CustomQTableView(self)
+        self.table_model = Model(self, rows)
+        table.setModel(self.table_model)
+        table.setCornerButtonEnabled(False)
+        #table.setGridStyle(QtCore.Qt.DashLine)
+        table.setSortingEnabled(False)
+        # Hide row numbers and column names.
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setFont(window.list_table.font())
+        # No selection of individual cells, but rather line specific selection.
+        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+        table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+        table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
+        table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
+        # Adjust the row data display.
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        # Ensure the first row is selected.
+        index = self.table_model.index(0, 0, QtCore.QModelIndex())
+        table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
+        table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+
+        button_widget = QtGui.QPushButton(button_text, self)
+        self.connect(button_widget, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
+
+        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout.addWidget(label_widget)
+        outer_vertical_layout.addWidget(self.table_widget)
+        outer_vertical_layout.addWidget(button_widget)
+        self.setLayout(outer_vertical_layout)
+
+    def accept(self):
+        # TODO: Should be selected row index from table, used to look up row_keys.
+        row_idx = self.table_widget.currentIndex().row()
+        self.selection_key = self._row_keys[row_idx]
+        return super(RowSelectionDialog, self).accept()
 
 
 class NewProjectDialog(QtGui.QDialog):

@@ -56,12 +56,16 @@ Method 3 (Linux, MacOS X, etc):
 * Edit "run.sh" to be able to find your Python 2.7 executable and run it.
 
 You should be able to use the user interface to:
-* Load and disassemble a new file.
+* Load and disassemble a new file (Ctrl+O).
 * Scroll through a loaded and disassembled file.
-* Change the font used to a smaller or non-proportional one.
-* Edit label names.
-* Change datatype of pieces of disassembled data.
-* Save and load ongoing disassembly work.
+* Change the font used to a smaller or non-proportional one (menu).
+* Edit label names (Enter).
+* Change datatype of pieces of disassembled data (menu).
+* Save and load ongoing disassembly work as a project file (menu).
+* Export current complete disassembled source code (menu).
+* Jump to an operand address (Ctrl+Right).
+* Select from, and jump to addresses that refer to the currently selected label (Ctrl+Shift+Right).
+* Return to the last address jumped from (Ctrl+Left).
 
 Note that the ongoing work save file format is not final, and when it changes, older save files will not be loadable.  For this reason, you should not use this disassembler unless you can deal with that.
 
@@ -73,9 +77,11 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
+* Disassembly: Instruction "move.l $(4.w), a6" is interpreted as referring to offset 4 in executables.  This is a more general problem that creates a label for each absolute address.
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* UI: For binary file disassembly, changing some data blocks with uncertain references to code blocks will not remove the entries from the data reference list.
 
 #### Functionality
 
