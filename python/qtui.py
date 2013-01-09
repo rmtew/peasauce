@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012  Richard Tew
+    Copyright (C) 2012, 2013 Richard Tew
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -47,7 +47,6 @@ from PySide import QtCore, QtGui
 
 import disassemblylib
 import editor_state
-import loaderlib
 import util
 
 
@@ -1395,16 +1394,6 @@ class NewProjectDialog(QtGui.QDialog):
         self.new_options = new_options
         dir_path, file_name = os.path.split(file_path)
 
-        # Attempt to identify the file type.
-        with open(file_path, "rb") as input_file:
-            identification_result = loaderlib.identify_file(input_file)
-        if identification_result is not None:
-            file_info, file_details = identification_result
-            new_options.is_binary_file = False
-        else:
-            file_info, file_details = None, {}
-            new_options.is_binary_file = True
-
         ## Options / information layouts.
         # File groupbox.
         file_name_key_label = QtGui.QLabel("Name:")
@@ -1418,7 +1407,7 @@ class NewProjectDialog(QtGui.QDialog):
         file_hline.setMidLineWidth(1)
 
         file_type_key_label = QtGui.QLabel("Type:")
-        file_type_value_label = QtGui.QLabel(file_details.get("filetype", "-"))
+        file_type_value_label = QtGui.QLabel(new_options.loader_filetype)
         file_arch_key_label = QtGui.QLabel("Architecture:")
         self.file_arch_value_combobox = file_arch_value_combobox = QtGui.QComboBox(self)
         if new_options.is_binary_file:
@@ -1428,7 +1417,7 @@ class NewProjectDialog(QtGui.QDialog):
             file_arch_value_combobox.setEnabled(True)
         else:
             # Fixed processor defined by the file format.
-            file_arch_value_combobox.addItem(file_details["processor"])
+            file_arch_value_combobox.addItem(new_options.loader_processor)
             file_arch_value_combobox.setEnabled(False)
 
         information_groupbox = QtGui.QGroupBox("File Information")
@@ -1445,17 +1434,11 @@ class NewProjectDialog(QtGui.QDialog):
         information_groupbox.setLayout(information_layout)
 
         # Processing groupbox.
-        load_address = 0
-        entrypoint_address = 0
-        if not new_options.is_binary_file:
-            load_address = loaderlib.get_load_address(file_info)
-            entrypoint_address = loaderlib.get_entrypoint_address(file_info)
-
         processing_loadaddress_key_label = QtGui.QLabel("Load address:")
-        self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtGui.QLineEdit("0x%X" % load_address)
+        self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtGui.QLineEdit("0x%X" % self.new_options.loader_load_address)
         processing_loadaddress_value_textedit.setEnabled(new_options.is_binary_file)
         processing_entryaddress_key_label = QtGui.QLabel("Entrypoint address:")
-        self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtGui.QLineEdit("0x%X" % entrypoint_address)
+        self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtGui.QLineEdit("0x%X" % self.new_options.loader_entrypoint_offset)
         processing_entryaddress_value_textedit.setEnabled(new_options.is_binary_file)
         processing_hline1 = QtGui.QFrame()
         processing_hline1.setFrameShape(QtGui.QFrame.HLine)

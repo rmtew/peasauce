@@ -49,14 +49,14 @@ With the prerequisites installed, and with the source code that accompanies this
 Method 1 (any platform):
 * Enter the "python" directory and run the "qtui.py" Python script.
 
-Method 2 (Windows):
+Method 2 (Windows & DOS/Explorer):
 * Run "run.bat".
 
-Method 3 (Linux, MacOS X, etc):
+Method 3 (Linux, MacOS X, Windows & MinGW .. etc):
 * Edit "run.sh" to be able to find your Python 2.7 executable and run it.
 
 You should be able to use the user interface to:
-* Load and disassemble a new file (Ctrl+O).
+* Load and disassemble a new file (menu or Ctrl+O).
 * Scroll through a loaded and disassembled file.
 * Change the font used to a smaller or non-proportional one (menu).
 * Edit label names (Enter).
@@ -82,12 +82,12 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
 * UI: For binary file disassembly, changing some data blocks with uncertain references to code blocks will not remove the entries from the data reference list.
+* UI: For loading projects, should show existing unused UI to prompt user to select the right file (if it is not encapsulated in the project).
 
 #### Functionality
 
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
-* Metadata: Track what addresses are referred to by other addresses to allow browsing the source.
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.

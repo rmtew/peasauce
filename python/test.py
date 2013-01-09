@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012  Richard Tew
+    Copyright (C) 2012, 2013 Richard Tew
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,19 +23,59 @@ Unit testing.
 import logging
 import random
 import sys
+import types
 import unittest
-
 
 import disassembly
 import editor_state
 import qtui
+import toolapi
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-logger.addHandler(ch)
+LOGGING_SPAM = False
+
+if LOGGING_SPAM:
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    logger.addHandler(ch)
+
+
+class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
+    def setUp(self):
+        self.toolapiob = toolapi.ToolAPI()
+
+    def test_bug_conqueror_4e0f6_data_to_code_leak_4e144_data_reference(self):
+        result = self.toolapiob.load_binary_file(r"samples\amiga-binary\conqueror-game-load21000-entrypoint57B8A", "m68k", 0x21000, 0x57B8A-0x21000)
+        if type(result) in types.StringTypes:
+            self.fail("loading error ('%s')" % result)
+        if type(result) is not tuple:
+            self.fail("did not get correct load return value")
+
+        # At this point, we are ready to test the bug.
+        TYPE_CHANGE_ADDRESS = 0x4e0f6
+        LEAKED_REFERENCE_ADDRESS = 0x4e144
+
+        self.toolapiob.goto_address(TYPE_CHANGE_ADDRESS)
+        self.assertEqual(TYPE_CHANGE_ADDRESS, self.toolapiob.get_address())
+
+        # Verify that 0x4e144 is correctly in the list of uncertain data references.
+        data_references = self.toolapiob.get_uncertain_data_references()
+        for entry in data_references:
+            if entry[0] == LEAKED_REFERENCE_ADDRESS:
+                break
+        else:
+            self.fail("Unable to find a data reference at 0x%X", LEAKED_REFERENCE_ADDRESS)
+
+        self.toolapiob.set_datatype("code")
+
+        # Verify that 0x4e144 is incorrectly in the list of uncertain data references.
+        data_references = self.toolapiob.get_uncertain_data_references()
+        for entry in data_references:
+            if entry[0] == LEAKED_REFERENCE_ADDRESS:
+                self.fail("Found leaked data reference")
+                break
 
 
 class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
@@ -88,6 +128,9 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         self.uncertain_data_references_model._row_data = self.data_rows[:]
 
         self.disassembly_uncertain_reference_modification = qtui.MainWindow.disassembly_uncertain_reference_modification.im_func
+
+    def tearDown(self):
+        self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = disassembly
 
     def test_leading_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []

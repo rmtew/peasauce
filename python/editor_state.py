@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012  Richard Tew
+    Copyright (C) 2012, 2013 Richard Tew
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,6 +27,7 @@ import os
 
 import disassembly
 import disassembly_persistence
+import loaderlib
 import util
 
 
@@ -111,15 +112,6 @@ class ClientAPI(object):
 
 
 class EditorState(object):
-    """
-    TODO: How to integrate prompting for needed information mid-load?
-    - GUI showing dialog with fields.
-    - Command line prompting.
-
-    List of required values with default values.
-    Maybe list of possible options.
-    """
-
     STATE_INITIAL = 0
     STATE_LOADING = 1
     STATE_LOADED = 2
@@ -140,7 +132,8 @@ class EditorState(object):
         self.disassembly_data = None
         self.line_number = 0
         self.address_stack = []
-        # TODO: Clear out related data.
+
+        # Clear out related data.
         self.client.reset_state()
 
     def _address_to_string(self, address):
@@ -155,13 +148,39 @@ class EditorState(object):
             else:
                 addresses[i] = self._address_to_string(address)
 
+    def get_data_type_for_address(self, address):
+        pass # TODO: need to ask the disassembly module for the type of the block at the given address
+        data_type = None
+        if data_type == DATA_TYPE_CODE:
+            return "code"
+        elif data_type == DATA_TYPE_ASCII:
+            return "ascii"
+        elif data_type == DATA_TYPE_BYTE:
+            return "8bit"
+        elif data_type == DATA_TYPE_WORD:
+            return "16bit"
+        elif data_type == DATA_TYPE_LONGWORD:
+            return "32bit"
+
     def get_source_code_for_address(self, address):
         line_idx = disassembly.get_line_number_for_address(self.disassembly_data, address)
+        return self.get_source_code_for_line_number(line_idx)
+
+    def get_source_code_for_line_number(self, line_idx):
         code_string = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION)
         operands_text = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS)
         if len(operands_text):
             code_string += " "+ operands_text
         return code_string
+
+    def get_row_for_line_number(self, line_idx):
+        return [
+            disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OFFSET),
+            disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_BYTES),
+            disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_LABEL),
+            disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION),
+            disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS),
+        ]
 
     def get_address(self):
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
@@ -311,7 +330,7 @@ class EditorState(object):
 
         current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
-        # TODO: Prompt user to edit the current label, or add a new one.
+        # Prompt user to edit the current label, or add a new one.
         new_symbol_name = self.client.request_label_name(symbol_name)
         if new_symbol_name is not None and new_symbol_name != symbol_name:
             match = RE_LABEL.match(new_symbol_name)
@@ -372,8 +391,15 @@ class EditorState(object):
             def load_call_proxy(f, *args, **kwargs):
                 return f(*args, **kwargs)
 
-        # TODO: Request a file name to load.
+        self.reset_state()
+
+        # Request a file name to load.
         load_file = self.client.request_load_file()
+        if load_file is None:
+            return
+        if type(load_file) in types.StringTypes:
+            self.reset_state()
+            return load_file
 
         self.state_id = EditorState.STATE_LOADING
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
@@ -382,9 +408,23 @@ class EditorState(object):
             result = load_call_proxy(disassembly.load_project_file, load_file)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
-            # TODO: Prompt for new project option values.
+            # Populate useful fields.
+            identify_result = loaderlib.identify_file(load_file)
+            if identify_result is not None:
+                new_options.is_binary_file = False
+                new_options.loader_load_address = loaderlib.get_load_address(identify_result[0])
+                new_options.loader_entrypoint_offset = loaderlib.get_entrypoint_address(identify_result[0])
+                new_options.loader_filetype = identify_result[1]["filetype"]
+                new_options.loader_processor = identify_result[1]["processor"]
+            else:
+                new_options.is_binary_file = True
+                new_options.loader_load_address = 0
+                new_options.loader_entrypoint_offset = 0
+                new_options.loader_filetype = ""
+                new_options.loader_processor = ""
+            # Prompt for new project option values.
             new_options = self.client.request_new_project_option_values(new_options)
-            # TODO: Validate all values are provided correctly.
+            # Verify that all values are provided correctly.
             errmsg = self.client.validate_new_project_option_values(new_options)
             if errmsg is not None:
                 self.reset_state()
@@ -432,7 +472,7 @@ class EditorState(object):
         save_options = disassembly.get_save_project_options(self.disassembly_data)
         # Install higher-level defined and used option attributes.
         save_options.cache_input_file = disassembly.get_project_save_count(self.disassembly_data) == 0 or disassembly.is_project_inputfile_cached(self.disassembly_data)
-        # TODO: Prompt user if they want to save the source file.
+        # Prompt user if they want to save the source file.
         save_options = self.client.request_save_project_option_values(save_options)
         # User chose to cancel the save process.
         if save_options is None:
@@ -449,7 +489,7 @@ class EditorState(object):
 
         line_count = disassembly.get_line_count(self.disassembly_data)
 
-        # TODO: Prompt for save file name.
+        # Prompt for save file name.
         save_file = self.client.request_code_save_file()
         if save_file is not None:
             for i in xrange(line_count):
