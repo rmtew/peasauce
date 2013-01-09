@@ -367,7 +367,7 @@ class QTUIEditorClient(editor_state.ClientAPI):
         if os.path.dirname(file_path) == "":
             file_path = os.path.join(os.getcwd(), file_path)
         self.file_path = file_path
-        return self.get_load_file()
+        return self.get_load_file(), file_path
 
     # TODO: Should this be an internal function?  editor state uses it at the moment.
     def get_load_file(self):

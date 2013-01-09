@@ -61,8 +61,9 @@ class ClientAPI(object):
 
     def request_load_file(self):
         """
-        Returns the selected file name or None if no file was selected.
-        .. should really return a file handle, whether local or remote.
+        Returns the selected file, file name or None if no file was selected.
+        Returns an error message if failed.
+        .. should really return a file handle, whether local or remote. ???
         """
         raise NotImplementedError
 
@@ -149,17 +150,16 @@ class EditorState(object):
                 addresses[i] = self._address_to_string(address)
 
     def get_data_type_for_address(self, address):
-        pass # TODO: need to ask the disassembly module for the type of the block at the given address
-        data_type = None
-        if data_type == DATA_TYPE_CODE:
+        data_type = disassembly.get_data_type_for_address(self.disassembly_data, address)
+        if data_type == disassembly.DATA_TYPE_CODE:
             return "code"
-        elif data_type == DATA_TYPE_ASCII:
+        elif data_type == disassembly.DATA_TYPE_ASCII:
             return "ascii"
-        elif data_type == DATA_TYPE_BYTE:
+        elif data_type == disassembly.DATA_TYPE_BYTE:
             return "8bit"
-        elif data_type == DATA_TYPE_WORD:
+        elif data_type == disassembly.DATA_TYPE_WORD:
             return "16bit"
-        elif data_type == DATA_TYPE_LONGWORD:
+        elif data_type == disassembly.DATA_TYPE_LONGWORD:
             return "32bit"
 
     def get_source_code_for_address(self, address):
@@ -181,6 +181,9 @@ class EditorState(object):
             disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION),
             disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS),
         ]
+
+    def get_referring_addresses_for_address(self, address):
+        return list(disassembly.get_referring_addresses(self.disassembly_data, address))
 
     def get_address(self):
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
@@ -259,9 +262,11 @@ class EditorState(object):
         current_address = self.get_address()
         if current_address is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
         addresses = list(disassembly.get_referring_addresses(self.disassembly_data, current_address))
         if not len(addresses):
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
         # Addresses appear in numerical order.
         addresses.sort()
         # Symbols appear in place of addresses where they exist.
@@ -271,12 +276,15 @@ class EditorState(object):
         for i, address in enumerate(addresses):
             code_string = self.get_source_code_for_address(address)
             address_rows.append((self._address_to_string(address), converted_addresses[i], code_string))
+
         selected_address = self.client.request_address_selection(TEXT_SELECT_REFERRING_ADDRESS_SHORT, TEXT_SELECT_REFERRING_ADDRESS_LONG, TEXT_GO_TO_SELECTION, address_rows, addresses)
         if selected_address is None:
             return False
+
         next_line_number = disassembly.get_line_number_for_address(self.disassembly_data, selected_address)
         if next_line_number is None:
             return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
+
         self.set_line_number(next_line_number)
         self.address_stack.append(current_address)
         return True
@@ -394,7 +402,7 @@ class EditorState(object):
         self.reset_state()
 
         # Request a file name to load.
-        load_file = self.client.request_load_file()
+        load_file, file_path = self.client.request_load_file()
         if load_file is None:
             return
         if type(load_file) in types.StringTypes:
@@ -402,10 +410,11 @@ class EditorState(object):
             return load_file
 
         self.state_id = EditorState.STATE_LOADING
+        file_name = os.path.basename(file_path)
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
 
         if is_saved_project:
-            result = load_call_proxy(disassembly.load_project_file, load_file)
+            result = load_call_proxy(disassembly.load_project_file, load_file, file_name)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
             # Populate useful fields.
@@ -429,7 +438,7 @@ class EditorState(object):
             if errmsg is not None:
                 self.reset_state()
                 return errmsg
-            result = load_call_proxy(disassembly.load_file, load_file, new_options)
+            result = load_call_proxy(disassembly.load_file, load_file, new_options, file_name)
 
         self.state_id = EditorState.STATE_LOADED
         self.disassembly_data, line_count = result
@@ -449,7 +458,7 @@ class EditorState(object):
 
                 # Show the "locate input file" dialog.
                 errmsg = None
-                input_data_file = self.client.request_load_file()
+                input_data_file, input_data_file_path = self.client.request_load_file()
                 input_data_file.seek(0, os.SEEK_END)
                 if input_data_file.tell() != self.disassembly_data.file_size:
                     errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS

@@ -188,6 +188,9 @@ def get_code_block_info_for_line_number(program_data, line_number):
     logger.debug("get_code_block_info_for_line_number.3: %d, %d", line_number, line_count)
     # return None, previous_result
 
+def get_data_type_for_address(program_data, address):
+    block, block_idx = lookup_block_by_address(program_data, address)
+    return get_block_data_type(block)
 
 def get_line_number_for_address(program_data, address):
     block, block_idx = lookup_block_by_address(program_data, address)
@@ -869,8 +872,13 @@ def set_data_type_at_address(program_data, address, data_type):
     block_data_type = get_block_data_type(block)
     if data_type == block_data_type:
         return
+    # Preserve these as recalculated block information needs to be done for the whole range, not just after the split.
+    original_block_address = block.address
+    original_block_length = block.length
+    original_block_idx = block_idx
+
     result = split_block(program_data, address)
-    # If the address was within the address range of another block, split a block at the given address off and use that.
+    # If the address was within the address range of another block, split off a block at the given address and use that.
     if IS_SPLIT_ERR(result[1]):
         if result[1] != ERR_SPLIT_EXISTING:
             logger.error("set_data_type_at_address: At $%06X unexpected splitting error #%d", address, result[1])
@@ -879,15 +887,19 @@ def set_data_type_at_address(program_data, address, data_type):
         block, block_idx = result
 
     # At this point we are attempting to change a block from one data type to another.
+    affected_blocks = set([ ])
     if data_type == DATA_TYPE_CODE:
         # This can fail, so we do not explicitly change the block ourselves.
-        new_code_blocks = _process_address_as_code(program_data, address, set([ ]))
+        processed_blocks = _process_address_as_code(program_data, address, set([ ]))
 
-        # This needs to be updated before operating on the new blocks.
-        recalculate_line_count_index(program_data, block_idx)
-
-        for block in new_code_blocks:
-            block.references = _locate_uncertain_code_references(program_data, block.address, block)
+        # Any block that is within the scope of the original block needs recalculation of its data precalculations.
+        block_idx_local = original_block_idx
+        while block_idx_local < len(program_data.blocks):
+            affected_block = program_data.blocks[block_idx_local]
+            if affected_block.address < original_block_address or affected_block.address > original_block_address + original_block_length:
+                break
+            affected_blocks.add(affected_block)
+            block_idx_local += 1
     else:
         set_block_data_type(block, data_type)
         if data_type == DATA_TYPE_ASCII:
@@ -895,16 +907,28 @@ def set_data_type_at_address(program_data, address, data_type):
         else:
             block.line_data = None
         block.flags &= ~BLOCK_FLAG_PROCESSED
-
         calculate_line_count(program_data, block)
-        recalculate_line_count_index(program_data, block_idx)
 
-        block.references = _locate_uncertain_data_references(program_data, address)
+        affected_blocks.add(block)
+
+    # This needs to be updated before operating on the new blocks.
+    recalculate_line_count_index(program_data, block_idx)
+
+    for affected_block in affected_blocks:
+        old_references = affected_block.references
+        data_type_old = affected_block._old_data_type
+        data_type_new = get_block_data_type(affected_block)
+        if data_type_new == DATA_TYPE_CODE:
+            new_references = _locate_uncertain_code_references(program_data, affected_block.address, affected_block)
+        else:
+            new_references = _locate_uncertain_data_references(program_data, affected_block.address)
+        if old_references != new_references:
+            affected_block.references = new_references
+            if program_data.uncertain_reference_modification_func is not None:                
+                program_data.uncertain_reference_modification_func(data_type_old, data_type_new, affected_block.address, affected_block.length)
 
     logger.debug("Changed data type at %X to %d", address, data_type)
 
-    if program_data.uncertain_reference_modification_func is not None:
-        program_data.uncertain_reference_modification_func(block_data_type, data_type, block.address, block.length)
 
 def _process_block_as_ascii(program_data, block):
     """
@@ -1166,7 +1190,7 @@ def load_project_file(save_file):
     return program_data, get_line_count(program_data)
 
 
-def load_file(input_file, new_options):
+def load_file(input_file, new_options, file_name):
     loader_options = None
     if new_options.is_binary_file:
         loader_options = loaderlib.BinaryFileOptions()
@@ -1194,6 +1218,7 @@ def load_file(input_file, new_options):
     program_data.loader_relocatable_addresses = set()
     program_data.loader_relocated_addresses = set()
 
+    program_data.file_name = file_name
     input_file.seek(0, os.SEEK_END)
     program_data.file_size = input_file.tell()
     program_data.file_checksum = util.calculate_file_checksum(input_file)

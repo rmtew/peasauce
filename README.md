@@ -81,7 +81,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
-* UI: For binary file disassembly, changing some data blocks with uncertain references to code blocks will not remove the entries from the data reference list.
 * UI: For loading projects, should show existing unused UI to prompt user to select the right file (if it is not encapsulated in the project).
 
 #### Functionality
@@ -104,7 +103,9 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
+* Disassembly: block._old_data_type is not a safe way to track block data type changes for later use, redress this.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
+* Editor state: This needs to support multiple "views", so the tool API can be used and the UI can respond.
 
 ### Medium Term Tasks
 

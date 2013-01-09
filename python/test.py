@@ -21,6 +21,7 @@ Unit testing.
 """
 
 import logging
+import os
 import random
 import sys
 import types
@@ -42,12 +43,43 @@ if LOGGING_SPAM:
     logger.addHandler(ch)
 
 
+class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
+    def setUp(self):
+        self.toolapiob = toolapi.ToolAPI()
+
+    def test_bug_monam302_00004_reference(self):
+        FILE_NAME = "samples/amiga-executable/MonAm302"
+        if not os.path.exists(FILE_NAME):
+            self.skip("binary file dependency not available")
+
+        result = self.toolapiob.load_file(FILE_NAME)
+        if type(result) in types.StringTypes:
+            self.fail("loading error ('%s')" % result)
+        if type(result) is not tuple:
+            self.fail("did not get correct load return value")
+        
+        TARGET_ADDRESS = 0x4
+        code_string = self.toolapiob.get_source_code_for_address(TARGET_ADDRESS)
+        self.assertEqual("DC.L $4D4F4E20", code_string)
+
+        referring_addresses = self.toolapiob.get_source_code_for_address(TARGET_ADDRESS)
+        self.assertNotEqual(0, len(referring_addresses))
+
+        for address in self.toolapiob.get_referring_addresses_for_address(TARGET_ADDRESS):
+            code_string = self.toolapiob.get_source_code_for_address(address)
+            self.assertNotEqual("MOVEA.L ($4).W, A6", code_string, "ExecBase absolute address being misinterpreted as a program segment reference")
+
+
 class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
 
     def test_bug_conqueror_4e0f6_data_to_code_leak_4e144_data_reference(self):
-        result = self.toolapiob.load_binary_file(r"samples\amiga-binary\conqueror-game-load21000-entrypoint57B8A", "m68k", 0x21000, 0x57B8A-0x21000)
+        FILE_NAME = "samples/amiga-binary/conqueror-game-load21000-entrypoint57B8A"
+        if not os.path.exists(FILE_NAME):
+            self.skip("binary file dependency not available")
+
+        result = self.toolapiob.load_binary_file(FILE_NAME, "m68k", 0x21000, 0x57B8A-0x21000)
         if type(result) in types.StringTypes:
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
@@ -57,8 +89,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
         TYPE_CHANGE_ADDRESS = 0x4e0f6
         LEAKED_REFERENCE_ADDRESS = 0x4e144
 
-        self.toolapiob.goto_address(TYPE_CHANGE_ADDRESS)
-        self.assertEqual(TYPE_CHANGE_ADDRESS, self.toolapiob.get_address())
+        self.assertNotEqual("code", self.toolapiob.get_data_type_for_address(TYPE_CHANGE_ADDRESS))
 
         # Verify that 0x4e144 is correctly in the list of uncertain data references.
         data_references = self.toolapiob.get_uncertain_data_references()
@@ -68,9 +99,10 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
         else:
             self.fail("Unable to find a data reference at 0x%X", LEAKED_REFERENCE_ADDRESS)
 
-        self.toolapiob.set_datatype("code")
+        self.toolapiob.set_datatype(TYPE_CHANGE_ADDRESS, "code")
+        self.assertEqual("code", self.toolapiob.get_data_type_for_address(TYPE_CHANGE_ADDRESS))
 
-        # Verify that 0x4e144 is incorrectly in the list of uncertain data references.
+        # Is the given address still in the uncertain data reference list?
         data_references = self.toolapiob.get_uncertain_data_references()
         for entry in data_references:
             if entry[0] == LEAKED_REFERENCE_ADDRESS:

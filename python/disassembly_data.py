@@ -62,6 +62,7 @@ def set_block_data_type(block, data_type):
     NOTE: If this function is called after loading of an input file is complete, then it is 
           the responsibility of the caller to update the uncertain reference lists.
     """
+    block._old_data_type = get_block_data_type(block)
     block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
     block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
 
@@ -163,6 +164,8 @@ class SegmentBlock(object):
     line_count = 0
     """ Cached potential address references. """
     references = None
+    """ Cached old data type. """
+    _old_data_type = None
 
 
 class NewProjectOptions:

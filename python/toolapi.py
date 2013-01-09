@@ -49,7 +49,7 @@ class ToolEditorClient(editor_state.ClientAPI):
         if not os.path.isfile(file_path):
             return ERRMSG_FILE_DOES_NOT_EXIST
         if file_path is not None:
-            return open(file_path, "rb")
+            return open(file_path, "rb"), file_path
 
     def get_load_file(self):
         file_path = self.owner.get_file_path()
@@ -101,10 +101,10 @@ class ToolAPI(object):
             self.editor_state.reset_state()
         return result
 
-    def get_address(self):
+    def _get_address(self):
         return self.editor_state.get_address()
 
-    def goto_address(self, address):
+    def _goto_address(self, address):
         self.editor_client._goto_address_value = address
         try:
             return self.editor_state.goto_address()
@@ -114,7 +114,8 @@ class ToolAPI(object):
     def get_data_type_for_address(self, address):
         return self.editor_state.get_data_type_for_address(address)
 
-    def set_datatype(self, type_name):
+    def set_datatype(self, address, type_name):
+        self._goto_address(address)
         if type_name == "code":
             return self.editor_state.set_datatype_code()
         elif type_name == "32bit":
@@ -131,3 +132,9 @@ class ToolAPI(object):
 
     def get_uncertain_data_references(self):
         return self.editor_state.get_uncertain_data_references()
+
+    def get_source_code_for_address(self, address):
+        return self.editor_state.get_source_code_for_address(address)
+
+    def get_referring_addresses_for_address(self, address):
+        return self.editor_state.get_referring_addresses_for_address(address)
