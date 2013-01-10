@@ -47,8 +47,10 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
 
-    @unittest.skipUnless("TESTDATA_PATH" in os.environ, "TESTDATA_PATH environment variable required")
     def test_upgrade_v2_to_vCURRENT(self):
+        if "TESTDATA_PATH" not in os.environ:
+            self.fail("TESTDATA_PATH environment variable required")
+
         FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "project-compatibility", "gdbstop.psproj")
         INPUT_FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "gdbstop")
 
@@ -101,7 +103,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
     def test_bug_conqueror_4e0f6_data_to_code_leak_4e144_data_reference(self):
         FILE_NAME = "samples/amiga-binary/conqueror-game-load21000-entrypoint57B8A"
         if not os.path.exists(FILE_NAME):
-            self.skip("binary file dependency not available")
+            self.skipTest("binary file dependency not available")
 
         result = self.toolapiob.load_binary_file(FILE_NAME, "m68k", 0x21000, 0x57B8A-0x21000)
         if type(result) in types.StringTypes:
