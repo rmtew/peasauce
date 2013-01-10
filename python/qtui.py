@@ -382,6 +382,11 @@ class QTUIEditorClient(editor_state.ClientAPI):
     def validate_new_project_option_values(self, options):
         return None
 
+    def request_load_project_option_values(self, load_options):
+        result = LoadProjectDialog(load_options, self.file_path, self.owner).exec_()
+        # if result == QtGui.QDialog.Accepted:
+        return load_options
+
     def request_save_project_option_values(self, save_options):
         options = QtGui.QFileDialog.Options()
         save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner, caption="Save to...", filter=PROJECT_FILTER, options=options)
@@ -1147,9 +1152,9 @@ class LoadProjectDialog(QtGui.QDialog):
         problem_layout.addWidget(problem_label4)
         problem_groupbox.setLayout(problem_layout)
 
-        original_filesize = self.parentWidget().disassembly_data.file_size
-        original_filename = self.parentWidget().disassembly_data.file_name
-        original_checksum = self.parentWidget().disassembly_data.file_checksum
+        original_filesize = load_options.input_file_filesize
+        original_filename = load_options.input_file_filename
+        original_checksum = load_options.input_file_checksum
 
         filespec_groupbox = QtGui.QGroupBox("Original file")
         filespec_layout = QtGui.QGridLayout()
@@ -1207,7 +1212,8 @@ class LoadProjectDialog(QtGui.QDialog):
             if os.path.isfile(file_path):
                 if os.path.getsize(file_path) == original_filesize:
                     valid_size_checkbox.setChecked(True)
-                file_checksum = util.calculate_file_checksum(file_path)
+                with open(file_path, "rb") as input_file:
+                    file_checksum = util.calculate_file_checksum(input_file)
                 if file_checksum == original_checksum:
                     valid_checksum_checkbox.setChecked(True)
                 if valid_size_checkbox.isChecked() and valid_checksum_checkbox.isChecked():
@@ -1299,90 +1305,6 @@ class SaveProjectDialog(QtGui.QDialog):
     def accept(self):
         self.save_options.cache_input_file = self.inputdata_do_radio.isChecked()
         return super(SaveProjectDialog, self).accept()
-
-
-class RowSelectionDialog(QtGui.QDialog):
-    selection_key = None
-
-    def __init__(self, parent, title_text, body_text, button_text, rows, row_keys):
-        super(RowSelectionDialog, self).__init__(parent)
-
-        self._row_keys = row_keys
-
-        _set_default_font(self)
-
-        self.setWindowTitle(title_text)
-        self.setWindowModality(QtCore.Qt.WindowModal)
-
-        label_widget = QtGui.QLabel(body_text, self)
-
-        class Model(QtCore.QAbstractItemModel):
-            def __init__(self, parent, rows):
-                super(Model, self).__init__(parent)
-                self._rows = rows
-                self.beginInsertRows(QtCore.QModelIndex(), 0, len(rows)-1)
-                self.endInsertRows()
-            def data(self, index, role=QtCore.Qt.DisplayRole):
-                if not index.isValid():
-                    return None
-                if role == QtCore.Qt.DisplayRole:
-                    return self._rows[index.row()][index.column()]
-                return None
-            def columnCount(self, parent):
-                if parent.isValid():
-                    return 0
-                if len(self._rows):
-                    return len(self._rows[0])
-                return 0
-            def rowCount(self, parent):
-                if parent.isValid():
-                    return 0
-                return len(self._rows)
-            def parent(self, index):
-                return QtCore.QModelIndex()
-            def index(self, row, column, parent):
-                if not self.hasIndex(row, column, parent):
-                    return QtCore.QModelIndex()
-                return self.createIndex(row, column)
-
-        table = self.table_widget = CustomQTableView(self)
-        self.table_model = Model(self, rows)
-        table.setModel(self.table_model)
-        table.setCornerButtonEnabled(False)
-        #table.setGridStyle(QtCore.Qt.DashLine)
-        table.setSortingEnabled(False)
-        # Hide row numbers and column names.
-        table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setFont(window.list_table.font())
-        # No selection of individual cells, but rather line specific selection.
-        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-        table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
-        table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
-        # Adjust the row data display.
-        table.resizeColumnsToContents()
-        table.horizontalHeader().setStretchLastSection(True)
-        # Ensure the first row is selected.
-        index = self.table_model.index(0, 0, QtCore.QModelIndex())
-        table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
-        table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
-
-        button_widget = QtGui.QPushButton(button_text, self)
-        self.connect(button_widget, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
-
-        outer_vertical_layout = QtGui.QVBoxLayout()
-        outer_vertical_layout.addWidget(label_widget)
-        outer_vertical_layout.addWidget(self.table_widget)
-        outer_vertical_layout.addWidget(button_widget)
-        self.setLayout(outer_vertical_layout)
-
-    def accept(self):
-        # TODO: Should be selected row index from table, used to look up row_keys.
-        row_idx = self.table_widget.currentIndex().row()
-        self.selection_key = self._row_keys[row_idx]
-        return super(RowSelectionDialog, self).accept()
 
 
 class NewProjectDialog(QtGui.QDialog):
@@ -1486,6 +1408,91 @@ class NewProjectDialog(QtGui.QDialog):
             self.new_options.loader_load_address = to_int(self.processing_loadaddress_value_textedit.text())
             self.new_options.loader_entrypoint_offset = to_int(self.processing_entryaddress_value_textedit.text()) - self.new_options.loader_load_address
         return super(NewProjectDialog, self).accept()
+
+
+class RowSelectionDialog(QtGui.QDialog):
+    selection_key = None
+
+    def __init__(self, parent, title_text, body_text, button_text, rows, row_keys):
+        super(RowSelectionDialog, self).__init__(parent)
+
+        self._row_keys = row_keys
+
+        _set_default_font(self)
+
+        self.setWindowTitle(title_text)
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        label_widget = QtGui.QLabel(body_text, self)
+
+        class Model(QtCore.QAbstractItemModel):
+            def __init__(self, parent, rows):
+                super(Model, self).__init__(parent)
+                self._rows = rows
+                self.beginInsertRows(QtCore.QModelIndex(), 0, len(rows)-1)
+                self.endInsertRows()
+            def data(self, index, role=QtCore.Qt.DisplayRole):
+                if not index.isValid():
+                    return None
+                if role == QtCore.Qt.DisplayRole:
+                    return self._rows[index.row()][index.column()]
+                return None
+            def columnCount(self, parent):
+                if parent.isValid():
+                    return 0
+                if len(self._rows):
+                    return len(self._rows[0])
+                return 0
+            def rowCount(self, parent):
+                if parent.isValid():
+                    return 0
+                return len(self._rows)
+            def parent(self, index):
+                return QtCore.QModelIndex()
+            def index(self, row, column, parent):
+                if not self.hasIndex(row, column, parent):
+                    return QtCore.QModelIndex()
+                return self.createIndex(row, column)
+
+        table = self.table_widget = CustomQTableView(self)
+        self.table_model = Model(self, rows)
+        table.setModel(self.table_model)
+        table.setCornerButtonEnabled(False)
+        #table.setGridStyle(QtCore.Qt.DashLine)
+        table.setSortingEnabled(False)
+        # Hide row numbers and column names.
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setFont(window.list_table.font())
+        # No selection of individual cells, but rather line specific selection.
+        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+        table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+        table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
+        table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
+        # Adjust the row data display.
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        # Ensure the first row is selected.
+        index = self.table_model.index(0, 0, QtCore.QModelIndex())
+        table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
+        table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+
+        button_widget = QtGui.QPushButton(button_text, self)
+        self.connect(button_widget, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
+
+        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout.addWidget(label_widget)
+        outer_vertical_layout.addWidget(self.table_widget)
+        outer_vertical_layout.addWidget(button_widget)
+        self.setLayout(outer_vertical_layout)
+
+    def accept(self):
+        # TODO: Should be selected row index from table, used to look up row_keys.
+        row_idx = self.table_widget.currentIndex().row()
+        self.selection_key = self._row_keys[row_idx]
+        return super(RowSelectionDialog, self).accept()
+
 
 # TODO: int(, 16) chokes on $ prefix.  Done elsewhere too.
 def to_int(value):

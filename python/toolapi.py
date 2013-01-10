@@ -28,36 +28,25 @@ import editor_state
 
 
 ERRMSG_FILE_DOES_NOT_EXIST = "File does not exist."
-ERRMSG_INPUT_FILE_NOT_FOUND = "Input file not found."
 
 
 class ToolEditorClient(editor_state.ClientAPI):
     # __init__(self, owner)
-
-    # Internal responsibility.
-    _request_load_file_count = 0
 
     # External responsibility.
     _binary_parameters = None
     _goto_address_value = None
 
     def reset_state(self):
-        self._request_load_file_count = 0
         self.owner.reset_state()
 
     def request_load_file(self):
         # Offers the user a chance to load a file.
         # Returns None if user aborted.
         # Returns the file object on success.
-        self._request_load_file_count += 1
-        if self._request_load_file_count == 1:
-            file_path = self.owner.get_file_path()
-            errmsg = ERRMSG_FILE_DOES_NOT_EXIST
-        elif self._request_load_file_count == 2:
-            file_path = self.owner.get_input_file_path()
-            errmsg = ERRMSG_INPUT_FILE_NOT_FOUND
+        file_path = self.owner.get_file_path()
         if file_path is None or not os.path.isfile(file_path):
-            return errmsg
+            return ERRMSG_FILE_DOES_NOT_EXIST
         return open(file_path, "rb"), file_path
 
     def get_load_file(self):
@@ -72,6 +61,10 @@ class ToolEditorClient(editor_state.ClientAPI):
     def validate_new_project_option_values(self, new_options):
         # Returns an error message if any option is invalid.
         return None
+
+    def request_load_project_option_values(self, load_options):
+        load_options.loader_file_path = self.owner.get_input_file_path()
+        return load_options
 
     def request_address(self, address):
         return self._goto_address_value

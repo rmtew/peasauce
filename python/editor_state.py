@@ -40,6 +40,7 @@ TEXT_GO_TO_SELECTION = "Go to selection"
 
 ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT = "The file does not appear to be a supported executable file format."
 ERRMSG_NO_IDENTIFIABLE_DESTINATION = "Nowhere to go."
+ERRMSG_INPUT_FILE_NOT_FOUND = "Input file not found."
 ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH = "File does not match (checksum differs)"
 ERRMSG_INPUT_FILE_SIZE_DIFFERS = "File does not match (size differs)"
 ERRMSG_INVALID_LABEL_NAME = "Invalid label name"
@@ -78,6 +79,10 @@ class ClientAPI(object):
 
     def validate_new_project_option_values(self, new_options):
         """ Returns a message on error, or None on success. """
+        raise NotImplementedError
+
+    def request_load_project_option_values(self, load_options):
+        """ Returns the user modified options. """
         raise NotImplementedError
 
     def request_save_project_option_values(self, save_options):
@@ -129,13 +134,15 @@ class EditorState(object):
         return disassembly_persistence.check_is_project_file(input_file)
 
     def reset_state(self):
-        self.state_id = EditorState.STATE_INITIAL
         self.disassembly_data = None
         self.line_number = 0
         self.address_stack = []
 
         # Clear out related data.
         self.client.reset_state()
+
+        # Finally, reset the state.
+        self.state_id = EditorState.STATE_INITIAL
 
     def _address_to_string(self, address):
         # TODO: Make it disassembly specific e.g. $address, 0xaddress
@@ -451,28 +458,36 @@ class EditorState(object):
         if is_saved_project:
             # User may have optionally chosen to not save the input file, as part of the project file.
             if not disassembly.is_segment_data_cached(self.disassembly_data):
-                # Inform the user of the purpose of the next file dialog.
-                if not self.client.request_confirmation(TEXT_LOAD_INPUT_FILE_TITLE, TEXT_LOAD_INPUT_FILE_BODY):
-                    self.reset_state()
-                    return None
+                load_options = disassembly.get_new_project_options(self.disassembly_data)
+                load_options.input_file_filesize = self.disassembly_data.file_size
+                load_options.input_file_filename = self.disassembly_data.file_name
+                load_options.input_file_checksum = self.disassembly_data.file_checksum
 
-                # Show the "locate input file" dialog.
-                input_result = self.client.request_load_file()
-                if input_result is None or type(input_result) in types.StringTypes:
-                    self.reset_state()
-                    return input_result
+                load_options.loader_file_path = None
+                load_options = self.client.request_load_project_option_values(load_options)
 
-                input_data_file, input_data_file_path = input_result
-                input_data_file.seek(0, os.SEEK_END)
-                errmsg = None
-                if input_data_file.tell() != self.disassembly_data.file_size:
-                    errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS
-                elif util.calculate_file_checksum(input_data_file) != self.disassembly_data.file_checksum:
-                    errmsg = ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH
-                if type(errmsg) in types.StringTypes:
+                if False: # Clean up this and dependencies.
+                    # Inform the user of the purpose of the next file dialog.
+                    if not self.client.request_confirmation(TEXT_LOAD_INPUT_FILE_TITLE, TEXT_LOAD_INPUT_FILE_BODY):
+                        self.reset_state()
+                        return None
+
+                if load_options.loader_file_path is None:
                     self.reset_state()
-                    return errmsg
-                disassembly.cache_segment_data(self.disassembly_data, input_data_file)
+                    return ERRMSG_INPUT_FILE_NOT_FOUND
+
+                # Verify that the given input file is valid, or error descriptively.
+                with open(load_options.loader_file_path, "rb") as input_data_file:
+                    input_data_file.seek(0, os.SEEK_END)
+                    errmsg = None
+                    if input_data_file.tell() != self.disassembly_data.file_size:
+                        errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS
+                    elif util.calculate_file_checksum(input_data_file) != self.disassembly_data.file_checksum:
+                        errmsg = ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH
+                    if type(errmsg) in types.StringTypes:
+                        self.reset_state()
+                        return errmsg
+                    disassembly.cache_segment_data(self.disassembly_data, input_data_file)
 
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
