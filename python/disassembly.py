@@ -1171,10 +1171,12 @@ def save_project_file(save_file, program_data, save_options):
     return disassembly_persistence.save_project(save_file, program_data, save_options)
 
 
-def load_project_file(save_file):
+def load_project_file(save_file, file_name):
     program_data = disassembly_persistence.load_project(save_file)
     if program_data is None:
         return None, 0
+
+    program_data.file_name = file_name
 
     for block in program_data.blocks:
         if get_block_data_type(block) == DATA_TYPE_ASCII:

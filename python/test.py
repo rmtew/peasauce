@@ -43,10 +43,19 @@ if LOGGING_SPAM:
     logger.addHandler(ch)
 
 
+class TOOL_AutoProjectUpgrade_TestCase(unittest.TestCase):
+    def setUp(self):
+        self.toolapiob = toolapi.ToolAPI()
+
+    def test_upgrade_v2_to_vCURRENT(self):
+        self.fail("incomplete test")
+
+
 class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
 
+    @unittest.expectedFailure
     def test_bug_monam302_00004_reference(self):
         FILE_NAME = "samples/amiga-executable/MonAm302"
         if not os.path.exists(FILE_NAME):
