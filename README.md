@@ -106,6 +106,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Disassembly: block._old_data_type is not a safe way to track block data type changes for later use, redress this.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 * Editor state: This needs to support multiple "views", so the tool API can be used and the UI can respond.
+* Editor state: Error messages should be reconsidered.  Return the message name, not the text?
 
 ### Medium Term Tasks
 

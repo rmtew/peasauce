@@ -28,28 +28,37 @@ import editor_state
 
 
 ERRMSG_FILE_DOES_NOT_EXIST = "File does not exist."
+ERRMSG_INPUT_FILE_NOT_FOUND = "Input file not found."
 
 
 class ToolEditorClient(editor_state.ClientAPI):
     # __init__(self, owner)
-    # owner.reset_state()
-    # owner.get_file_path()
 
+    # Internal responsibility.
+    _request_load_file_count = 0
+
+    # External responsibility.
     _binary_parameters = None
     _goto_address_value = None
 
     def reset_state(self):
+        self._request_load_file_count = 0
         self.owner.reset_state()
 
     def request_load_file(self):
         # Offers the user a chance to load a file.
         # Returns None if user aborted.
         # Returns the file object on success.
-        file_path = self.owner.get_file_path()
-        if not os.path.isfile(file_path):
-            return ERRMSG_FILE_DOES_NOT_EXIST
-        if file_path is not None:
-            return open(file_path, "rb"), file_path
+        self._request_load_file_count += 1
+        if self._request_load_file_count == 1:
+            file_path = self.owner.get_file_path()
+            errmsg = ERRMSG_FILE_DOES_NOT_EXIST
+        elif self._request_load_file_count == 2:
+            file_path = self.owner.get_input_file_path()
+            errmsg = ERRMSG_INPUT_FILE_NOT_FOUND
+        if file_path is None or not os.path.isfile(file_path):
+            return errmsg
+        return open(file_path, "rb"), file_path
 
     def get_load_file(self):
         file_path = self.owner.get_file_path()
@@ -67,9 +76,17 @@ class ToolEditorClient(editor_state.ClientAPI):
     def request_address(self, address):
         return self._goto_address_value
 
+    def request_confirmation(self, title, text):
+        if title == editor_state.TEXT_LOAD_INPUT_FILE_TITLE:
+            return True
+        return super(ToolEditorClient, self).request_confirmation(title, text)
+
 
 class ToolAPI(object):
     editor_state = None
+
+    file_path = None
+    input_file_path = None
 
     def __init__(self):
         self.editor_client = ToolEditorClient(self)
@@ -81,10 +98,15 @@ class ToolAPI(object):
             return
         # This is set in initial state, before loading.
         self.file_path = None
+        self.input_file_path = None
 
     def get_file_path(self):
         """ Called by the editor client. """
         return self.file_path
+
+    def get_input_file_path(self):
+        """ Called by the editor client. """
+        return self.input_file_path
 
     def load_binary_file(self, file_path, dis_name, load_address, entrypoint_offset):
         # Not ideal, but works for now.
@@ -94,8 +116,9 @@ class ToolAPI(object):
         finally:
             self.editor_client._binary_parameters = None
 
-    def load_file(self, file_path):
+    def load_file(self, file_path, input_file_path=None):
         self.file_path = file_path
+        self.input_file_path = input_file_path
         result = self.editor_state.load_file()
         if result is None or type(result) in types.StringTypes:
             self.editor_state.reset_state()

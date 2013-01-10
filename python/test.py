@@ -43,12 +43,27 @@ if LOGGING_SPAM:
     logger.addHandler(ch)
 
 
-class TOOL_AutoProjectUpgrade_TestCase(unittest.TestCase):
+class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
 
+    @unittest.skipUnless("TESTDATA_PATH" in os.environ, "TESTDATA_PATH environment variable required")
     def test_upgrade_v2_to_vCURRENT(self):
-        self.fail("incomplete test")
+        FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "project-compatibility", "gdbstop.psproj")
+        INPUT_FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "gdbstop")
+
+        if not os.path.exists(FILE_NAME):
+            self.fail("missing project file '%s'" % FILE_NAME)
+        if not os.path.exists(INPUT_FILE_NAME):
+            self.fail("missing input file '%s'" % INPUT_FILE_NAME)
+
+        result = self.toolapiob.load_file(FILE_NAME, INPUT_FILE_NAME)
+        if type(result) in types.StringTypes:
+            self.fail("loading error ('%s')" % result)
+        if type(result) is not tuple:
+            self.fail("did not get correct load return value")
+
+        # At this point, the project has been upgraded and loaded successfully.
 
 
 class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
@@ -59,7 +74,7 @@ class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
     def test_bug_monam302_00004_reference(self):
         FILE_NAME = "samples/amiga-executable/MonAm302"
         if not os.path.exists(FILE_NAME):
-            self.skip("binary file dependency not available")
+            self.fail("binary file dependency not available")
 
         result = self.toolapiob.load_file(FILE_NAME)
         if type(result) in types.StringTypes:

@@ -457,9 +457,14 @@ class EditorState(object):
                     return None
 
                 # Show the "locate input file" dialog.
-                errmsg = None
-                input_data_file, input_data_file_path = self.client.request_load_file()
+                input_result = self.client.request_load_file()
+                if input_result is None or type(input_result) in types.StringTypes:
+                    self.reset_state()
+                    return input_result
+
+                input_data_file, input_data_file_path = input_result
                 input_data_file.seek(0, os.SEEK_END)
+                errmsg = None
                 if input_data_file.tell() != self.disassembly_data.file_size:
                     errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS
                 elif util.calculate_file_checksum(input_data_file) != self.disassembly_data.file_checksum:
