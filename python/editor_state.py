@@ -22,8 +22,9 @@ interface, whether a user facing GUI or separate script, might use it without
 reproducing the same logic.
 """
 
-import types
 import os
+import types
+import weakref
 
 import disassembly
 import disassembly_persistence
@@ -37,6 +38,12 @@ TEXT_LOAD_INPUT_FILE_BODY = "The save-file cannot be loaded unless you locate an
 TEXT_SELECT_REFERRING_ADDRESS_SHORT = "Go to which referring address?"
 TEXT_SELECT_REFERRING_ADDRESS_LONG = "Select on the following and press the enter key, or click on the button, to jump to the given referring address."
 TEXT_GO_TO_SELECTION = "Go to selection"
+
+TEXT_CHANGING_DATA_TYPE = "Changing data type"
+TEXT_PROCESSING = "Processing"
+TEXT_LOADING_FILE = "TEXT_LOADING_FILE"
+TEXT_LOADING = "TEXT_LOADING"
+TEXT_LOADING_PROJECT = "TEXT_LOADING_PROJECT"
 
 ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT = "The file does not appear to be a supported executable file format."
 ERRMSG_NO_IDENTIFIABLE_DESTINATION = "Nowhere to go."
@@ -77,10 +84,6 @@ class ClientAPI(object):
         """ Returns the user modified options. """
         raise NotImplementedError
 
-    def validate_new_project_option_values(self, new_options):
-        """ Returns a message on error, or None on success. """
-        raise NotImplementedError
-
     def request_load_project_option_values(self, load_options):
         """ Returns the user modified options. """
         raise NotImplementedError
@@ -116,30 +119,51 @@ class ClientAPI(object):
             Returns False if not confirmed. """
         raise NotImplementedError
 
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback):
+        raise NotImplementedError
+
+    def event_prolonged_action_update(self, active_client, description_msg_id, step_number):
+        raise NotImplementedError
+
+    def event_prolonged_action_complete(self, active_client, flags):
+        raise NotImplementedError
+
+    def event_load_successful(self, active_client):
+        raise NotImplementedError
+
 
 class EditorState(object):
     STATE_INITIAL = 0
     STATE_LOADING = 1
     STATE_LOADED = 2
 
-    def __init__(self, client):
-        self.client = client
-        self.reset_state()
+    _load_call_proxy_func = None
 
-    def in_initial_state(self): return self.state_id == EditorState.STATE_INITIAL
-    def in_loading_state(self): return self.state_id == EditorState.STATE_LOADING
-    def in_loaded_state(self): return self.state_id == EditorState.STATE_LOADED
+    def __init__(self):
+        self.clients = weakref.WeakSet()
+        self.reset_state(None)
 
-    def is_project_file(self, input_file):
+    def register_client(self, client):
+        self.clients.add(client)
+
+    def unregister_client(self, client):
+        self.clients.remove(client)
+
+    def in_initial_state(self, acting_client): return self.state_id == EditorState.STATE_INITIAL
+    def in_loading_state(self, acting_client): return self.state_id == EditorState.STATE_LOADING
+    def in_loaded_state(self, acting_client): return self.state_id == EditorState.STATE_LOADED
+
+    def is_project_file(self, acting_client, input_file):
         return disassembly_persistence.check_is_project_file(input_file)
 
-    def reset_state(self):
+    def reset_state(self, acting_client):
         self.disassembly_data = None
         self.line_number = 0
         self.address_stack = []
 
         # Clear out related data.
-        self.client.reset_state()
+        for client in self.clients:
+            client.reset_state()
 
         # Finally, reset the state.
         self.state_id = EditorState.STATE_INITIAL
@@ -156,7 +180,7 @@ class EditorState(object):
             else:
                 addresses[i] = self._address_to_string(address)
 
-    def get_data_type_for_address(self, address):
+    def get_data_type_for_address(self, acting_client, address):
         data_type = disassembly.get_data_type_for_address(self.disassembly_data, address)
         if data_type == disassembly.DATA_TYPE_CODE:
             return "code"
@@ -169,18 +193,18 @@ class EditorState(object):
         elif data_type == disassembly.DATA_TYPE_LONGWORD:
             return "32bit"
 
-    def get_source_code_for_address(self, address):
+    def get_source_code_for_address(self, acting_client, address):
         line_idx = disassembly.get_line_number_for_address(self.disassembly_data, address)
-        return self.get_source_code_for_line_number(line_idx)
+        return self.get_source_code_for_line_number(acting_client, line_idx)
 
-    def get_source_code_for_line_number(self, line_idx):
+    def get_source_code_for_line_number(self, acting_client, line_idx):
         code_string = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION)
         operands_text = disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS)
         if len(operands_text):
             code_string += " "+ operands_text
         return code_string
 
-    def get_row_for_line_number(self, line_idx):
+    def get_row_for_line_number(self, acting_client, line_idx):
         return [
             disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OFFSET),
             disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_BYTES),
@@ -189,34 +213,37 @@ class EditorState(object):
             disassembly.get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS),
         ]
 
-    def get_referring_addresses_for_address(self, address):
+    def get_referring_addresses_for_address(self, acting_client, address):
         return list(disassembly.get_referring_addresses(self.disassembly_data, address))
 
-    def get_address(self):
+    def get_address(self, acting_client):
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
 
-    def get_line_number_for_address(self, address):
+    def get_line_number_for_address(self, acting_client, address):
         return disassembly.get_line_number_for_address(self.disassembly_data, address)
 
-    def get_line_number(self):
+    def get_line_number(self, acting_client):
         return self.line_number
 
-    def set_line_number(self, line_number):
+    def set_line_number(self, acting_client, line_number):
         if type(line_number) not in (int, long):
             raise ValueError("expected numeric type, got %s (%s)" % (line_number.__class__.__name__, line_number))
         self.line_number = line_number
 
-    def get_line_count(self):
+    def get_line_count(self, acting_client):
         if self.disassembly_data is None:
             return 0
         return disassembly.get_line_count(self.disassembly_data)
 
-    def get_file_line(self, row, column):
+    def get_file_line(self, acting_client, row, column):
         if self.disassembly_data is None:
             return ""
         return disassembly.get_file_line(self.disassembly_data, row, column)
 
-    def push_address(self):
+    def get_symbols(self, acting_client):
+        return self.disassembly_data.symbols_by_address.items()
+
+    def push_address(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
@@ -230,7 +257,7 @@ class EditorState(object):
             if next_line_number is None:
                 return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
 
-            self.set_line_number(next_line_number)
+            self.set_line_number(acting_client, next_line_number)
             self.address_stack.append(current_address)
             return
         elif len(operand_addresses) == 2:
@@ -238,7 +265,7 @@ class EditorState(object):
 
         return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
-    def pop_address(self):
+    def pop_address(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
@@ -248,13 +275,13 @@ class EditorState(object):
         address = self.address_stack.pop()
         # It is expected that if you can have pushed the address, there was a line number for it.
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
-        self.set_line_number(line_number)
+        self.set_line_number(acting_client, line_number)
 
-    def goto_address(self):
+    def goto_address(self, acting_client):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None: # Current line does not have an address.
             address = 0
-        result = self.client.request_address(address)
+        result = acting_client.request_address(address)
         if result is None: # Cancelled / aborted.
             return
         # Convert an entered symbol name to it's address.
@@ -263,10 +290,10 @@ class EditorState(object):
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, result)
-        self.set_line_number(line_number)
+        self.set_line_number(acting_client, line_number)
 
-    def goto_referring_address(self):
-        current_address = self.get_address()
+    def goto_referring_address(self, acting_client):
+        current_address = self.get_address(acting_client)
         if current_address is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
@@ -281,10 +308,10 @@ class EditorState(object):
         self._convert_addresses_to_symbols_where_possible(converted_addresses)
         address_rows = []
         for i, address in enumerate(addresses):
-            code_string = self.get_source_code_for_address(address)
+            code_string = self.get_source_code_for_address(acting_client, address)
             address_rows.append((self._address_to_string(address), converted_addresses[i], code_string))
 
-        selected_address = self.client.request_address_selection(TEXT_SELECT_REFERRING_ADDRESS_SHORT, TEXT_SELECT_REFERRING_ADDRESS_LONG, TEXT_GO_TO_SELECTION, address_rows, addresses)
+        selected_address = acting_client.request_address_selection(TEXT_SELECT_REFERRING_ADDRESS_SHORT, TEXT_SELECT_REFERRING_ADDRESS_LONG, TEXT_GO_TO_SELECTION, address_rows, addresses)
         if selected_address is None:
             return False
 
@@ -292,27 +319,27 @@ class EditorState(object):
         if next_line_number is None:
             return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
 
-        self.set_line_number(next_line_number)
+        self.set_line_number(acting_client, next_line_number)
         self.address_stack.append(current_address)
         return True
 
-    def goto_previous_data_block(self):
-        line_idx = self.get_line_number()
+    def goto_previous_data_block(self, acting_client):
+        line_idx = self.get_line_number(acting_client)
         new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-        self.set_line_number(new_line_idx)
+        self.set_line_number(acting_client, new_line_idx)
 
-    def goto_next_data_block(self):
+    def goto_next_data_block(self, acting_client):
         line_idx = self.get_line_number()
         new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-        self.set_line_number(new_line_idx)
+        self.set_line_number(acting_client, new_line_idx)
 
     ## UNCERTAIN REFERENCES:
 
-    def set_uncertain_reference_modification_func(self, callback):
+    def set_uncertain_reference_modification_func(self, acting_client, callback):
         def callback_adaptor(data_type_from, data_type_to, address, length):
             if data_type_from == disassembly.DATA_TYPE_CODE:
                 data_type_from = "CODE"
@@ -325,107 +352,133 @@ class EditorState(object):
             return callback(data_type_from, data_type_to, address, length)
         disassembly.set_uncertain_reference_modification_func(self.disassembly_data, callback_adaptor)
 
-    def get_uncertain_code_references(self):
+    def get_uncertain_code_references(self, acting_client):
         return disassembly.get_uncertain_code_references(self.disassembly_data)
 
-    def get_uncertain_data_references(self):
+    def get_uncertain_data_references(self, acting_client):
         return disassembly.get_uncertain_data_references(self.disassembly_data)
 
-    def get_uncertain_references_by_address(self, address):
+    def get_uncertain_references_by_address(self, acting_client, address):
         return disassembly.get_uncertain_references_by_address(self.disassembly_data, address)
 
     ## GENERAL:
 
-    def set_symbol_insert_func(self, callback):
+    def set_symbol_insert_func(self, acting_client, callback):
         disassembly.set_symbol_insert_func(self.disassembly_data, callback)
 
-    def set_label_name(self):
+    def set_label_name(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
         # Prompt user to edit the current label, or add a new one.
-        new_symbol_name = self.client.request_label_name(symbol_name)
+        new_symbol_name = acting_client.request_label_name(symbol_name)
         if new_symbol_name is not None and new_symbol_name != symbol_name:
             match = RE_LABEL.match(new_symbol_name)
             if match is None:
                 return ERRMSG_INVALID_LABEL_NAME
             disassembly.set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
 
-    def set_datatype_code(self):
+    def set_datatype_code(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(address, disassembly.DATA_TYPE_CODE)
+        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_CODE)
 
-    def set_datatype_32bit(self):
+    def set_datatype_32bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(address, disassembly.DATA_TYPE_LONGWORD)
+        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_LONGWORD)
 
-    def set_datatype_16bit(self):
+    def set_datatype_16bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(address, disassembly.DATA_TYPE_WORD)
+        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_WORD)
 
-    def set_datatype_8bit(self):
+    def set_datatype_8bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(address, disassembly.DATA_TYPE_BYTE)
+        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_BYTE)
 
-    def set_datatype_ascii(self):
+    def set_datatype_ascii(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(address, disassembly.DATA_TYPE_ASCII)
+        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_ASCII)
 
-    def _set_data_type(self, address, data_type):
+    def _set_data_type(self, acting_client, address, data_type):
+        for client in self.clients:
+            client.event_prolonged_action(client is acting_client, "TEXT_CHANGING_DATA_TYPE", "TEXT_PROCESSING", 1, None)
         disassembly.set_data_type_at_address(self.disassembly_data, address, data_type)
+        for client in self.clients:
+            client.event_prolonged_action_complete(client is acting_client, 0)
 
-    def load_file(self, load_call_proxy=None):
-        if load_call_proxy is None:
-            def load_call_proxy(f, *args, **kwargs):
-                return f(*args, **kwargs)
+    if False:
+        def set_load_call_proxy_func(self, func):
+            self._load_call_proxy_func = weakref.ref(func.im_self), func.__name__
 
-        self.reset_state()
+        def _get_load_call_proxy_func(self):
+            f = None
+            if self._load_call_proxy_func is not None:
+                object_ref, func_name = self._load_call_proxy_func
+                ob = object_ref()
+                if ob is not None:
+                    f = getattr(ob, func_name)
+            if f is None:
+                def f(g, *args, **kwargs):
+                    return g(*args, **kwargs)
+            return f
+
+    def load_file(self, acting_client, load_call_proxy=None, abort_callback=None):
+        if True:
+            if load_call_proxy is None:
+                def load_call_proxy(g, *args, **kwargs):
+                    return g(*args, **kwargs)
+        self.reset_state(acting_client)
 
         # Request a file name to load.
-        load_file, file_path = self.client.request_load_file()
-        if load_file is None:
+        result = acting_client.request_load_file()
+        if result is None:
             return
-        if type(load_file) in types.StringTypes:
-            self.reset_state()
-            return load_file
+        if type(result) in types.StringTypes:
+            self.reset_state(acting_client)
+            return result
+        load_file, file_path = result
 
         self.state_id = EditorState.STATE_LOADING
         file_name = os.path.basename(file_path)
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
 
         if is_saved_project:
+            for client in self.clients:
+                client.event_prolonged_action(client is acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", 1, abort_callback)
             result = load_call_proxy(disassembly.load_project_file, load_file, file_name)
+            #result = self._get_load_call_proxy_func(disassembly.load_project_file, load_file, file_name)
+            for client in self.clients:
+                client.event_prolonged_action_complete(client is acting_client, 0)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
-            # Populate useful fields.
             identify_result = loaderlib.identify_file(load_file)
+            # Parameters passed in, to help the client make up it's mind.
             if identify_result is not None:
                 new_options.is_binary_file = False
                 new_options.loader_load_address = loaderlib.get_load_address(identify_result[0])
@@ -439,41 +492,51 @@ class EditorState(object):
                 new_options.loader_filetype = ""
                 new_options.loader_processor = ""
             # Prompt for new project option values.
-            new_options = self.client.request_new_project_option_values(new_options)
-            # Verify that all values are provided correctly.
-            errmsg = self.client.validate_new_project_option_values(new_options)
-            if errmsg is not None:
-                self.reset_state()
-                return errmsg
-            result = load_call_proxy(disassembly.load_file, load_file, new_options, file_name)
+            new_option_result = acting_client.request_new_project_option_values(new_options)
+            if new_option_result is None or type(new_option_result) in types.StringTypes:
+                self.reset_state(acting_client)
+                return new_option_result
+
+            for client in self.clients:
+                client.event_prolonged_action(client is acting_client, "TEXT_LOADING_FILE", "TEXT_LOADING", 1, abort_callback)
+            result = load_call_proxy(disassembly.load_file, load_file, new_option_result, file_name)
+            #result = self._get_load_call_proxy_func(disassembly.load_file, load_file, new_option_result, file_name)
+            for client in self.clients:
+                client.event_prolonged_action_complete(client is acting_client, 0)
+
+        # Loading was cancelled.
+        if result is None:
+            self.reset_state(acting_client)
+            return
 
         self.state_id = EditorState.STATE_LOADED
         self.disassembly_data, line_count = result
 
         if line_count == 0:
-            self.reset_state()
+            self.reset_state(acting_client)
             return ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT
 
-        is_saved_project = disassembly_persistence.check_is_project_file(self.client.get_load_file())
+        is_saved_project = disassembly_persistence.check_is_project_file(acting_client.get_load_file())
         if is_saved_project:
             # User may have optionally chosen to not save the input file, as part of the project file.
             if not disassembly.is_segment_data_cached(self.disassembly_data):
                 load_options = disassembly.get_new_project_options(self.disassembly_data)
+                # Parameters passed in, to help the client make up it's mind.
                 load_options.input_file_filesize = self.disassembly_data.file_size
                 load_options.input_file_filename = self.disassembly_data.file_name
                 load_options.input_file_checksum = self.disassembly_data.file_checksum
-
+                # Parameters received out, our "return values".
                 load_options.loader_file_path = None
-                load_options = self.client.request_load_project_option_values(load_options)
+                load_options = acting_client.request_load_project_option_values(load_options)
 
                 if False: # Clean up this and dependencies.
                     # Inform the user of the purpose of the next file dialog.
-                    if not self.client.request_confirmation(TEXT_LOAD_INPUT_FILE_TITLE, TEXT_LOAD_INPUT_FILE_BODY):
-                        self.reset_state()
+                    if not acting_client.request_confirmation(TEXT_LOAD_INPUT_FILE_TITLE, TEXT_LOAD_INPUT_FILE_BODY):
+                        self.reset_state(acting_client)
                         return None
 
                 if load_options.loader_file_path is None:
-                    self.reset_state()
+                    self.reset_state(acting_client)
                     return ERRMSG_INPUT_FILE_NOT_FOUND
 
                 # Verify that the given input file is valid, or error descriptively.
@@ -485,16 +548,18 @@ class EditorState(object):
                     elif util.calculate_file_checksum(input_data_file) != self.disassembly_data.file_checksum:
                         errmsg = ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH
                     if type(errmsg) in types.StringTypes:
-                        self.reset_state()
+                        self.reset_state(acting_client)
                         return errmsg
                     disassembly.cache_segment_data(self.disassembly_data, input_data_file)
 
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
-        self.set_line_number(line_number)
+        self.set_line_number(acting_client, line_number)
+        for client in self.clients:
+            client.event_load_successful(client is acting_client)
         return result
 
-    def save_project(self):
+    def save_project(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
@@ -502,24 +567,24 @@ class EditorState(object):
         # Install higher-level defined and used option attributes.
         save_options.cache_input_file = disassembly.get_project_save_count(self.disassembly_data) == 0 or disassembly.is_project_inputfile_cached(self.disassembly_data)
         # Prompt user if they want to save the source file.
-        save_options = self.client.request_save_project_option_values(save_options)
+        save_options = acting_client.request_save_project_option_values(save_options)
         # User chose to cancel the save process.
         if save_options is None:
             return
         if save_options.cache_input_file:
-            save_options.input_file = self.client.get_load_file()
+            save_options.input_file = acting_client.get_load_file()
 
         with open(save_options.save_file_path, "wb") as f:
             disassembly.save_project_file(f, self.disassembly_data, save_options)
 
-    def export_source_code(self):
+    def export_source_code(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         line_count = disassembly.get_line_count(self.disassembly_data)
 
         # Prompt for save file name.
-        save_file = self.client.request_code_save_file()
+        save_file = acting_client.request_code_save_file()
         if save_file is not None:
             for i in xrange(line_count):
                 label_text = disassembly.get_file_line(self.disassembly_data, i, disassembly.LI_LABEL)

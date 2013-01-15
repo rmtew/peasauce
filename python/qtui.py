@@ -201,10 +201,10 @@ class DisassemblyItemModel(BaseItemModel):
         super(DisassemblyItemModel, self).__init__(columns, parent)
 
     def rowCount(self, parent=None):
-        return self.window.editor_state.get_line_count()
+        return self.window.editor_state.get_line_count(self.window.editor_client)
 
     def _lookup_cell_value(self, row, column):
-        return self.window.editor_state.get_file_line(row, column)
+        return self.window.editor_state.get_file_line(self.window.editor_client, row, column)
 
 
 class CustomItemModel(BaseItemModel):
@@ -347,6 +347,10 @@ def create_table_widget(parent, model, multiselect=False):
 
 
 class QTUIEditorClient(editor_state.ClientAPI):
+    # Internal responsibility.
+    _progress_dialog = None
+    _progress_dialog_steps = 0
+
     def __init__(self, *args, **kwargs):
         super(QTUIEditorClient, self).__init__(*args, **kwargs)
 
@@ -378,9 +382,6 @@ class QTUIEditorClient(editor_state.ClientAPI):
         if result != QtGui.QDialog.Accepted:
             return ERRMSG_BAD_NEW_PROJECT_OPTIONS
         return options
-
-    def validate_new_project_option_values(self, options):
-        return None
 
     def request_load_project_option_values(self, load_options):
         result = LoadProjectDialog(load_options, self.file_path, self.owner).exec_()
@@ -434,10 +435,49 @@ class QTUIEditorClient(editor_state.ClientAPI):
         ret = QtGui.QMessageBox.question(self.owner, title, text, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
         return ret == QtGui.QMessageBox.Ok
 
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback):
+        # Display a modal dialog.
+        self._progress_dialog = QtGui.QProgressDialog(self.owner)
+        self._progress_dialog_steps = step_count
+
+        d = self._progress_dialog
+        d.setCancelButtonText("&Cancel")
+        d.setWindowTitle(title_msg_id)
+        d.setLabelText(description_msg_id)
+        d.setAutoClose(True)
+        d.setWindowModality(QtCore.Qt.WindowModal)
+        d.setRange(0, step_count)
+        d.setMinimumDuration(1000)
+        d.setValue(0)
+
+        # Register to hear if the cancel button is pressed.
+        def canceled():
+            abort_callback()
+        d.canceled.connect(canceled)
+
+        # Non-blocking.
+        d.show()
+
+    def event_prolonged_action_update(self, active_client, message_id, step_number):
+        d = self._progress_dialog
+        d.setLabelText(message_id)
+        d.setValue(step_number)
+
+    def event_prolonged_action_complete(self, active_client, flags):
+        d = self._progress_dialog
+        # Trigger the auto-close behaviour.
+        d.setValue(self._progress_dialog_steps)
+
+        self._progress_dialog = None
+        self._progress_dialog_steps = 0
+
+    def event_load_successful(self, active_client):
+        if not active_client:
+            self.owner.on_file_opened()
+
 
 class MainWindow(QtGui.QMainWindow):
     _settings = None
-    disassembly_data = None
 
     loaded_signal = QtCore.Signal(int)
     log_signal = QtCore.Signal(tuple)
@@ -446,7 +486,8 @@ class MainWindow(QtGui.QMainWindow):
         super(MainWindow, self).__init__(parent)
 
         self.editor_client = QTUIEditorClient(self)
-        self.editor_state = editor_state.EditorState(self.editor_client)
+        self.editor_state = editor_state.EditorState()
+        self.editor_state.register_client(self.editor_client)
 
         self.thread = WorkThread()
 
@@ -519,7 +560,7 @@ class MainWindow(QtGui.QMainWindow):
         selected_indexes = result[0].indexes()        
         if len(selected_indexes) == 1:
             index = selected_indexes[0]
-            self.editor_state.set_line_number(index.row())
+            self.editor_state.set_line_number(self.editor_client, index.row())
 
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
@@ -703,15 +744,15 @@ class MainWindow(QtGui.QMainWindow):
 
     def reset_state(self):
         """ Called to clear out all state related to loaded data. """
-        self.disassembly_data = None
+        pass
 
     def menu_file_open(self):
-        if self.editor_state.in_loaded_state():
+        if self.editor_state.in_loaded_state(self.editor_client):
             ret = QtGui.QMessageBox.question(self, "Abandon work?", "You have existing work loaded, do you wish to abandon it?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
             if ret != QtGui.QMessageBox.Ok:
                 return
             self.reset_all()
-        elif not self.editor_state.in_initial_state():
+        elif not self.editor_state.in_initial_state(self.editor_client):
             return
 
         self.attempt_open_file()
@@ -726,25 +767,25 @@ class MainWindow(QtGui.QMainWindow):
             pass
 
     def menu_search_goto_address(self):
-        errmsg = self.editor_state.goto_address()
+        errmsg = self.editor_state.goto_address(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
         else:
-            self.scroll_to_line(self.editor_state.get_line_number())
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_previous_data_block(self):
-        errmsg = self.editor_state.goto_previous_data_block()
+        errmsg = self.editor_state.goto_previous_data_block(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
         else:
-            self.scroll_to_line(self.editor_state.get_line_number())
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_next_data_block(self):
-        errmsg = self.editor_state.goto_next_data_block()
+        errmsg = self.editor_state.goto_next_data_block(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
         else:
-            self.scroll_to_line(self.editor_state.get_line_number())
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_settings_choose_font(self):
         font, ok = QtGui.QFontDialog.getFont(self.list_table.font(), self)
@@ -757,26 +798,26 @@ class MainWindow(QtGui.QMainWindow):
     ## INTERACTION FUNCTIONS
 
     def interaction_request_save_project(self):
-        errmsg = self.editor_state.save_project()
+        errmsg = self.editor_state.save_project(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to save project", errmsg)
 
     def interaction_request_export_source(self):
-        errmsg = self.editor_state.export_source_code()
+        errmsg = self.editor_state.export_source_code(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to export source", errmsg)
 
     def interaction_rename_symbol(self):
-        errmsg = self.editor_state.set_label_name()
+        errmsg = self.editor_state.set_label_name(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
 
     def interaction_uncertain_code_references_view_push_symbol(self):
-        if not self.editor_state.in_loaded_state():
+        if not self.editor_state.in_loaded_state(self.editor_client):
             return
 
         # Place current address on the stack.
-        current_address = self.editor_state.get_address()
+        current_address = self.editor_state.get_address(self.editor_client)
         if current_address is None:
             return
 
@@ -786,11 +827,11 @@ class MainWindow(QtGui.QMainWindow):
         self.functionality_view_push_address(current_address, address)
 
     def interaction_uncertain_data_references_view_push_symbol(self):
-        if not self.editor_state.in_loaded_state():
+        if not self.editor_state.in_loaded_state(self.editor_client):
             return
 
         # Place current address on the stack.
-        current_address = self.editor_state.get_address()
+        current_address = self.editor_state.get_address(self.editor_client)
         if current_address is None:
             return
 
@@ -800,60 +841,60 @@ class MainWindow(QtGui.QMainWindow):
         self.functionality_view_push_address(current_address, address)
 
     def interaction_view_push_symbol(self):
-        errmsg = self.editor_state.push_address()
+        errmsg = self.editor_state.push_address(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-        line_idx = self.editor_state.get_line_number()
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
 
     def interaction_view_pop_symbol(self):
-        errmsg = self.editor_state.pop_address()
+        errmsg = self.editor_state.pop_address(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-        line_idx = self.editor_state.get_line_number()
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
 
     def interaction_view_referring_symbols(self):
-        errmsg = self.editor_state.goto_referring_address()
+        errmsg = self.editor_state.goto_referring_address(self.editor_client)
         if errmsg is False:
             return
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
             return
-        line_idx = self.editor_state.get_line_number()
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
 
     def interaction_set_datatype_code(self):
-        errmsg = self.editor_state.set_datatype_code()
+        errmsg = self.editor_state.set_datatype_code(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_32bit(self):
-        errmsg = self.editor_state.set_datatype_32bit()
+        errmsg = self.editor_state.set_datatype_32bit(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_16bit(self):
-        errmsg = self.editor_state.set_datatype_16bit()
+        errmsg = self.editor_state.set_datatype_16bit(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_8bit(self):
-        errmsg = self.editor_state.set_datatype_8bit()
+        errmsg = self.editor_state.set_datatype_8bit(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_ascii(self):
-        errmsg = self.editor_state.set_datatype_ascii()
+        errmsg = self.editor_state.set_datatype_ascii(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     ## MISCELLANEIA
 
     def scroll_to_address(self, new_address):
-        new_line_idx = self.editor_state.get_line_number_for_address(new_address)
+        new_line_idx = self.editor_state.get_line_number_for_address(self.editor_client, new_address)
         logger.debug("scroll_to_address: line=%d address=$%X", new_line_idx, new_address)
         self.scroll_to_line(new_line_idx, True)
 
@@ -866,7 +907,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
-        next_line_number = self.editor_state.get_line_number_for_address(address)
+        next_line_number = self.editor_state.get_line_number_for_address(self.editor_client, address)
         if next_line_number is not None:
             #self.list_table.selectRow(next_line_number)
             self.scroll_to_line(next_line_number)
@@ -879,7 +920,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def get_current_address(self):
         # Place current address on the stack.
-        current_address = self.editor_state.get_address()
+        current_address = self.editor_state.get_address(self.editor_client)
         # Whether a non-disassembly "readability" line was selected.
         if current_address is None:
             logger.debug("Failed to get current address, no address for line.")
@@ -901,60 +942,32 @@ class MainWindow(QtGui.QMainWindow):
         return self._settings.get(setting_name, default_value)
 
     def attempt_open_file(self, file_path=None):
+        class Result(object):
+            done = False
+            value = None
+        local_result = Result()
+
+        def on_work_complete(work_result):
+            self.thread.result.disconnect(on_work_complete)
+            local_result.value = work_result
+            local_result.done = True
+
         def load_call_proxy(f, input_file, *args, **kwargs):
-            result_list = []
-            def on_work_complete(result):
-                if not self.editor_state.in_loading_state():
-                    return
-
-                result_list[:] = result
-
-                # Remove registration as we got our result.
-                self.thread.result.disconnect(on_work_complete)
-
-                # Close the progress dialog without canceling it.
-                self.progressDialog.setValue(100)
-                self.progressDialog = None
-
             # Start the loading on the worker thread.
             self.thread.result.connect(on_work_complete)
             self.thread.add_work(f, input_file, *args, **kwargs)
 
-            is_project_file = self.editor_state.is_project_file(input_file)
-
-            # Display a modal dialog.
-            progressDialog = self.progressDialog = QtGui.QProgressDialog(self)
-            progressDialog.setCancelButtonText("&Cancel")
-            if is_project_file:
-                progressDialog.setWindowTitle("Load Project")
-                progressDialog.setLabelText("Loading project..")
-            else:
-                progressDialog.setWindowTitle("New Project")
-                progressDialog.setLabelText("Creating initial project..")
-            progressDialog.setAutoClose(True)
-            progressDialog.setWindowModality(QtCore.Qt.WindowModal)
-            progressDialog.setRange(0, 100)
-            progressDialog.setMinimumDuration(0)
-            progressDialog.setValue(20)
-
-            # Register to hear if the cancel button is pressed.
-            def canceled():
-                # Clean up our use of the worker thread.
-                self.thread.result.disconnect(on_work_complete)
-                self.editor_state.reset_state()
-                self.progressDialog = None
-            progressDialog.canceled.connect(canceled)
-            
-            # Wait until cancel or the work is complete.
-            t0 = time.time()
-            progressDialog.show()
-            while self.progressDialog is not None:
+            while not local_result.done:
                 QtGui.qApp.processEvents()
-            logger.debug("qtui.py:load_call_proxy %0.1fs", time.time() - t0)
+            return local_result.value
 
-            return result_list
+        def abort_callback():
+            self.thread.result.disconnect(on_work_complete)
+            local_result.done = True
 
-        result = self.editor_state.load_file(load_call_proxy=load_call_proxy)
+        # TODO: Move this to the initialisation level.
+        #self.editor_state.set_load_call_proxy_func(load_call_proxy) / 0
+        result = self.editor_state.load_file(self.editor_client, load_call_proxy=load_call_proxy, abort_callback=abort_callback)
         # Cancelled?
         if result is None:
             return
@@ -964,44 +977,45 @@ class MainWindow(QtGui.QMainWindow):
             return
 
         # This isn't really good enough, as long loading files may conflict with cancellation and subsequent load attempts.
-        if not self.editor_state.in_loaded_state():
+        if not self.editor_state.in_loaded_state(self.editor_client):
             return
 
+        # TODO: Fix what the result is.
         # Successfully completed.
-        self.disassembly_data, line_count = result
+        self.on_file_opened()
 
-        self.list_table._initial_line_idx = self.editor_state.get_line_number()
+    def on_file_opened(self):
+        self.list_table._initial_line_idx = self.editor_state.get_line_number(self.editor_client)
 
         ## Populate the disassembly view with the loaded data.
-        model = self.list_model
-        model._data_ready()
+        self.list_model._data_ready()
 
         ## SYMBOLS
 
         # Register for further symbol events (only add for now).
-        self.editor_state.set_symbol_insert_func(self.disassembly_symbol_added)
+        self.editor_state.set_symbol_insert_func(self.editor_client, self.disassembly_symbol_added)
 
-        row_data = self.disassembly_data.symbols_by_address.items()
+        row_data = self.editor_state.get_symbols(self.editor_client)
         self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
         ## UNCERTAIN REFERENCES
 
-        self.editor_state.set_uncertain_reference_modification_func(self.disassembly_uncertain_reference_modification)
+        self.editor_state.set_uncertain_reference_modification_func(self.editor_client, self.disassembly_uncertain_reference_modification)
 
         def _lookup_cell_value(self, row, column):
             if column == 0:
                 return u"\u2713"
             return CustomItemModel._lookup_cell_value(self, row, column-1)
 
-        results = self.editor_state.get_uncertain_code_references()
+        results = self.editor_state.get_uncertain_code_references(self.editor_client)
         self.uncertain_code_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_code_references_model, CustomItemModel)
         self.uncertain_code_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_code_references_table.resizeColumnsToContents()
         self.uncertain_code_references_table.horizontalHeader().setStretchLastSection(True)
 
-        results = self.editor_state.get_uncertain_data_references()
+        results = self.editor_state.get_uncertain_data_references(self.editor_client)
         self.uncertain_data_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_data_references_model, CustomItemModel)
         self.uncertain_data_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_data_references_table.resizeColumnsToContents()
@@ -1042,7 +1056,7 @@ class MainWindow(QtGui.QMainWindow):
         from_row_data[removal_idx0:removal_idxN] = []
         from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
 
-        addition_rows = self.editor_state.get_uncertain_references_by_address(address)
+        addition_rows = self.editor_state.get_uncertain_references_by_address(self.editor_client, address)
         if len(addition_rows):
             if data_type_to == "CODE":
                 to_model = self.uncertain_code_references_model
@@ -1559,11 +1573,15 @@ if __name__ == '__main__':
                 # If we want to exit once the loading is complete (e.g. profiling).
                 #window.loaded_signal.connect(_received_loaded_signal)
 
-                t = QtCore.QTimer()
-                t.setSingleShot(True)
-                # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
-                t.timeout.connect(lambda: window.attempt_open_file(s) or t is not None)
-                t.start(50)
+                if False:
+                    t = QtCore.QTimer()
+                    t.setSingleShot(True)
+                    # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
+                    t.timeout.connect(lambda: window.attempt_open_file(s) or t is not None)
+                    t.start(50)
+            import toolapi
+            toolapiob = toolapi.ToolAPI(window.editor_state)
+            toolapiob.load_file(s)
     _arg_file_load()
 
     sys.exit(app.exec_())

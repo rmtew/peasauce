@@ -174,7 +174,9 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
             def reset_state(self):
                 pass
 
-        self.editor_state = editor_state.EditorState(EditorClient())
+        self.editor_client = EditorClient()
+        self.editor_state = editor_state.EditorState()
+        self.editor_state.register_client(self.editor_client)
         self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = self.fake_disassembly_module
 
         self.uncertain_code_references_model = Model()

@@ -58,10 +58,6 @@ class ToolEditorClient(editor_state.ClientAPI):
             new_options.dis_name, new_options.loader_load_address, new_options.loader_entrypoint_offset = self._binary_parameters
         return new_options
 
-    def validate_new_project_option_values(self, new_options):
-        # Returns an error message if any option is invalid.
-        return None
-
     def request_load_project_option_values(self, load_options):
         load_options.loader_file_path = self.owner.get_input_file_path()
         return load_options
@@ -69,10 +65,11 @@ class ToolEditorClient(editor_state.ClientAPI):
     def request_address(self, address):
         return self._goto_address_value
 
-    def request_confirmation(self, title, text):
-        if title == editor_state.TEXT_LOAD_INPUT_FILE_TITLE:
-            return True
-        return super(ToolEditorClient, self).request_confirmation(title, text)
+    # These can be ignored, as we have no GUI.
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback): pass
+    def event_prolonged_action_update(self, active_client, description_msg_id, step_number): pass
+    def event_prolonged_action_complete(self, active_client, flags): pass
+    def event_load_successful(self, active_client): pass
 
 
 class ToolAPI(object):
@@ -81,13 +78,16 @@ class ToolAPI(object):
     file_path = None
     input_file_path = None
 
-    def __init__(self):
+    def __init__(self, editor_state_ob=None):
         self.editor_client = ToolEditorClient(self)
-        self.editor_state = editor_state.EditorState(self.editor_client)
+        if editor_state_ob is None:
+            editor_state_ob = editor_state.EditorState()
+        editor_state_ob.register_client(self.editor_client)
+        self.editor_state = editor_state_ob
 
     def reset_state(self):
         """ Called by the editor client. """
-        if self.editor_state is None or self.editor_state.in_initial_state():
+        if self.editor_state is None or self.editor_state.in_initial_state(self.editor_client):
             return
         # This is set in initial state, before loading.
         self.file_path = None
@@ -112,45 +112,45 @@ class ToolAPI(object):
     def load_file(self, file_path, input_file_path=None):
         self.file_path = file_path
         self.input_file_path = input_file_path
-        result = self.editor_state.load_file()
+        result = self.editor_state.load_file(self.editor_client)
         if result is None or type(result) in types.StringTypes:
-            self.editor_state.reset_state()
+            self.editor_state.reset_state(self.editor_client)
         return result
 
     def _get_address(self):
-        return self.editor_state.get_address()
+        return self.editor_state.get_address(self.editor_client)
 
     def _goto_address(self, address):
         self.editor_client._goto_address_value = address
         try:
-            return self.editor_state.goto_address()
+            return self.editor_state.goto_address(self.editor_client)
         finally:
             self.editor_client._goto_address_value = None
 
     def get_data_type_for_address(self, address):
-        return self.editor_state.get_data_type_for_address(address)
+        return self.editor_state.get_data_type_for_address(self.editor_client, address)
 
     def set_datatype(self, address, type_name):
         self._goto_address(address)
         if type_name == "code":
-            return self.editor_state.set_datatype_code()
+            return self.editor_state.set_datatype_code(self.editor_client)
         elif type_name == "32bit":
-            return self.editor_state.set_datatype_32bit()
+            return self.editor_state.set_datatype_32bit(self.editor_client)
         elif type_name == "16bit":
-            return self.editor_state.set_datatype_16bit()
+            return self.editor_state.set_datatype_16bit(self.editor_client)
         elif type_name == "8bit":
-            return self.editor_state.set_datatype_8bit()
+            return self.editor_state.set_datatype_8bit(self.editor_client)
         elif type_name == "ascii":
-            return self.editor_state.set_datatype_ascii()
+            return self.editor_state.set_datatype_ascii(self.editor_client)
 
     def get_uncertain_code_references(self):
-        return self.editor_state.get_uncertain_code_references()
+        return self.editor_state.get_uncertain_code_references(self.editor_client)
 
     def get_uncertain_data_references(self):
-        return self.editor_state.get_uncertain_data_references()
+        return self.editor_state.get_uncertain_data_references(self.editor_client)
 
     def get_source_code_for_address(self, address):
-        return self.editor_state.get_source_code_for_address(address)
+        return self.editor_state.get_source_code_for_address(self.editor_client, address)
 
     def get_referring_addresses_for_address(self, address):
-        return self.editor_state.get_referring_addresses_for_address(address)
+        return self.editor_state.get_referring_addresses_for_address(self.editor_client, address)
