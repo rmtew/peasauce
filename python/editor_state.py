@@ -129,11 +129,25 @@ class ClientAPI(object):
     def event_prolonged_action_update(self, active_client, description_msg_id, step_number):
         raise NotImplementedError
 
-    def event_prolonged_action_complete(self, active_client, flags):
+    def event_prolonged_action_complete(self, active_client):
         raise NotImplementedError
 
     def event_load_successful(self, active_client):
         raise NotImplementedError
+
+
+class WorkState(object):
+    completeness = 0.0
+    description = "?"
+    cancelled = False
+
+    def get_completeness(self): return self.completeness
+    def set_completeness(self, f): self.completeness = f
+    def get_description(self): return self.description
+    def set_description(self, s): self.description = s
+    def cancel(self): self.cancelled = True
+    def is_cancelled(self): return self.cancelled
+    def check_exit_update(self, f, s): self.set_completeness(f); self.set_description(s); return self.cancelled
 
 
 class EditorState(object):
@@ -177,22 +191,28 @@ class EditorState(object):
 
     def _prolonged_action(self, acting_client, title_msg_id, description_msg_id, f, *args, **kwargs):
         # Remove keywork arguments meant to customise the call.
-        step_count = kwargs.pop("step_count", 1)
+        step_count = kwargs.pop("step_count", 100)
         can_cancel = kwargs.pop("can_cancel", True)
-        cancellations = []
+
+        work_state = kwargs["work_state"] = WorkState()
         def cancel_callback():
-            cancellations.append(None)
+            work_state.cancel()
         # Notify clients the action is starting.
         for client in self.clients:
             client.event_prolonged_action(client is acting_client, title_msg_id, description_msg_id, can_cancel, step_count, cancel_callback)
-        # ...
+        # Start the work and periodically check for it's completion, or cancellation.
         completed_event = self.worker_thread.add_work(f, *args, **kwargs)
-        while not completed_event.wait(0.1) and not len(cancellations):
+        last_completeness, last_description = None, None
+        while not completed_event.wait(0.1) and not work_state.is_cancelled():
+            work_completeness, work_description = work_state.get_completeness(), work_state.get_description()
             for client in self.clients:
+                if work_completeness != last_completeness or work_description != last_description:
+                    client.event_prolonged_action_update(client is acting_client, work_description, step_count * work_completeness)
                 client.event_tick(client is acting_client)
+            last_completeness, last_description = work_completeness, work_description
         # Notify clients the action is completed.
         for client in self.clients:
-            client.event_prolonged_action_complete(client is acting_client, 0)
+            client.event_prolonged_action_complete(client is acting_client)
         if completed_event.is_set():
             return completed_event.result
         return None
@@ -455,7 +475,7 @@ class EditorState(object):
         self._set_data_type(acting_client, address, disassembly.DATA_TYPE_ASCII)
 
     def _set_data_type(self, acting_client, address, data_type):
-        self._prolonged_action(acting_client, "TEXT_CHANGING_DATA_TYPE", "TEXT_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
+        self._prolonged_action(acting_client, "TEXT_DATA_TYPE_CHANGE", "TEXT_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
 
     def load_file(self, acting_client):
         self.reset_state(acting_client)
@@ -497,7 +517,7 @@ class EditorState(object):
                 self.reset_state(acting_client)
                 return new_option_result
 
-            result = self._prolonged_action(acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
+            result = self._prolonged_action(acting_client, "TEXT_LOADING_FILE", "TEXT_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
 
         # Loading was cancelled.
         if result is None:
@@ -605,12 +625,12 @@ class WorkerThread(threading.Thread):
         self.condition = threading.Condition(self.lock)
 
         self.quit = False
-        self.work_data = None
+        self.work_data = []
 
     def stop(self):
         self.lock.acquire()
         self.quit = True
-        self.work_data = None
+        self.work_data = []
         self.condition.notify()
         self.lock.release()
         #self.wait() # Wait until thread execution has finished.
@@ -619,7 +639,7 @@ class WorkerThread(threading.Thread):
         self.lock.acquire()
         completed_event = threading.Event()
         completed_event.result = None
-        self.work_data = _callable, _args, _kwargs, completed_event
+        self.work_data.append((_callable, _args, _kwargs, completed_event))
  
         if not self.is_alive():
             self.start()
@@ -630,8 +650,7 @@ class WorkerThread(threading.Thread):
 
     def run(self):
         self.lock.acquire()
-        work_data = self.work_data
-        self.work_data = None
+        work_data = self.work_data.pop(0)
         self.lock.release()
 
         while not self.quit:
@@ -639,6 +658,7 @@ class WorkerThread(threading.Thread):
             try:
                 try:
                     completed_event.result = work_data[0](*work_data[1], **work_data[2])
+                    completed_event.set()
                 except Exception:
                     traceback.print_stack()
                     raise
@@ -648,10 +668,10 @@ class WorkerThread(threading.Thread):
             work_data = None
 
             self.lock.acquire()
-            completed_event.set()
             # Wait for the next piece of work.
-            self.condition.wait()
-            work_data = self.work_data
-            self.work_data = None
+            if not len(self.work_data):
+                self.condition.wait()
+            if not self.quit:
+                work_data = self.work_data.pop(0)
             self.lock.release()
 

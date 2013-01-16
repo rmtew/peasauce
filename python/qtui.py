@@ -47,6 +47,7 @@ from PySide import QtCore, QtGui
 
 import disassemblylib
 import editor_state
+import res
 import util
 
 
@@ -244,7 +245,8 @@ class CustomQTableView(QtGui.QTableView):
 
     def paintEvent(self, event):
         if self._initial_line_idx is not None:
-            window.scroll_to_line(self._initial_line_idx)
+            # This should be the main window.
+            self.parent().scroll_to_line(self._initial_line_idx)
             self._initial_line_idx = None
         super(CustomQTableView, self).paintEvent(event)
 
@@ -448,8 +450,8 @@ class QTUIEditorClient(editor_state.ClientAPI):
             d.setCancelButtonText("&Cancel")
         else:
             d.setCancelButtonText("")
-        d.setWindowTitle(title_msg_id)
-        d.setLabelText(description_msg_id)
+        d.setWindowTitle(res.strings[title_msg_id])
+        d.setLabelText(res.strings[description_msg_id])
         d.setAutoClose(True)
         d.setWindowModality(QtCore.Qt.WindowModal)
         d.setRange(0, step_count)
@@ -466,10 +468,10 @@ class QTUIEditorClient(editor_state.ClientAPI):
 
     def event_prolonged_action_update(self, active_client, message_id, step_number):
         d = self._progress_dialog
-        d.setLabelText(message_id)
+        d.setLabelText(res.strings[message_id])
         d.setValue(step_number)
 
-    def event_prolonged_action_complete(self, active_client, flags):
+    def event_prolonged_action_complete(self, active_client):
         d = self._progress_dialog
         # Trigger the auto-close behaviour.
         d.setValue(self._progress_dialog_steps)
@@ -550,6 +552,9 @@ class MainWindow(QtGui.QMainWindow):
         # "QThread: Destroyed while thread is still running"
         self.thread.stop()
         self.thread.wait()
+
+        # Needed to allow the script to exit (ensures the editor state worker thread is exited).
+        self.editor_state = None
 
         # Persist window layout.
         self._set_setting("window-geometry", self.saveGeometry())
@@ -1459,7 +1464,7 @@ class RowSelectionDialog(QtGui.QDialog):
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setVisible(False)
         table.horizontalHeader().setStretchLastSection(True)
-        table.setFont(window.list_table.font())
+        table.setFont(self.parent().list_table.font())
         # No selection of individual cells, but rather line specific selection.
         table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
         table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
@@ -1500,7 +1505,6 @@ def to_int(value):
 
 def _initialise_logging(window):
     def _ui_thread_logging(t):
-        global window
         timestamp, level_name, logger_name, message = t
         table = window.log_table
         model = window.log_model
@@ -1534,10 +1538,11 @@ def _initialise_logging(window):
     root_logger.debug("Logging redirected to standard output as inter-thread logging is slow.")
 
 
-if __name__ == '__main__':
+def run():
     app = QtGui.QApplication(sys.argv)
 
     window = MainWindow()
+    print "window", window
     # The window needs to be created so we can connect to its signal.
     _initialise_logging(window)
     window.show()
@@ -1567,3 +1572,5 @@ if __name__ == '__main__':
 
     sys.exit(app.exec_())
 
+if __name__ == '__main__':
+    run()

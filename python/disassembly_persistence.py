@@ -298,8 +298,11 @@ def convert_project_format_2_to_3(input_file):
     return output_file
 
 
-def load_project(f):
+def load_project(f, work_state=None):
     while True:
+        if work_state is not None and work_state.check_exit_update(0.1, "TEXT_CONVERTING_PROJECT_FILE"):
+            return None
+
         f.seek(0, os.SEEK_END)
         file_size = f.tell()
         f.seek(0, os.SEEK_SET)
@@ -327,6 +330,9 @@ def load_project(f):
 
     sourcedata_offset = sourcedata_length = None
     while f.tell() < file_size:
+        if work_state is not None and work_state.check_exit_update(0.1 + 0.8 * (file_size-f.tell()), "TEXT_READING_PROJECT_DATA"):
+            return None
+
         hunk_id = persistence.read_uint16(f)
         hunk_length = persistence.read_uint32(f)
         expected_hunk_version = CURRENT_HUNK_VERSIONS[hunk_id]
@@ -351,6 +357,9 @@ def load_project(f):
         if offsetN - offset0 != hunk_length:
             logger.error("load_project encountered hunk length mismatch, expected: %d, got: %d, hunk id: %d", hunk_length, offsetN - offset0, hunk_id)
             return None
+
+    if work_state is not None and work_state.check_exit_update(0.95 * (file_size-f.tell()), "TEXT_POSTPROCESSING"):
+        return None
 
     if sourcedata_offset is not None:
         logger.info("Caching input file segments from embedded source file.")

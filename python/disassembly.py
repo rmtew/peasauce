@@ -866,7 +866,7 @@ def get_uncertain_references_by_address(program_data, address):
 def set_uncertain_reference_modification_func(program_data, f):
     program_data.uncertain_reference_modification_func = f
 
-def set_data_type_at_address(program_data, address, data_type):
+def set_data_type_at_address(program_data, address, data_type, work_state=None):
     block, block_idx = lookup_block_by_address(program_data, address)
     # If the block is already the given data type, no need to do anything.
     block_data_type = get_block_data_type(block)
@@ -989,11 +989,16 @@ def _get_byte_representation(byte):
     else:
         return "$%X" % byte
 
-def _process_address_as_code(program_data, address, pending_symbol_addresses):
+def _process_address_as_code(program_data, address, pending_symbol_addresses, work_state=None):
     debug_offsets = set()
     disassembly_offsets = set([ address ])
     new_code_block_addresses = []
     while len(disassembly_offsets):
+        if work_state is not None:
+            extra_fraction = sum(block.length for block in new_code_block_addresses) / float(program_data.file_size) * 0.6
+            if work_state.check_exit_update(0.2 + extra_fraction, "TEXT_DISASSEMBLY_PASS"):
+                return None
+
         address = disassembly_offsets.pop()
         block, block_idx = lookup_block_by_address(program_data, address)
         block_data_type = get_block_data_type(block)
@@ -1171,8 +1176,8 @@ def save_project_file(save_file, program_data, save_options):
     return disassembly_persistence.save_project(save_file, program_data, save_options)
 
 
-def load_project_file(save_file, file_name):
-    program_data = disassembly_persistence.load_project(save_file)
+def load_project_file(save_file, file_name, work_state=None):
+    program_data = disassembly_persistence.load_project(save_file, work_state=work_state)
     if program_data is None:
         return None, 0
 
@@ -1192,13 +1197,16 @@ def load_project_file(save_file, file_name):
     return program_data, get_line_count(program_data)
 
 
-def load_file(input_file, new_options, file_name):
+def load_file(input_file, new_options, file_name, work_state=None):
     loader_options = None
     if new_options.is_binary_file:
         loader_options = loaderlib.BinaryFileOptions()
         loader_options.dis_name = new_options.dis_name
         loader_options.load_address = new_options.loader_load_address
         loader_options.entrypoint_offset = new_options.loader_entrypoint_offset
+
+    if work_state is not None and work_state.check_exit_update(0.1, "TEXT_ANALYSING_FILE"):
+        return None
 
     result = loaderlib.load_file(input_file, loader_options)
     if result is None:
@@ -1243,6 +1251,9 @@ def load_file(input_file, new_options, file_name):
 
     # Start disassembling.
     entrypoint_address = loaderlib.get_segment_address(segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
+
+    if work_state is not None and work_state.check_exit_update(0.2, "TEXT_ANALYSING_FILE"):
+        return None
 
     # Pass 1: Create a block for each of the segments.
     for segment_id in range(len(segments)):
@@ -1292,7 +1303,10 @@ def load_file(input_file, new_options, file_name):
     pending_symbol_addresses.add(entrypoint_address)
 
     # Follow the disassembly at the given address, as far as it takes us.
-    _process_address_as_code(program_data, entrypoint_address, pending_symbol_addresses)
+    _process_address_as_code(program_data, entrypoint_address, pending_symbol_addresses, work_state=work_state)
+
+    if work_state is not None and work_state.check_exit_update(0.9, "TEXT_POSTPROCESSING"):
+        return None
 
     # Split the blocks for existing symbols (so their label appears).
     for address in existing_symbol_addresses:
