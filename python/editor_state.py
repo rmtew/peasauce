@@ -24,6 +24,7 @@ reproducing the same logic.
 
 import os
 import types
+import threading
 import weakref
 
 import disassembly
@@ -65,7 +66,7 @@ RE_LABEL = re.compile("([a-zA-Z_]+[a-zA-Z0-9_\.]*)$")
 
 class ClientAPI(object):
     def __init__(self, owner):
-        self.owner = owner
+        self.owner_ref = weakref.ref(owner)
 
     def request_load_file(self):
         """
@@ -119,7 +120,10 @@ class ClientAPI(object):
             Returns False if not confirmed. """
         raise NotImplementedError
 
-    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback):
+    def event_tick(self, active_client):
+        raise NotImplementedError
+
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback):
         raise NotImplementedError
 
     def event_prolonged_action_update(self, active_client, description_msg_id, step_number):
@@ -137,11 +141,14 @@ class EditorState(object):
     STATE_LOADING = 1
     STATE_LOADED = 2
 
-    _load_call_proxy_func = None
-
     def __init__(self):
+        self.worker_thread = WorkerThread()
         self.clients = weakref.WeakSet()
         self.reset_state(None)
+
+    def __del__(self):
+        # A worker thread which has been used, will have self-references to keep it alive.  This will clean up those.
+        self.worker_thread.stop()
 
     def register_client(self, client):
         self.clients.add(client)
@@ -167,6 +174,28 @@ class EditorState(object):
 
         # Finally, reset the state.
         self.state_id = EditorState.STATE_INITIAL
+
+    def _prolonged_action(self, acting_client, title_msg_id, description_msg_id, f, *args, **kwargs):
+        # Remove keywork arguments meant to customise the call.
+        step_count = kwargs.pop("step_count", 1)
+        can_cancel = kwargs.pop("can_cancel", True)
+        cancellations = []
+        def cancel_callback():
+            cancellations.append(None)
+        # Notify clients the action is starting.
+        for client in self.clients:
+            client.event_prolonged_action(client is acting_client, title_msg_id, description_msg_id, can_cancel, step_count, cancel_callback)
+        # ...
+        completed_event = self.worker_thread.add_work(f, *args, **kwargs)
+        while not completed_event.wait(0.1) and not len(cancellations):
+            for client in self.clients:
+                client.event_tick(client is acting_client)
+        # Notify clients the action is completed.
+        for client in self.clients:
+            client.event_prolonged_action_complete(client is acting_client, 0)
+        if completed_event.is_set():
+            return completed_event.result
+        return None
 
     def _address_to_string(self, address):
         # TODO: Make it disassembly specific e.g. $address, 0xaddress
@@ -331,8 +360,8 @@ class EditorState(object):
         self.set_line_number(acting_client, new_line_idx)
 
     def goto_next_data_block(self, acting_client):
-        line_idx = self.get_line_number()
-        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
+        line_idx = self.get_line_number(acting_client)
+        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, 1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
@@ -426,33 +455,9 @@ class EditorState(object):
         self._set_data_type(acting_client, address, disassembly.DATA_TYPE_ASCII)
 
     def _set_data_type(self, acting_client, address, data_type):
-        for client in self.clients:
-            client.event_prolonged_action(client is acting_client, "TEXT_CHANGING_DATA_TYPE", "TEXT_PROCESSING", 1, None)
-        disassembly.set_data_type_at_address(self.disassembly_data, address, data_type)
-        for client in self.clients:
-            client.event_prolonged_action_complete(client is acting_client, 0)
+        self._prolonged_action(acting_client, "TEXT_CHANGING_DATA_TYPE", "TEXT_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
 
-    if False:
-        def set_load_call_proxy_func(self, func):
-            self._load_call_proxy_func = weakref.ref(func.im_self), func.__name__
-
-        def _get_load_call_proxy_func(self):
-            f = None
-            if self._load_call_proxy_func is not None:
-                object_ref, func_name = self._load_call_proxy_func
-                ob = object_ref()
-                if ob is not None:
-                    f = getattr(ob, func_name)
-            if f is None:
-                def f(g, *args, **kwargs):
-                    return g(*args, **kwargs)
-            return f
-
-    def load_file(self, acting_client, load_call_proxy=None, abort_callback=None):
-        if True:
-            if load_call_proxy is None:
-                def load_call_proxy(g, *args, **kwargs):
-                    return g(*args, **kwargs)
+    def load_file(self, acting_client):
         self.reset_state(acting_client)
 
         # Request a file name to load.
@@ -469,12 +474,7 @@ class EditorState(object):
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
 
         if is_saved_project:
-            for client in self.clients:
-                client.event_prolonged_action(client is acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", 1, abort_callback)
-            result = load_call_proxy(disassembly.load_project_file, load_file, file_name)
-            #result = self._get_load_call_proxy_func(disassembly.load_project_file, load_file, file_name)
-            for client in self.clients:
-                client.event_prolonged_action_complete(client is acting_client, 0)
+            result = self._prolonged_action(acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", disassembly.load_project_file, load_file, file_name)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
             identify_result = loaderlib.identify_file(load_file)
@@ -497,12 +497,7 @@ class EditorState(object):
                 self.reset_state(acting_client)
                 return new_option_result
 
-            for client in self.clients:
-                client.event_prolonged_action(client is acting_client, "TEXT_LOADING_FILE", "TEXT_LOADING", 1, abort_callback)
-            result = load_call_proxy(disassembly.load_file, load_file, new_option_result, file_name)
-            #result = self._get_load_call_proxy_func(disassembly.load_file, load_file, new_option_result, file_name)
-            for client in self.clients:
-                client.event_prolonged_action_complete(client is acting_client, 0)
+            result = self._prolonged_action(acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
 
         # Loading was cancelled.
         if result is None:
@@ -600,4 +595,63 @@ class EditorState(object):
                     save_file.write(operands_text)
                 save_file.write("\n")
             save_file.close()
+
+
+class WorkerThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        super(WorkerThread, self).__init__(*args, **kwargs)
+
+        self.lock = threading.RLock()
+        self.condition = threading.Condition(self.lock)
+
+        self.quit = False
+        self.work_data = None
+
+    def stop(self):
+        self.lock.acquire()
+        self.quit = True
+        self.work_data = None
+        self.condition.notify()
+        self.lock.release()
+        #self.wait() # Wait until thread execution has finished.
+
+    def add_work(self, _callable, *_args, **_kwargs):
+        self.lock.acquire()
+        completed_event = threading.Event()
+        completed_event.result = None
+        self.work_data = _callable, _args, _kwargs, completed_event
+ 
+        if not self.is_alive():
+            self.start()
+        else:
+            self.condition.notify()
+        self.lock.release()
+        return completed_event
+
+    def run(self):
+        self.lock.acquire()
+        work_data = self.work_data
+        self.work_data = None
+        self.lock.release()
+
+        while not self.quit:
+            completed_event = work_data[3]
+            try:
+                try:
+                    completed_event.result = work_data[0](*work_data[1], **work_data[2])
+                except Exception:
+                    traceback.print_stack()
+                    raise
+            except SystemExit:
+                traceback.print_exc()
+                raise
+            work_data = None
+
+            self.lock.acquire()
+            completed_event.set()
+            # Wait for the next piece of work.
+            self.condition.wait()
+            work_data = self.work_data
+            self.work_data = None
+            self.lock.release()
 

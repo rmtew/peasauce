@@ -47,6 +47,9 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
 
+    def tearDown(self):
+        self.toolapiob = None
+
     def test_upgrade_v2_to_vCURRENT(self):
         if "TESTDATA_PATH" not in os.environ:
             self.fail("TESTDATA_PATH environment variable required")
@@ -71,6 +74,9 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
 class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
+
+    def tearDown(self):
+        self.toolapiob = None
 
     @unittest.expectedFailure
     def test_bug_monam302_00004_reference(self):
@@ -99,6 +105,9 @@ class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
 class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
+
+    def tearDown(self):
+        self.toolapiob = None
 
     def test_bug_conqueror_4e0f6_data_to_code_leak_4e144_data_reference(self):
         FILE_NAME = "samples/amiga-binary/conqueror-game-load21000-entrypoint57B8A"
@@ -191,6 +200,8 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def tearDown(self):
         self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = disassembly
+        self.editor_state = None
+        self.editor_client = None
 
     def test_leading_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []

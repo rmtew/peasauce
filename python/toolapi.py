@@ -38,19 +38,19 @@ class ToolEditorClient(editor_state.ClientAPI):
     _goto_address_value = None
 
     def reset_state(self):
-        self.owner.reset_state()
+        self.owner_ref().reset_state()
 
     def request_load_file(self):
         # Offers the user a chance to load a file.
         # Returns None if user aborted.
         # Returns the file object on success.
-        file_path = self.owner.get_file_path()
+        file_path = self.owner_ref().get_file_path()
         if file_path is None or not os.path.isfile(file_path):
             return ERRMSG_FILE_DOES_NOT_EXIST
         return open(file_path, "rb"), file_path
 
     def get_load_file(self):
-        file_path = self.owner.get_file_path()
+        file_path = self.owner_ref().get_file_path()
         return open(file_path, "rb")
 
     def request_new_project_option_values(self, new_options):
@@ -59,14 +59,15 @@ class ToolEditorClient(editor_state.ClientAPI):
         return new_options
 
     def request_load_project_option_values(self, load_options):
-        load_options.loader_file_path = self.owner.get_input_file_path()
+        load_options.loader_file_path = self.owner_ref().get_input_file_path()
         return load_options
 
     def request_address(self, address):
         return self._goto_address_value
 
     # These can be ignored, as we have no GUI.
-    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback): pass
+    def event_tick(self, active_client): pass
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback): pass
     def event_prolonged_action_update(self, active_client, description_msg_id, step_number): pass
     def event_prolonged_action_complete(self, active_client, flags): pass
     def event_load_successful(self, active_client): pass

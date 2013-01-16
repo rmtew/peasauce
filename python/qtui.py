@@ -359,12 +359,12 @@ class QTUIEditorClient(editor_state.ClientAPI):
     def reset_state(self):
         # TODO: owner.reset_all() or just owner.reset_state()
         self.file_path = None
-        self.owner.reset_state()
+        self.owner_ref().reset_state()
 
     def request_load_file(self):
         # Request the user select a file.
         options = QtGui.QFileDialog.Options()
-        file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self.owner, "Select a file to disassemble", options=options)
+        file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self.owner_ref(), "Select a file to disassemble", options=options)
         if not len(file_path):
             return
         # Cover the case of a command-line startup with a current directory file name.
@@ -378,22 +378,22 @@ class QTUIEditorClient(editor_state.ClientAPI):
         return open(self.file_path, "rb")
 
     def request_new_project_option_values(self, options):
-        result = NewProjectDialog(options, self.file_path, self.owner).exec_()
+        result = NewProjectDialog(options, self.file_path, self.owner_ref()).exec_()
         if result != QtGui.QDialog.Accepted:
             return ERRMSG_BAD_NEW_PROJECT_OPTIONS
         return options
 
     def request_load_project_option_values(self, load_options):
-        result = LoadProjectDialog(load_options, self.file_path, self.owner).exec_()
+        result = LoadProjectDialog(load_options, self.file_path, self.owner_ref()).exec_()
         # if result == QtGui.QDialog.Accepted:
         return load_options
 
     def request_save_project_option_values(self, save_options):
         options = QtGui.QFileDialog.Options()
-        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner, caption="Save to...", filter=PROJECT_FILTER, options=options)
+        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner_ref(), caption="Save to...", filter=PROJECT_FILTER, options=options)
         if not len(save_file_path):
             return
-        result = SaveProjectDialog(save_options, save_file_path, self.owner).exec_()
+        result = SaveProjectDialog(save_options, save_file_path, self.owner_ref()).exec_()
         if result != QtGui.QDialog.Accepted:
             return
         save_options.save_file_path = save_file_path
@@ -401,12 +401,12 @@ class QTUIEditorClient(editor_state.ClientAPI):
 
     def request_code_save_file(self):
         options = QtGui.QFileDialog.Options()
-        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner, caption="Export source code to...", filter=SOURCE_CODE_FILTER, options=options)
+        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner_ref(), caption="Export source code to...", filter=SOURCE_CODE_FILTER, options=options)
         if len(save_file_path):
             return open(save_file_path, "wb")
 
     def request_address(self, default_address):
-        text, ok = QtGui.QInputDialog.getText(self.owner, "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
         text = text.strip()
         if ok and text != '':
             if text.startswith("0x") or text.startswith("$"):
@@ -419,29 +419,35 @@ class QTUIEditorClient(editor_state.ClientAPI):
         For now just show a dialog that allows the user to select the given addresses.
         Instructions to click on an address to select it, scrollable list of addresses, cancel button.
         """
-        dialog = RowSelectionDialog(self.owner, title_text, body_text, button_text, address_rows, row_keys)
+        dialog = RowSelectionDialog(self.owner_ref(), title_text, body_text, button_text, address_rows, row_keys)
         ret = dialog.exec_()
         if ret == 1:
             return dialog.selection_key
         return False
 
     def request_label_name(self, default_label_name):
-        text, ok = QtGui.QInputDialog.getText(self.owner, "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
         text = text.strip()
         if ok and text != default_label_name:
             return text
 
     def request_confirmation(self, title, text):
-        ret = QtGui.QMessageBox.question(self.owner, title, text, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
+        ret = QtGui.QMessageBox.question(self.owner_ref(), title, text, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
         return ret == QtGui.QMessageBox.Ok
 
-    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, step_count, abort_callback):
+    def event_tick(self, active_client):
+        QtGui.qApp.processEvents()
+
+    def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback):
         # Display a modal dialog.
-        self._progress_dialog = QtGui.QProgressDialog(self.owner)
+        self._progress_dialog = QtGui.QProgressDialog(self.owner_ref())
         self._progress_dialog_steps = step_count
 
         d = self._progress_dialog
-        d.setCancelButtonText("&Cancel")
+        if can_cancel:
+            d.setCancelButtonText("&Cancel")
+        else:
+            d.setCancelButtonText("")
         d.setWindowTitle(title_msg_id)
         d.setLabelText(description_msg_id)
         d.setAutoClose(True)
@@ -473,7 +479,7 @@ class QTUIEditorClient(editor_state.ClientAPI):
 
     def event_load_successful(self, active_client):
         if not active_client:
-            self.owner.on_file_opened()
+            self.owner_ref().on_file_opened()
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -942,32 +948,7 @@ class MainWindow(QtGui.QMainWindow):
         return self._settings.get(setting_name, default_value)
 
     def attempt_open_file(self, file_path=None):
-        class Result(object):
-            done = False
-            value = None
-        local_result = Result()
-
-        def on_work_complete(work_result):
-            self.thread.result.disconnect(on_work_complete)
-            local_result.value = work_result
-            local_result.done = True
-
-        def load_call_proxy(f, input_file, *args, **kwargs):
-            # Start the loading on the worker thread.
-            self.thread.result.connect(on_work_complete)
-            self.thread.add_work(f, input_file, *args, **kwargs)
-
-            while not local_result.done:
-                QtGui.qApp.processEvents()
-            return local_result.value
-
-        def abort_callback():
-            self.thread.result.disconnect(on_work_complete)
-            local_result.done = True
-
-        # TODO: Move this to the initialisation level.
-        #self.editor_state.set_load_call_proxy_func(load_call_proxy) / 0
-        result = self.editor_state.load_file(self.editor_client, load_call_proxy=load_call_proxy, abort_callback=abort_callback)
+        result = self.editor_state.load_file(self.editor_client)
         # Cancelled?
         if result is None:
             return
