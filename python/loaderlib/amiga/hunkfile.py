@@ -191,12 +191,12 @@ def load_hunk_file(file_info, data_types, f):
             elif hunk_id == HUNK_SYMBOL:
                 symbol_name = _read_hunk_string(file_info, data_types, f)
                 while symbol_name:
-                    symbol_value = structures.read_uint32(f)
+                    symbol_value = data_types.uint32(f.read(4))
                     symbols.append((symbol_value, symbol_name, False))
                     symbol_name = _read_hunk_string(file_info, data_types, f)
             elif hunk_id == HUNK_DEBUG:
                 # Skip this information.  Handling is lower in this file.
-                num_longwords = structures.read_uint32(f)
+                num_longwords = data_types.uint32(f.read(4))
                 f.seek(4 * num_longwords, os.SEEK_CUR)
             elif hunk_id == HUNK_NAME:
                 # Optional.  Hunks with the same name are combined.

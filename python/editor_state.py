@@ -33,18 +33,9 @@ import loaderlib
 import util
 
 
-TEXT_LOAD_INPUT_FILE_TITLE = "Input file not included"
-TEXT_LOAD_INPUT_FILE_BODY = "The save-file cannot be loaded unless you locate and provide the input file which was originally disassembled.  Do you wish to proceed?"
-
 TEXT_SELECT_REFERRING_ADDRESS_SHORT = "Go to which referring address?"
 TEXT_SELECT_REFERRING_ADDRESS_LONG = "Select on the following and press the enter key, or click on the button, to jump to the given referring address."
 TEXT_GO_TO_SELECTION = "Go to selection"
-
-TEXT_CHANGING_DATA_TYPE = "Changing data type"
-TEXT_PROCESSING = "Processing"
-TEXT_LOADING_FILE = "TEXT_LOADING_FILE"
-TEXT_LOADING = "TEXT_LOADING"
-TEXT_LOADING_PROJECT = "TEXT_LOADING_PROJECT"
 
 ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT = "The file does not appear to be a supported executable file format."
 ERRMSG_NO_IDENTIFIABLE_DESTINATION = "Nowhere to go."
@@ -112,12 +103,6 @@ class ClientAPI(object):
         """ Prompts the user with a list of addresses (strings), which they can select one of.
             Returns None if cancel chosen.
             Returns the selected address otherwise. """
-        raise NotImplementedError
-
-    def request_confirmation(self, title, text):
-        """ Prompt the user to confirm a choice.
-            Returns True if confirmed.
-            Returns False if not confirmed. """
         raise NotImplementedError
 
     def event_tick(self, active_client):
@@ -475,7 +460,7 @@ class EditorState(object):
         self._set_data_type(acting_client, address, disassembly.DATA_TYPE_ASCII)
 
     def _set_data_type(self, acting_client, address, data_type):
-        self._prolonged_action(acting_client, "TEXT_DATA_TYPE_CHANGE", "TEXT_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
+        self._prolonged_action(acting_client, "TITLE_DATA_TYPE_CHANGE", "TEXT_GENERIC_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
 
     def load_file(self, acting_client):
         self.reset_state(acting_client)
@@ -494,7 +479,7 @@ class EditorState(object):
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
 
         if is_saved_project:
-            result = self._prolonged_action(acting_client, "TEXT_LOADING_PROJECT", "TEXT_LOADING", disassembly.load_project_file, load_file, file_name)
+            result = self._prolonged_action(acting_client, "TITLE_LOADING_PROJECT", "TEXT_GENERIC_LOADING", disassembly.load_project_file, load_file, file_name)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
             identify_result = loaderlib.identify_file(load_file)
@@ -517,7 +502,7 @@ class EditorState(object):
                 self.reset_state(acting_client)
                 return new_option_result
 
-            result = self._prolonged_action(acting_client, "TEXT_LOADING_FILE", "TEXT_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
+            result = self._prolonged_action(acting_client, "TITLE_LOADING_FILE", "TEXT_GENERIC_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
 
         # Loading was cancelled.
         if result is None:
@@ -543,12 +528,6 @@ class EditorState(object):
                 # Parameters received out, our "return values".
                 load_options.loader_file_path = None
                 load_options = acting_client.request_load_project_option_values(load_options)
-
-                if False: # Clean up this and dependencies.
-                    # Inform the user of the purpose of the next file dialog.
-                    if not acting_client.request_confirmation(TEXT_LOAD_INPUT_FILE_TITLE, TEXT_LOAD_INPUT_FILE_BODY):
-                        self.reset_state(acting_client)
-                        return None
 
                 if load_options.loader_file_path is None:
                     self.reset_state(acting_client)

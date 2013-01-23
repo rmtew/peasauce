@@ -433,9 +433,11 @@ class QTUIEditorClient(editor_state.ClientAPI):
         if ok and text != default_label_name:
             return text
 
-    def request_confirmation(self, title, text):
-        ret = QtGui.QMessageBox.question(self.owner_ref(), title, text, QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
+    """
+    def request_confirmation(self, title_msg_id, text_msg_id):
+        ret = QtGui.QMessageBox.question(self.owner_ref(), res.strings[title_msg_id], res.strings[text_msg_id], QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
         return ret == QtGui.QMessageBox.Ok
+    """
 
     def event_tick(self, active_client):
         QtGui.qApp.processEvents()
@@ -913,18 +915,14 @@ class MainWindow(QtGui.QMainWindow):
         if not other:
             logger.debug("scroll_to_line line=%d", new_line_idx)
         index = self.list_model.index(new_line_idx, 2, QtCore.QModelIndex())
-        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
+        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Select)
         self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
         next_line_number = self.editor_state.get_line_number_for_address(self.editor_client, address)
         if next_line_number is not None:
-            #self.list_table.selectRow(next_line_number)
             self.scroll_to_line(next_line_number)
-            #index = self.list_model.index(next_line_number, 2, QtCore.QModelIndex())
-            #self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
-            #self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
             logger.info("view push symbol going to address %06X / line number %d." % (address, next_line_number))
         else:
             logger.error("view push symbol for address %06X unable to resolve line number." % address)
@@ -1128,6 +1126,9 @@ def _set_default_font(widget):
 
 
 class LoadProjectDialog(QtGui.QDialog):
+    """
+    Dialog shown when the user loads an existing saved project.
+    """
     def __init__(self, load_options, file_path, parent=None):
         super(LoadProjectDialog, self).__init__(parent)
 
@@ -1274,6 +1275,9 @@ class LoadProjectDialog(QtGui.QDialog):
         return super(LoadProjectDialog, self).accept()
 
 class SaveProjectDialog(QtGui.QDialog):
+    """
+    Dialog shown when the user saves the currently loaded project.
+    """
     def __init__(self, save_options, file_path, parent=None):
         super(SaveProjectDialog, self).__init__(parent)
 
@@ -1308,6 +1312,9 @@ class SaveProjectDialog(QtGui.QDialog):
 
 
 class NewProjectDialog(QtGui.QDialog):
+    """
+    Dialog shown when the user loads a file for disassembling (not a saved project).
+    """
     def __init__(self, new_options, file_path, parent=None):
         super(NewProjectDialog, self).__init__(parent)
 
@@ -1385,8 +1392,8 @@ class NewProjectDialog(QtGui.QDialog):
 
         ## Buttons layout.
         create_button = QtGui.QPushButton("Create")
-        cancel_button = QtGui.QPushButton("Cancel")
         create_button.clicked.connect(self.accept)
+        cancel_button = QtGui.QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
 
         buttons_layout = QtGui.QHBoxLayout()
@@ -1475,8 +1482,8 @@ class RowSelectionDialog(QtGui.QDialog):
         table.horizontalHeader().setStretchLastSection(True)
         # Ensure the first row is selected.
         index = self.table_model.index(0, 0, QtCore.QModelIndex())
-        table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.NoUpdate)
         table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+        table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Select)
 
         button_widget = QtGui.QPushButton(button_text, self)
         self.connect(button_widget, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
@@ -1542,7 +1549,6 @@ def run():
     app = QtGui.QApplication(sys.argv)
 
     window = MainWindow()
-    print "window", window
     # The window needs to be created so we can connect to its signal.
     _initialise_logging(window)
     window.show()

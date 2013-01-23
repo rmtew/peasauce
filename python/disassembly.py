@@ -996,7 +996,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
     while len(disassembly_offsets):
         if work_state is not None:
             extra_fraction = sum(block.length for block in new_code_block_addresses) / float(program_data.file_size) * 0.6
-            if work_state.check_exit_update(0.2 + extra_fraction, "TEXT_DISASSEMBLY_PASS"):
+            if work_state.check_exit_update(0.2 + extra_fraction, "TEXT_LOAD_DISASSEMBLY_PASS"):
                 return None
 
         address = disassembly_offsets.pop()
@@ -1205,7 +1205,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
         loader_options.load_address = new_options.loader_load_address
         loader_options.entrypoint_offset = new_options.loader_entrypoint_offset
 
-    if work_state is not None and work_state.check_exit_update(0.1, "TEXT_ANALYSING_FILE"):
+    if work_state is not None and work_state.check_exit_update(0.1, "TEXT_LOAD_ANALYSING_FILE"):
         return None
 
     result = loaderlib.load_file(input_file, loader_options)
@@ -1252,7 +1252,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
     # Start disassembling.
     entrypoint_address = loaderlib.get_segment_address(segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
 
-    if work_state is not None and work_state.check_exit_update(0.2, "TEXT_ANALYSING_FILE"):
+    if work_state is not None and work_state.check_exit_update(0.2, "TEXT_LOAD_ANALYSING_FILE"):
         return None
 
     # Pass 1: Create a block for each of the segments.
@@ -1305,7 +1305,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
     # Follow the disassembly at the given address, as far as it takes us.
     _process_address_as_code(program_data, entrypoint_address, pending_symbol_addresses, work_state=work_state)
 
-    if work_state is not None and work_state.check_exit_update(0.9, "TEXT_POSTPROCESSING"):
+    if work_state is not None and work_state.check_exit_update(0.9, "TEXT_LOAD_POSTPROCESSING"):
         return None
 
     # Split the blocks for existing symbols (so their label appears).

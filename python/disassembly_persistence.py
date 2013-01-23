@@ -300,7 +300,7 @@ def convert_project_format_2_to_3(input_file):
 
 def load_project(f, work_state=None):
     while True:
-        if work_state is not None and work_state.check_exit_update(0.1, "TEXT_CONVERTING_PROJECT_FILE"):
+        if work_state is not None and work_state.check_exit_update(0.1, "TEXT_LOAD_CONVERTING_PROJECT_FILE"):
             return None
 
         f.seek(0, os.SEEK_END)
@@ -330,7 +330,7 @@ def load_project(f, work_state=None):
 
     sourcedata_offset = sourcedata_length = None
     while f.tell() < file_size:
-        if work_state is not None and work_state.check_exit_update(0.1 + 0.8 * (file_size-f.tell()), "TEXT_READING_PROJECT_DATA"):
+        if work_state is not None and work_state.check_exit_update(0.1 + 0.8 * (file_size-f.tell()), "TEXT_LOAD_READING_PROJECT_DATA"):
             return None
 
         hunk_id = persistence.read_uint16(f)
@@ -358,7 +358,7 @@ def load_project(f, work_state=None):
             logger.error("load_project encountered hunk length mismatch, expected: %d, got: %d, hunk id: %d", hunk_length, offsetN - offset0, hunk_id)
             return None
 
-    if work_state is not None and work_state.check_exit_update(0.95 * (file_size-f.tell()), "TEXT_POSTPROCESSING"):
+    if work_state is not None and work_state.check_exit_update(0.95 * (file_size-f.tell()), "TEXT_LOAD_POSTPROCESSING"):
         return None
 
     if sourcedata_offset is not None:
