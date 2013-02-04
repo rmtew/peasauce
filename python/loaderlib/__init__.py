@@ -46,18 +46,18 @@ def get_system_data_types(system_name):
     system = systems_by_name[system_name]
     return DataTypes(system.big_endian)
  
-def load_file(input_file, loader_options=None):
+def load_file(input_file, loader_options=None, file_offset=0, file_length=None):
     for system_name, system in systems_by_name.iteritems():
         file_info = FileInfo(system, loader_options)
         data_types = get_system_data_types(system_name)
-        if system.load_input_file(input_file, file_info, data_types):
+        if system.load_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length):
             return file_info, data_types
 
-def identify_file(input_file):
+def identify_file(input_file, file_offset=0, file_length=None):
     for system_name, system in systems_by_name.iteritems():
         file_info = FileInfo(system)
         data_types = get_system_data_types(system_name)
-        filetype_name = system.identify_input_file(input_file, file_info, data_types)
+        filetype_name = system.identify_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length)
         if filetype_name is not None:
             result = {}
             result["processor"] = system.get_arch_name()

@@ -70,6 +70,7 @@ class ToolEditorClient(editor_state.ClientAPI):
     def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback): pass
     def event_prolonged_action_update(self, active_client, description_msg_id, step_number): pass
     def event_prolonged_action_complete(self, active_client): pass
+    def event_load_start(self, active_client, file_path): pass
     def event_load_successful(self, active_client): pass
 
 

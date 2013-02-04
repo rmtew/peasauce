@@ -104,26 +104,27 @@ class HunkFile(object):
     _hunk_segments = None
 
 
-def identify_input_file(input_file, file_info, data_types):
-    if load_hunk_file(file_info, data_types, input_file):
+def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
+    if load_hunk_file(file_info, data_types, input_file, f_offset, f_length):
         return "Amiga hunk-based executable"
 
-def load_input_file(input_file, file_info, data_types):
-    return load_hunk_file(file_info, data_types, input_file)
+def load_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
+    return load_hunk_file(file_info, data_types, input_file, f_offset, f_length)
 
-def load_hunk_file(file_info, data_types, f):
+def load_hunk_file(file_info, data_types, f, file_offset, file_length):
     data = HunkFile()
 
-    f.seek(0, os.SEEK_SET)
+    f.seek(file_offset, os.SEEK_SET)
     hunk_id = data_types.uint32(f.read(4))
     if hunk_id != HUNK_HEADER:
         logger.debug("amiga/hunkfile.py: _process_file: Unrecognised file.")
         return False
 
-    file_offset = f.tell()
-    f.seek(0, os.SEEK_END)
-    file_length = f.tell()
-    f.seek(file_offset, os.SEEK_SET)
+    if file_length is None:
+        file_offset2 = f.tell()
+        f.seek(0, os.SEEK_END)
+        file_length = f.tell()
+        f.seek(file_offset2, os.SEEK_SET)
 
     # OS actually fails loading executables if this doesn't just read a NULL longword.
     data._resident_library_names = _read_hunk_strings(file_info, data_types, f)
@@ -144,7 +145,7 @@ def load_hunk_file(file_info, data_types, f):
 
     # Read in segments.
     l = []
-    while f.tell() != file_length:
+    while f.tell() - file_offset != file_length:
         longword = data_types.uint32(f.read(4))
         # This should be the same as the header segment slot.  The header slot is what is used for the allocations, in any case.
         segment_memory_flags = longword & 0xE0000000
@@ -152,7 +153,7 @@ def load_hunk_file(file_info, data_types, f):
         data_length = data_types.uint32(f.read(4)) * 4
 
         if segment_hunk_id == HUNK_CODE or segment_hunk_id == HUNK_DATA:
-            data_offset = f.tell()
+            data_offset = f.tell() - file_offset
             f.seek(data_length, os.SEEK_CUR)
         elif segment_hunk_id == HUNK_BSS:
             data_offset = -1
@@ -186,7 +187,7 @@ def load_hunk_file(file_info, data_types, f):
                         offset_count -= 1
                     offset_count = data_types.uint16(f.read(2))
                     relocations.append((target_hunk_id, offsets))
-                if f.tell() & 2:
+                if f.tell() - file_offset & 2:
                     f.seek(2, os.SEEK_CUR)
             elif hunk_id == HUNK_SYMBOL:
                 symbol_name = _read_hunk_string(file_info, data_types, f)

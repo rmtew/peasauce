@@ -25,6 +25,7 @@ reproducing the same logic.
 import os
 import types
 import threading
+import traceback
 import weakref
 
 import disassembly
@@ -52,7 +53,7 @@ ERRMSG_TODO_BAD_STATE_FUNCTIONALITY = "TODO: Work out you can do this in the cur
 
 import re
 
-RE_LABEL = re.compile("([a-zA-Z_]+[a-zA-Z0-9_\.]*)$")
+RE_LABEL = re.compile("([\.]*[a-zA-Z_]+[a-zA-Z0-9_\.]*)$")
 
 
 class ClientAPI(object):
@@ -115,6 +116,9 @@ class ClientAPI(object):
         raise NotImplementedError
 
     def event_prolonged_action_complete(self, active_client):
+        raise NotImplementedError
+
+    def event_load_start(self, active_client, file_path):
         raise NotImplementedError
 
     def event_load_successful(self, active_client):
@@ -477,6 +481,9 @@ class EditorState(object):
         self.state_id = EditorState.STATE_LOADING
         file_name = os.path.basename(file_path)
         is_saved_project = disassembly_persistence.check_is_project_file(load_file)
+
+        for client in self.clients:
+            client.event_load_start(client is acting_client, file_path)
 
         if is_saved_project:
             result = self._prolonged_action(acting_client, "TITLE_LOADING_PROJECT", "TEXT_GENERIC_LOADING", disassembly.load_project_file, load_file, file_name)

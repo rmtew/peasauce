@@ -172,13 +172,16 @@ def get_code_block_info_for_line_number(program_data, line_number):
 
             # Exactly this instruction.
             if line_number == line_count:
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, hex(current_result[0]))
+                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (code)", line_number, line_count, hex(current_result[0]))
                 return current_result
 
             previous_result = current_result
             bytes_used += entry.num_bytes
             line_count += calculate_match_line_count(program_data, entry)
         elif type_id in (SLD_COMMENT_FULL_LINE, SLD_EQU_LOCATION_RELATIVE):
+            if line_number == line_count:
+                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (comment/location-relative)", line_number, line_count, hex(base_address + entry))
+                return base_address + entry, previous_result[1]
             line_count += 1
     # Within but not at the start of the previous instruction.
     if line_number < line_count:
@@ -896,7 +899,7 @@ def set_data_type_at_address(program_data, address, data_type, work_state=None):
         block_idx_local = original_block_idx
         while block_idx_local < len(program_data.blocks):
             affected_block = program_data.blocks[block_idx_local]
-            if affected_block.address < original_block_address or affected_block.address > original_block_address + original_block_length:
+            if affected_block.address < original_block_address or affected_block.address >= original_block_address + original_block_length:
                 break
             affected_blocks.add(affected_block)
             block_idx_local += 1

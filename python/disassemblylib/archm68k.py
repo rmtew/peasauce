@@ -811,7 +811,7 @@ def _decode_operand(data, data_idx, operand_idx, M, T):
             if base_displacement is None: # Disassembly failure.
                 return None
             # TODO: Finish implementation.
-            logger.debug("Skipping full extension word for instruction '%s'", M.specification.key)
+            logger.debug("%X: Skipping full extension word for instruction '%s'", M.pc-2, M.specification.key)
             return None
             # raise RuntimeError("Full displacement incomplete", M.specification.key)
         else:
@@ -1003,23 +1003,28 @@ def get_match_addresses(match):
     # Given a branch/jump address, have we seen it before?
     # Given a branch/jump address, should it be queued?
     # Given a branch/jump address, should it be done next?
+    def _extract_address(match, opcode_idx):
+        opcode = match.opcodes[opcode_idx]
+        if opcode.key == "PCid16":
+            return match.pc + _signed_value("W", opcode.vars["D16"]) # JSR, JMP?
+        elif opcode.key == "PCiId8":
+            return match.pc + _signed_value("W", opcode.vars["D8"]) # JSR, JMP?
+        elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
+            return opcode.vars["xxx"]
+        elif opcode.specification.key == "DISPLACEMENT": # JMP
+            return match.pc + opcode.vars["xxx"]
+        return None
+
     address = None
-    instruction_key = match.specification.key[:3]
+    instruction_key = match.specification.key
     if instruction_key in ("RTS", "RTR"):
         pass
-    elif instruction_key in ("JMP", "BRA"):
-        if match.opcodes[0].key in ("AbsW", "AbsL"):
-            address = match.opcodes[0].vars["xxx"]
-        elif match.opcodes[0].specification.key == "DISPLACEMENT":
-            address = match.pc + match.opcodes[0].vars["xxx"]
-    elif instruction_key == "JSR":
-        if match.opcodes[0].key in ("AbsL", "AbsW"):
-            address = match.opcodes[0].vars["xxx"]
-    elif instruction_key == "BSR":
+    elif instruction_key in ("JSR", "JMP"):
+        address = _extract_address(match, 0)
+    elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
         address = match.pc + match.opcodes[0].vars["xxx"]
-    elif instruction_key in ("Bcc", "DBc"):
-        opcode_idx = 0 if instruction_key == "Bcc" else 1
-        address = match.pc + match.opcodes[opcode_idx].vars["xxx"]
+    elif instruction_key == "DBcc":
+        address = match.pc + match.opcodes[1].vars["xxx"]
 
     ret = {}
     if address is not None:
@@ -1056,8 +1061,7 @@ def get_match_addresses(match):
     return ret
 
 def is_final_instruction(match):
-    instruction_key = match.specification.key[:3]
-    return instruction_key in ("RTS", "RTR", "JMP", "BRA")
+    return match.specification.key in ("RTS", "RTR", "JMP", "BRA")
 
 def is_big_endian():
     return True

@@ -347,7 +347,8 @@ def load_project(f, work_state=None):
         elif SAVEFILE_HUNK_SOURCEDATAINFO == hunk_id:
             load_sourcedatainfo_hunk(f, program_data)
         elif SAVEFILE_HUNK_SOURCEDATA == hunk_id:
-            sourcedata_offset, sourcedata_length = offset0, hunk_length
+            skip_bytes = (f.tell() - offset0)
+            sourcedata_offset, sourcedata_length = offset0 + skip_bytes, hunk_length - skip_bytes 
             f.seek(sourcedata_length, os.SEEK_CUR)
         else:
             logger.error("load_project encountered unknown hunk, with id: %d", hunk_id)
@@ -366,6 +367,11 @@ def load_project(f, work_state=None):
         segments = program_data.loader_segments
         for i in range(len(segments)):
             loaderlib.cache_segment_data(f, segments, i, sourcedata_offset)
+        # Avoid doing relocations if there weren't any.   e.g. binary files.
+        if len(program_data.loader_relocatable_addresses):
+            logger.info("Re-extracting relocations from embedded source file.")
+            file_info, data_types = loaderlib.load_file(f, None, file_offset=sourcedata_offset, file_length=sourcedata_length)
+            loaderlib.relocate_segment_data(segments, data_types, file_info.relocations_by_segment_id, program_data.loader_relocatable_addresses, program_data.loader_relocated_addresses)
         program_data.input_file_cached = True
 
     logger.info("Project loaded")

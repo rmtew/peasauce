@@ -425,7 +425,6 @@ class QTUIEditorClient(editor_state.ClientAPI):
         ret = dialog.exec_()
         if ret == 1:
             return dialog.selection_key
-        return False
 
     def request_label_name(self, default_label_name):
         text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
@@ -480,6 +479,11 @@ class QTUIEditorClient(editor_state.ClientAPI):
 
         self._progress_dialog = None
         self._progress_dialog_steps = 0
+
+    def event_load_start(self, active_client, file_path):
+        # Need this in case loading was started via command-line, and skipped 'request_load_file'.
+        self.file_path = file_path
+        self.owner_ref().on_file_load_start(file_path)
 
     def event_load_successful(self, active_client):
         if not active_client:
@@ -757,7 +761,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def reset_state(self):
         """ Called to clear out all state related to loaded data. """
-        pass
+        self.setWindowTitle(APPLICATION_NAME)
 
     def menu_file_open(self):
         if self.editor_state.in_loaded_state(self.editor_client):
@@ -915,7 +919,7 @@ class MainWindow(QtGui.QMainWindow):
         if not other:
             logger.debug("scroll_to_line line=%d", new_line_idx)
         index = self.list_model.index(new_line_idx, 2, QtCore.QModelIndex())
-        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Select)
+        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Clear | QtGui.QItemSelectionModel.Select)
         self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
 
     def functionality_view_push_address(self, current_address, address):
@@ -967,6 +971,9 @@ class MainWindow(QtGui.QMainWindow):
         # TODO: Fix what the result is.
         # Successfully completed.
         self.on_file_opened()
+
+    def on_file_load_start(self, file_path):
+        self.setWindowTitle("%s - %s" % (APPLICATION_NAME, os.path.basename(file_path)))
 
     def on_file_opened(self):
         self.list_table._initial_line_idx = self.editor_state.get_line_number(self.editor_client)
@@ -1558,22 +1565,9 @@ def run():
     # it is used in PySide.
     def _arg_file_load():
         if len(sys.argv) > 1:
-            s = sys.argv[-1]
-            if s[0] != "-":
-                def _received_loaded_signal(var):
-                    window.close()
-                # If we want to exit once the loading is complete (e.g. profiling).
-                #window.loaded_signal.connect(_received_loaded_signal)
-
-                if False:
-                    t = QtCore.QTimer()
-                    t.setSingleShot(True)
-                    # If a reference is not kept for the timer, it will die before it does its job.  So hence "t is not None".
-                    t.timeout.connect(lambda: window.attempt_open_file(s) or t is not None)
-                    t.start(50)
             import toolapi
             toolapiob = toolapi.ToolAPI(window.editor_state)
-            toolapiob.load_file(s)
+            toolapiob.load_file(sys.argv[-1])
     _arg_file_load()
 
     sys.exit(app.exec_())
