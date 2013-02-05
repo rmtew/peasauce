@@ -125,6 +125,8 @@ class ProgramData(object):
         self.symbol_insert_func = None
         "Callback application can register to be notified."
         self.uncertain_reference_modification_func = None
+        "Callback application can register to be notified."
+        self.line_change_func = None
         "List of segment address ranges, used to validate addresses."
         self.address_ranges = None # []
         "Where the file was saved to, or loaded from."

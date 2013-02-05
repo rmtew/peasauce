@@ -85,8 +85,9 @@ def calculate_match_line_count(program_data, match):
 
 def calculate_line_count(program_data, block):
     old_line_count = block.line_count
-    block.line_count = calculate_block_leading_line_count(program_data, block)
 
+    # Overwrite the old line count, it's OK, we've notified any removal if necessary.
+    block.line_count = calculate_block_leading_line_count(program_data, block)
     if get_block_data_type(block) == DATA_TYPE_CODE:
         for type_id, entry in block.line_data:
             if type_id == SLD_INSTRUCTION:
@@ -103,7 +104,7 @@ def calculate_line_count(program_data, block):
         block.line_count = len(block.line_data)
     else:
         block.line_count = None
-        return block.line_count - old_line_count
+        return
 
     segments = program_data.loader_segments
     if block.segment_offset + block.length == loaderlib.get_segment_length(segments, block.segment_id):
@@ -114,7 +115,13 @@ def calculate_line_count(program_data, block):
         # Last block in a segment gets a trailing line, if it is not the last segment.
         if block.segment_id < len(segments)-1:
             block.line_count += 1 # SEGMENT FOOTER (blank line)
-    return block.line_count - old_line_count
+
+    # Event notifying addition or removal of blocks.
+    line_count_delta = block.line_count - old_line_count
+    if line_count_delta != 0:
+        if program_data.line_change_func is not None:
+            block_line0 = get_block_line_number_by_address(program_data, block.address)
+            program_data.line_change_func(block_line0, line_count_delta)
 
 
 def get_code_block_info_for_address(program_data, address):
@@ -668,7 +675,7 @@ def recalculate_line_count_index(program_data, dirtyidx=None):
         dirtyidx = min(dirtyidx, program_data.block_line0s_dirtyidx)
 
     if dirtyidx is not None:
-        logger.debug("Recalculated line counts")
+        logger.debug("Recalculated line counts, from idx %d", dirtyidx)
         line_count_start = 0
         if dirtyidx > 0:
             line_count_start = program_data.block_line0s[dirtyidx-1] + program_data.blocks[dirtyidx-1].line_count
@@ -676,6 +683,14 @@ def recalculate_line_count_index(program_data, dirtyidx=None):
             program_data.block_line0s[i] = line_count_start
             line_count_start += program_data.blocks[i].line_count
         program_data.block_line0s_dirtyidx = None
+
+def get_block_line_number_by_address(program_data, address):
+    di = program_data.block_line0s_dirtyidx
+    recalculate_line_count_index(program_data)
+    block, block_idx = lookup_block_by_address(program_data, address)
+    if program_data.block_line0s[block_idx] is None:
+        raise Exception("block with None line0", block, "idx", block_idx, "address", address, "line0", program_data.block_line0s[block_idx], "line_count", block.line_count, "di-before", di, "di-after", program_data.block_line0s_dirtyidx)
+    return program_data.block_line0s[block_idx]
 
 def lookup_block_by_line_count(program_data, lookup_key):
     recalculate_line_count_index(program_data)
@@ -699,7 +714,7 @@ def insert_block(program_data, insert_idx, block):
     program_data.block_line0s.insert(insert_idx, None)
     program_data.blocks.insert(insert_idx, block)
     # Update how much of the sorted line number index needs to be recalculated.
-    if program_data.block_line0s_dirtyidx is not None and insert_idx < program_data.block_line0s_dirtyidx:
+    if program_data.block_line0s_dirtyidx is None or insert_idx < program_data.block_line0s_dirtyidx:
         program_data.block_line0s_dirtyidx = insert_idx
 
 ERR_SPLIT_EXISTING = -1

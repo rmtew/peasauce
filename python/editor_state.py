@@ -124,6 +124,9 @@ class ClientAPI(object):
     def event_load_successful(self, active_client):
         raise NotImplementedError
 
+    def event_line_change(self, active_client, line0, line_count):
+        raise NotImplementedError
+
 
 class WorkState(object):
     completeness = 0.0
@@ -556,6 +559,12 @@ class EditorState(object):
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
         self.set_line_number(acting_client, line_number)
+
+        def _line_change_callback(line0, line_count):
+            for client in self.clients:
+                client.event_line_change(client is acting_client, line0, line_count)
+        self.disassembly_data.line_change_func = _line_change_callback
+
         for client in self.clients:
             client.event_load_successful(client is acting_client)
         return result

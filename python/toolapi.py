@@ -72,6 +72,7 @@ class ToolEditorClient(editor_state.ClientAPI):
     def event_prolonged_action_complete(self, active_client): pass
     def event_load_start(self, active_client, file_path): pass
     def event_load_successful(self, active_client): pass
+    def event_line_change(self, active_client, line0, line_count): pass
 
 
 class ToolAPI(object):

@@ -153,6 +153,14 @@ class BaseItemModel(QtCore.QAbstractItemModel):
         self.beginRemoveRows(QtCore.QModelIndex(), 0, row_count-1)
         self.endRemoveRows()
 
+    def _row_addition_or_removal(self, row, row_count):
+        if row_count < 0:
+            self.beginRemoveRows(QtCore.QModelIndex(), row, row+(-row_count)-1)
+            self.endRemoveRows()
+        else:
+            self.beginInsertRows(QtCore.QModelIndex(), row, row+row_count-1)
+            self.endInsertRows()
+
     def _set_header_font(self, font):
         self._header_font = font
 
@@ -488,6 +496,9 @@ class QTUIEditorClient(editor_state.ClientAPI):
     def event_load_successful(self, active_client):
         if not active_client:
             self.owner_ref().on_file_opened()
+
+    def event_line_change(self, active_client, line0, line_count):
+        self.owner_ref().on_line_change(line0, line_count)
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -884,27 +895,38 @@ class MainWindow(QtGui.QMainWindow):
         self.scroll_to_line(line_idx, True)
 
     def interaction_set_datatype_code(self):
+        # May change current line number due to following references above in the file.
+        address = self.editor_state.get_address(self.editor_client)
         errmsg = self.editor_state.set_datatype_code(self.editor_client)
+        self.scroll_to_line(self.editor_state.get_line_number_for_address(self.editor_client, address), True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_32bit(self):
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_32bit(self.editor_client)
+        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_16bit(self):
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_16bit(self.editor_client)
+        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_8bit(self):
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_8bit(self.editor_client)
+        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_ascii(self):
+        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_ascii(self.editor_client)
+        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
@@ -1015,6 +1037,9 @@ class MainWindow(QtGui.QMainWindow):
         ## DONE LOADING ##
 
         self.loaded_signal.emit(0)
+
+    def on_line_change(self, line0, line_count):
+        self.list_model._row_addition_or_removal(line0, line_count)
 
     # TODO: FIX
     def disassembly_symbol_added(self, symbol_address, symbol_label):
