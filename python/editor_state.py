@@ -58,6 +58,8 @@ RE_LABEL = re.compile("([\.]*[a-zA-Z_]+[a-zA-Z0-9_\.]*)$")
 
 class ClientAPI(object):
     def __init__(self, owner):
+        super(ClientAPI, self).__init__()
+
         self.owner_ref = weakref.ref(owner)
 
     def request_load_file(self):
@@ -126,6 +128,12 @@ class ClientAPI(object):
 
     def event_line_change(self, active_client, line0, line_count):
         raise NotImplementedError
+
+    def event_uncertain_reference_modification(self, active_client, data_type_from, data_type_to, address, length):
+        raise NotImplementedError
+
+    def event_symbol_added(self, active_client, symbol_address, symbol_label):
+        raise NotImplementedError        
 
 
 class WorkState(object):
@@ -380,18 +388,19 @@ class EditorState(object):
 
     ## UNCERTAIN REFERENCES:
 
-    def set_uncertain_reference_modification_func(self, acting_client, callback):
-        def callback_adaptor(data_type_from, data_type_to, address, length):
-            if data_type_from == disassembly.DATA_TYPE_CODE:
-                data_type_from = "CODE"
-            else:
-                data_type_from = "DATA"
-            if data_type_to == disassembly.DATA_TYPE_CODE:
-                data_type_to = "CODE"
-            else:
-                data_type_to = "DATA"
-            return callback(data_type_from, data_type_to, address, length)
-        disassembly.set_uncertain_reference_modification_func(self.disassembly_data, callback_adaptor)
+    def _uncertain_reference_modification_callback(self, data_type_from, data_type_to, address, length):
+        if data_type_from == disassembly.DATA_TYPE_CODE:
+            data_type_from = "CODE"
+        else:
+            data_type_from = "DATA"
+        if data_type_to == disassembly.DATA_TYPE_CODE:
+            data_type_to = "CODE"
+        else:
+            data_type_to = "DATA"
+
+        acting_client = None # TODO: Reconsider whether this is valid.
+        for client in self.clients:
+            client.event_uncertain_reference_modification(client is acting_client, data_type_from, data_type_to, address, length)
 
     def get_uncertain_code_references(self, acting_client):
         return disassembly.get_uncertain_code_references(self.disassembly_data)
@@ -404,8 +413,10 @@ class EditorState(object):
 
     ## GENERAL:
 
-    def set_symbol_insert_func(self, acting_client, callback):
-        disassembly.set_symbol_insert_func(self.disassembly_data, callback)
+    def _symbol_insert_callback(self, symbol_address, symbol_label):
+        acting_client = None # TODO: Reconsider whether this is valid.
+        for client in self.clients:
+            client.event_symbol_added(client is acting_client, symbol_address, symbol_label)
 
     def set_label_name(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -521,6 +532,10 @@ class EditorState(object):
 
         self.state_id = EditorState.STATE_LOADED
         self.disassembly_data, line_count = result
+
+        # Register our event dispatching callbacks.
+        disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self._uncertain_reference_modification_callback)
+        disassembly.set_symbol_insert_func(self.disassembly_data, self._symbol_insert_callback)
 
         if line_count == 0:
             self.reset_state(acting_client)

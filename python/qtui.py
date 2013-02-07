@@ -66,64 +66,6 @@ logger = logging.getLogger("UI")
 UNCERTAIN_ADDRESS_IDX = 1
 
 
-class WorkThread(QtCore.QThread):
-    result = QtCore.Signal(tuple)
-
-    def __init__(self, parent=None):
-        super(WorkThread, self).__init__(parent)
-
-        self.condition = QtCore.QWaitCondition()
-        self.mutex = QtCore.QMutex()
-
-        self.quit = False
-        self.work_data = None
-
-    def __del__(self):
-        self.stop()
-
-    def stop(self):
-        self.mutex.lock()
-        self.quit = True
-        self.work_data = None
-        self.condition.wakeOne()
-        self.mutex.unlock()
-        self.wait()
-
-    def add_work(self, _callable, *_args, **_kwargs):
-        self.mutex.lock()
-        self.work_data = _callable, _args, _kwargs
- 
-        if not self.isRunning():
-            self.start()
-        else:
-            self.condition.wakeOne()
-        self.mutex.unlock()
-
-    def run(self):
-        self.mutex.lock()
-        work_data = self.work_data
-        self.work_data = None
-        self.mutex.unlock()
-
-        while not self.quit:
-            try:
-                try:
-                    result = work_data[0](*work_data[1], **work_data[2])
-                except Exception:
-                    traceback.print_stack()
-                    raise
-            except SystemExit:
-                traceback.print_exc()
-                raise
-            work_data = None
-
-            self.mutex.lock()
-            self.result.emit(result)
-            self.condition.wait(self.mutex)
-            work_data = self.work_data
-            self.work_data = None
-            self.mutex.unlock()
-
 class BaseItemModel(QtCore.QAbstractItemModel):
     _header_font = None
 
@@ -356,10 +298,13 @@ def create_table_widget(parent, model, multiselect=False):
     return table
 
 
-class QTUIEditorClient(editor_state.ClientAPI):
-    # Internal responsibility.
-    _progress_dialog = None
-    _progress_dialog_steps = 0
+class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
+    prolonged_action_signal = QtCore.Signal(tuple)
+    prolonged_action_update_signal = QtCore.Signal(tuple)
+    prolonged_action_complete_signal = QtCore.Signal()
+    line_change_signal = QtCore.Signal(tuple)
+    uncertain_reference_modification_signal = QtCore.Signal(tuple)
+    symbol_added_signal = QtCore.Signal(tuple)
 
     def __init__(self, *args, **kwargs):
         super(QTUIEditorClient, self).__init__(*args, **kwargs)
@@ -450,43 +395,21 @@ class QTUIEditorClient(editor_state.ClientAPI):
         QtGui.qApp.processEvents()
 
     def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback):
-        # Display a modal dialog.
-        self._progress_dialog = QtGui.QProgressDialog(self.owner_ref())
-        self._progress_dialog_steps = step_count
-
-        d = self._progress_dialog
-        if can_cancel:
-            d.setCancelButtonText("&Cancel")
-        else:
-            d.setCancelButtonText("")
-        d.setWindowTitle(res.strings[title_msg_id])
-        d.setLabelText(res.strings[description_msg_id])
-        d.setAutoClose(True)
-        d.setWindowModality(QtCore.Qt.WindowModal)
-        d.setRange(0, step_count)
-        d.setMinimumDuration(1000)
-        d.setValue(0)
-
-        # Register to hear if the cancel button is pressed.
-        def canceled():
-            abort_callback()
-        d.canceled.connect(canceled)
-
-        # Non-blocking.
-        d.show()
+        args = (
+            res.strings[title_msg_id],
+            res.strings[description_msg_id],
+            can_cancel,
+            step_count,
+            abort_callback
+        )
+        self.prolonged_action_signal.emit(args)
 
     def event_prolonged_action_update(self, active_client, message_id, step_number):
-        d = self._progress_dialog
-        d.setLabelText(res.strings[message_id])
-        d.setValue(step_number)
+        args = res.strings[message_id], step_number
+        self.prolonged_action_update_signal.emit(args)
 
     def event_prolonged_action_complete(self, active_client):
-        d = self._progress_dialog
-        # Trigger the auto-close behaviour.
-        d.setValue(self._progress_dialog_steps)
-
-        self._progress_dialog = None
-        self._progress_dialog_steps = 0
+        self.prolonged_action_complete_signal.emit()
 
     def event_load_start(self, active_client, file_path):
         # Need this in case loading was started via command-line, and skipped 'request_load_file'.
@@ -498,7 +421,13 @@ class QTUIEditorClient(editor_state.ClientAPI):
             self.owner_ref().on_file_opened()
 
     def event_line_change(self, active_client, line0, line_count):
-        self.owner_ref().on_line_change(line0, line_count)
+        self.line_change_signal.emit((line0, line_count))
+
+    def event_uncertain_reference_modification(self, active_client, data_type_from, data_type_to, address, length):
+        self.uncertain_reference_modification_signal.emit((data_type_from, data_type_to, address, length))
+
+    def event_symbol_added(self, active_client, symbol_address, symbol_label):
+        self.symbol_added_signal.emit((symbol_address, symbol_label))
 
 
 class MainWindow(QtGui.QMainWindow):
@@ -507,14 +436,22 @@ class MainWindow(QtGui.QMainWindow):
     loaded_signal = QtCore.Signal(int)
     log_signal = QtCore.Signal(tuple)
 
+    _progress_dialog = None
+    _progress_dialog_steps = 0
+
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
         self.editor_client = QTUIEditorClient(self)
+        self.editor_client.prolonged_action_signal.connect(self.show_progress_dialog, QtCore.Qt.QueuedConnection)
+        self.editor_client.prolonged_action_update_signal.connect(self.update_progress_dialog, QtCore.Qt.QueuedConnection)
+        self.editor_client.prolonged_action_complete_signal.connect(self.close_progress_dialog, QtCore.Qt.QueuedConnection)
+        self.editor_client.line_change_signal.connect(self.on_line_change, QtCore.Qt.QueuedConnection)
+        self.editor_client.uncertain_reference_modification_signal.connect(self.on_uncertain_reference_modification)
+        self.editor_client.symbol_added_signal.connect(self.on_disassembly_symbol_added)
+
         self.editor_state = editor_state.EditorState()
         self.editor_state.register_client(self.editor_client)
-
-        self.thread = WorkThread()
 
         ## GENERATE THE UI
 
@@ -565,10 +502,6 @@ class MainWindow(QtGui.QMainWindow):
 
     def closeEvent(self, event):
         """ Intercept the window close event and anything which needs to happen first. """
-        # If we do not stop the thread, we see the following noise in the console:
-        # "QThread: Destroyed while thread is still running"
-        self.thread.stop()
-        self.thread.wait()
 
         # Needed to allow the script to exit (ensures the editor state worker thread is exited).
         self.editor_state = None
@@ -1005,17 +938,12 @@ class MainWindow(QtGui.QMainWindow):
 
         ## SYMBOLS
 
-        # Register for further symbol events (only add for now).
-        self.editor_state.set_symbol_insert_func(self.editor_client, self.disassembly_symbol_added)
-
         row_data = self.editor_state.get_symbols(self.editor_client)
         self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
         ## UNCERTAIN REFERENCES
-
-        self.editor_state.set_uncertain_reference_modification_func(self.editor_client, self.disassembly_uncertain_reference_modification)
 
         def _lookup_cell_value(self, row, column):
             if column == 0:
@@ -1038,11 +966,13 @@ class MainWindow(QtGui.QMainWindow):
 
         self.loaded_signal.emit(0)
 
-    def on_line_change(self, line0, line_count):
+    def on_line_change(self, args):
+        line0, line_count = args
         self.list_model._row_addition_or_removal(line0, line_count)
 
-    # TODO: FIX
-    def disassembly_symbol_added(self, symbol_address, symbol_label):
+    def on_disassembly_symbol_added(self, args):
+        symbol_address, symbol_label = args
+
         model = self.symbols_model
         model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
         self._add_symbol_to_model(symbol_address, symbol_label)
@@ -1050,7 +980,8 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
 
-    def disassembly_uncertain_reference_modification(self, data_type_from, data_type_to, address, length):
+    def on_uncertain_reference_modification(self, args):
+        data_type_from, data_type_to, address, length = args
         # logger.info("disassembly_uncertain_reference_modification: %s %s %s %s", data_type_from, data_type_to, address, length)
         if data_type_from == "CODE":
             from_model = self.uncertain_code_references_model
@@ -1105,6 +1036,47 @@ class MainWindow(QtGui.QMainWindow):
             row_index = model.rowCount()-1
         model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
         model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
+
+    def show_progress_dialog(self, args):
+        title, description, can_cancel, step_count, abort_callback = args
+
+        # Display a modal dialog.
+        d = self._progress_dialog = QtGui.QProgressDialog(self)
+        self._progress_dialog_steps = step_count
+        if can_cancel:
+            d.setCancelButtonText("&Cancel")
+        else:
+            d.setCancelButtonText("")
+        d.setWindowTitle(title)
+        d.setLabelText(description)
+        d.setAutoClose(True)
+        d.setWindowModality(QtCore.Qt.WindowModal)
+        d.setRange(0, step_count)
+        d.setMinimumDuration(1000)
+        d.setValue(0)
+
+        # Register to hear if the cancel button is pressed.
+        def canceled():
+            abort_callback()
+        d.canceled.connect(canceled)
+
+        # Non-blocking.
+        d.show()
+
+    def update_progress_dialog(self, args):
+        message, step_number = args
+        d = self._progress_dialog
+        d.setLabelText(message)
+        d.setValue(step_number)
+
+    def close_progress_dialog(self):
+        d = self._progress_dialog
+        # Trigger the auto-close behaviour.
+        d.setValue(self._progress_dialog_steps)
+
+        self._progress_dialog = None
+        self._progress_dialog_steps = 0
+
 
 
 ## Option dialogs.
