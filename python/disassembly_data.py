@@ -126,7 +126,9 @@ class ProgramData(object):
         "Callback application can register to be notified."
         self.uncertain_reference_modification_func = None
         "Callback application can register to be notified."
-        self.line_change_func = None
+        self.pre_line_change_func = None
+        "Callback application can register to be notified."
+        self.post_line_change_func = None
         "List of segment address ranges, used to validate addresses."
         self.address_ranges = None # []
         "Where the file was saved to, or loaded from."
@@ -168,6 +170,17 @@ class SegmentBlock(object):
     references = None
     """ Cached old data type. """
     _old_data_type = None
+
+    def copy_to(self, new_block):
+        new_block.segment_id = self.segment_id
+        new_block.segment_offset = self.segment_offset
+        new_block.address = self.address
+        new_block.length = self.length
+        new_block.flags = self.flags
+        new_block.line_data = self.line_data
+        new_block.line_count = self.line_count
+        new_block.references = self.references
+        new_block._old_data_type = self._old_data_type
 
 
 class NewProjectOptions:

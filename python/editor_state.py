@@ -25,10 +25,12 @@ reproducing the same logic.
 import os
 import types
 import threading
+import time
 import traceback
 import weakref
 
 import disassembly
+import disassembly_data # DATA TYPES ONLY
 import disassembly_persistence
 import loaderlib
 import util
@@ -126,7 +128,10 @@ class ClientAPI(object):
     def event_load_successful(self, active_client):
         raise NotImplementedError
 
-    def event_line_change(self, active_client, line0, line_count):
+    def event_pre_line_change(self, active_client, line0, line_count):
+        raise NotImplementedError
+
+    def event_post_line_change(self, active_client, line0, line_count):
         raise NotImplementedError
 
     def event_uncertain_reference_modification(self, active_client, data_type_from, data_type_to, address, length):
@@ -203,6 +208,7 @@ class EditorState(object):
         # Start the work and periodically check for it's completion, or cancellation.
         completed_event = self.worker_thread.add_work(f, *args, **kwargs)
         last_completeness, last_description = None, None
+        t0 = time.time()
         while not completed_event.wait(0.1) and not work_state.is_cancelled():
             work_completeness, work_description = work_state.get_completeness(), work_state.get_description()
             for client in self.clients:
@@ -231,15 +237,15 @@ class EditorState(object):
 
     def get_data_type_for_address(self, acting_client, address):
         data_type = disassembly.get_data_type_for_address(self.disassembly_data, address)
-        if data_type == disassembly.DATA_TYPE_CODE:
+        if data_type == disassembly_data.DATA_TYPE_CODE:
             return "code"
-        elif data_type == disassembly.DATA_TYPE_ASCII:
+        elif data_type == disassembly_data.DATA_TYPE_ASCII:
             return "ascii"
-        elif data_type == disassembly.DATA_TYPE_BYTE:
+        elif data_type == disassembly_data.DATA_TYPE_BYTE:
             return "8bit"
-        elif data_type == disassembly.DATA_TYPE_WORD:
+        elif data_type == disassembly_data.DATA_TYPE_WORD:
             return "16bit"
-        elif data_type == disassembly.DATA_TYPE_LONGWORD:
+        elif data_type == disassembly_data.DATA_TYPE_LONGWORD:
             return "32bit"
 
     def get_source_code_for_address(self, acting_client, address):
@@ -282,7 +288,7 @@ class EditorState(object):
     def get_line_count(self, acting_client):
         if self.disassembly_data is None:
             return 0
-        return disassembly.get_line_count(self.disassembly_data)
+        return disassembly.get_file_line_count(self.disassembly_data)
 
     def get_file_line(self, acting_client, row, column):
         if self.disassembly_data is None:
@@ -389,11 +395,11 @@ class EditorState(object):
     ## UNCERTAIN REFERENCES:
 
     def _uncertain_reference_modification_callback(self, data_type_from, data_type_to, address, length):
-        if data_type_from == disassembly.DATA_TYPE_CODE:
+        if data_type_from == disassembly_data.DATA_TYPE_CODE:
             data_type_from = "CODE"
         else:
             data_type_from = "DATA"
-        if data_type_to == disassembly.DATA_TYPE_CODE:
+        if data_type_to == disassembly_data.DATA_TYPE_CODE:
             data_type_to = "CODE"
         else:
             data_type_to = "DATA"
@@ -439,7 +445,7 @@ class EditorState(object):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_CODE)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_CODE)
 
     def set_datatype_32bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -448,7 +454,7 @@ class EditorState(object):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_LONGWORD)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_LONGWORD)
 
     def set_datatype_16bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -457,7 +463,7 @@ class EditorState(object):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_WORD)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_WORD)
 
     def set_datatype_8bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -466,7 +472,7 @@ class EditorState(object):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_BYTE)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_BYTE)
 
     def set_datatype_ascii(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -475,7 +481,7 @@ class EditorState(object):
         address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly.DATA_TYPE_ASCII)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_ASCII)
 
     def _set_data_type(self, acting_client, address, data_type):
         self._prolonged_action(acting_client, "TITLE_DATA_TYPE_CHANGE", "TEXT_GENERIC_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
@@ -575,10 +581,14 @@ class EditorState(object):
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)
         self.set_line_number(acting_client, line_number)
 
-        def _line_change_callback(line0, line_count):
+        def _pre_line_change_callback(line0, line_count):
             for client in self.clients:
-                client.event_line_change(client is acting_client, line0, line_count)
-        self.disassembly_data.line_change_func = _line_change_callback
+                client.event_pre_line_change(client is acting_client, line0, line_count)
+        self.disassembly_data.pre_line_change_func = _pre_line_change_callback
+        def _post_line_change_callback(line0, line_count):
+            for client in self.clients:
+                client.event_post_line_change(client is acting_client, line0, line_count)
+        self.disassembly_data.post_line_change_func = _post_line_change_callback
 
         for client in self.clients:
             client.event_load_successful(client is acting_client)
@@ -606,7 +616,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        line_count = disassembly.get_line_count(self.disassembly_data)
+        line_count = disassembly.get_file_line_count(self.disassembly_data)
 
         # Prompt for save file name.
         save_file = acting_client.request_code_save_file()

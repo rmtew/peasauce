@@ -95,12 +95,16 @@ class BaseItemModel(QtCore.QAbstractItemModel):
         self.beginRemoveRows(QtCore.QModelIndex(), 0, row_count-1)
         self.endRemoveRows()
 
-    def _row_addition_or_removal(self, row, row_count):
+    def _begin_row_change(self, row, row_count):
         if row_count < 0:
             self.beginRemoveRows(QtCore.QModelIndex(), row, row+(-row_count)-1)
-            self.endRemoveRows()
         else:
             self.beginInsertRows(QtCore.QModelIndex(), row, row+row_count-1)
+
+    def _end_row_change(self, row, row_count):
+        if row_count < 0:
+            self.endRemoveRows()
+        else:
             self.endInsertRows()
 
     def _set_header_font(self, font):
@@ -302,7 +306,8 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
     prolonged_action_signal = QtCore.Signal(tuple)
     prolonged_action_update_signal = QtCore.Signal(tuple)
     prolonged_action_complete_signal = QtCore.Signal()
-    line_change_signal = QtCore.Signal(tuple)
+    pre_line_change_signal = QtCore.Signal(tuple)
+    post_line_change_signal = QtCore.Signal(tuple)
     uncertain_reference_modification_signal = QtCore.Signal(tuple)
     symbol_added_signal = QtCore.Signal(tuple)
 
@@ -316,6 +321,13 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         self.file_path = None
         self.owner_ref().reset_state()
 
+    # TODO: Should this be an internal function?  editor state uses it at the moment.
+    def get_load_file(self):
+        return open(self.file_path, "rb")
+
+    ## Events related to user direct interaction and required GUIs.
+    # It does not appear to be necessary to delegate these to the GUI thread.
+
     def request_load_file(self):
         # Request the user select a file.
         options = QtGui.QFileDialog.Options()
@@ -327,10 +339,6 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
             file_path = os.path.join(os.getcwd(), file_path)
         self.file_path = file_path
         return self.get_load_file(), file_path
-
-    # TODO: Should this be an internal function?  editor state uses it at the moment.
-    def get_load_file(self):
-        return open(self.file_path, "rb")
 
     def request_new_project_option_values(self, options):
         result = NewProjectDialog(options, self.file_path, self.owner_ref()).exec_()
@@ -385,14 +393,23 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         if ok and text != default_label_name:
             return text
 
-    """
-    def request_confirmation(self, title_msg_id, text_msg_id):
-        ret = QtGui.QMessageBox.question(self.owner_ref(), res.strings[title_msg_id], res.strings[text_msg_id], QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
-        return ret == QtGui.QMessageBox.Ok
-    """
-
     def event_tick(self, active_client):
         QtGui.qApp.processEvents()
+
+    ## Events related to the lifetime of an attempt to load a file.
+    # It does not appear to be necessary to delegate these to the GUI thread.
+
+    def event_load_start(self, active_client, file_path):
+        # Need this in case loading was started via command-line, and skipped 'request_load_file'.
+        self.file_path = file_path
+        self.owner_ref().on_file_load_start(file_path)
+
+    def event_load_successful(self, active_client):
+        if not active_client:
+            self.owner_ref().on_file_opened()
+
+    ## Events related to prolonged actions (display of a progress dialog).
+    # It is necessary to delegate these to the GUI thread via slots and signals.
 
     def event_prolonged_action(self, active_client, title_msg_id, description_msg_id, can_cancel, step_count, abort_callback):
         args = (
@@ -410,18 +427,18 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def event_prolonged_action_complete(self, active_client):
         self.prolonged_action_complete_signal.emit()
+        import disassembly
+        if self.owner_ref().editor_state.disassembly_data:
+            disassembly.DEBUG_check_file_line_count(self.owner_ref().editor_state.disassembly_data)
 
-    def event_load_start(self, active_client, file_path):
-        # Need this in case loading was started via command-line, and skipped 'request_load_file'.
-        self.file_path = file_path
-        self.owner_ref().on_file_load_start(file_path)
+    ## Events related to post-load disassembly events.
+    # It is necessary to delegate these to the GUI thread via slots and signals.
 
-    def event_load_successful(self, active_client):
-        if not active_client:
-            self.owner_ref().on_file_opened()
+    def event_pre_line_change(self, active_client, line0, line_count):
+        self.pre_line_change_signal.emit((line0, line_count))
 
-    def event_line_change(self, active_client, line0, line_count):
-        self.line_change_signal.emit((line0, line_count))
+    def event_post_line_change(self, active_client, line0, line_count):
+        self.post_line_change_signal.emit((line0, line_count))
 
     def event_uncertain_reference_modification(self, active_client, data_type_from, data_type_to, address, length):
         self.uncertain_reference_modification_signal.emit((data_type_from, data_type_to, address, length))
@@ -443,10 +460,11 @@ class MainWindow(QtGui.QMainWindow):
         super(MainWindow, self).__init__(parent)
 
         self.editor_client = QTUIEditorClient(self)
-        self.editor_client.prolonged_action_signal.connect(self.show_progress_dialog, QtCore.Qt.QueuedConnection)
-        self.editor_client.prolonged_action_update_signal.connect(self.update_progress_dialog, QtCore.Qt.QueuedConnection)
-        self.editor_client.prolonged_action_complete_signal.connect(self.close_progress_dialog, QtCore.Qt.QueuedConnection)
-        self.editor_client.line_change_signal.connect(self.on_line_change, QtCore.Qt.QueuedConnection)
+        self.editor_client.prolonged_action_signal.connect(self.show_progress_dialog)
+        self.editor_client.prolonged_action_update_signal.connect(self.update_progress_dialog)
+        self.editor_client.prolonged_action_complete_signal.connect(self.close_progress_dialog)
+        self.editor_client.pre_line_change_signal.connect(self.on_pre_line_change)
+        self.editor_client.post_line_change_signal.connect(self.on_post_line_change)
         self.editor_client.uncertain_reference_modification_signal.connect(self.on_uncertain_reference_modification)
         self.editor_client.symbol_added_signal.connect(self.on_disassembly_symbol_added)
 
@@ -829,37 +847,29 @@ class MainWindow(QtGui.QMainWindow):
 
     def interaction_set_datatype_code(self):
         # May change current line number due to following references above in the file.
-        address = self.editor_state.get_address(self.editor_client)
+        #address = self.editor_state.get_address(self.editor_client)
         errmsg = self.editor_state.set_datatype_code(self.editor_client)
-        self.scroll_to_line(self.editor_state.get_line_number_for_address(self.editor_client, address), True)
+        #self.scroll_to_line(self.editor_state.get_line_number(self.editor_client), True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_32bit(self):
-        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_32bit(self.editor_client)
-        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_16bit(self):
-        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_16bit(self.editor_client)
-        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_8bit(self):
-        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_8bit(self.editor_client)
-        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_ascii(self):
-        line_idx = self.editor_state.get_line_number(self.editor_client)
         errmsg = self.editor_state.set_datatype_ascii(self.editor_client)
-        self.scroll_to_line(line_idx, True)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
@@ -966,9 +976,13 @@ class MainWindow(QtGui.QMainWindow):
 
         self.loaded_signal.emit(0)
 
-    def on_line_change(self, args):
+    def on_pre_line_change(self, args):
         line0, line_count = args
-        self.list_model._row_addition_or_removal(line0, line_count)
+        self.list_model._begin_row_change(line0, line_count)
+
+    def on_post_line_change(self, args):
+        line0, line_count = args
+        self.list_model._end_row_change(line0, line_count)
 
     def on_disassembly_symbol_added(self, args):
         symbol_address, symbol_label = args
