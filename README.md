@@ -31,9 +31,7 @@ Note that there are limitations, files which include unsupported assembly code o
 
 ## Licensing
 
-All files that comprise this are released under the GPLv3 license.
-
-Any source code contributions must be made by the sole author of those contributions, and be contributed with dual licensing under both the MIT and GPLv3 license.  At some point in the future, I may wish to use parts of this in commercial projects, or switch the license of the open source project as a whole to the more liberal MIT license.
+All files that comprise this are released under the MIT license.
 
 ## Installation
 
@@ -78,6 +76,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Bugs
 
 * Disassembly: Instruction "move.l $(4.w), a6" is interpreted as referring to offset 4 in executables.  This is a more general problem that creates a label for each absolute address.
+* Disassembly: Instruction "JMP (lbL0057B4,PC,D1.W*1)" is interpreted as lbL0057B4 being a valid jump address and an attempt is made to disassemble there.
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.

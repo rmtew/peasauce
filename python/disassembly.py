@@ -937,10 +937,11 @@ def set_uncertain_reference_modification_func(program_data, f):
 
 def set_data_type_at_address(program_data, address, data_type, work_state=None):
     block, block_idx = lookup_block_by_address(program_data, address)
-    set_block_data_type(program_data, data_type, block, block_idx=block_idx, work_state=work_state)
+    set_block_data_type(program_data, data_type, block, block_idx=block_idx, work_state=work_state, address=address)
 
-def set_block_data_type(program_data, data_type, block, block_idx=None, work_state=None):
-    address = block.address
+def set_block_data_type(program_data, data_type, block, block_idx=None, work_state=None, address=None):
+    if address is None:
+        address = block.address
     if block_idx is None:
         discard, block_idx = lookup_block_by_address(program_data, block.address)
     # If the block is already the given data type, no need to do anything.
@@ -1128,6 +1129,11 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             match_address = address + bytes_consumed
             match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, match_address)
             if match is None:
+                # Likely bad disassembly.
+                if data_offset_start >= len(data):
+                    logger.error("unable to disassemble out of bound data address at %X (started at %X)", match_address, address)
+                    break
+                # Likely a known instruction we can't disassemble, but know the length of and want to leave as interleaved data.
                 data_bytes_to_skip = program_data.dis_disassemble_as_data_func(data, data_offset_start)
                 if data_bytes_to_skip == 0:
                     logger.error("unable to disassemble data at %X (started at %X)", match_address, address)

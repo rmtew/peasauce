@@ -105,6 +105,8 @@ def get_size_value(label):
     if label == "W": return 1
     if label == "L": return 2
 
+NumericSizeValues = { "00": 0, "01": 1, "10": 2 }
+
 ConditionCodes = [
     [ "T" ],  # %0000
     [ "F" ],  # %0001
@@ -227,7 +229,7 @@ def _make_specification(format):
     if idx_charvars0 != -1:
         charvar_string = format[idx_charvars0:idx_charvarsN+1]
         spec.mask_char_vars = get_substitution_vars(charvar_string)
-    
+
     return spec
 
 
@@ -361,19 +363,23 @@ def _process_instruction_info():
             [ "1000DDD0zzsssSSS", "OR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",        IF_000, "Inclusive-OR Logical (EA->DR)", ],
             [ "1000DDD1zzsssSSS", "OR.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",        IF_000, "Inclusive-OR Logical (DR->EA)", ],
             [ "00000000zzsssSSS", "ORI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Inclusive-OR", ],
-            [ "0000000000111100", "ORI Imm:(z=00), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
+            [ "0000000000111100", "ORI.B Imm:(z=00), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
+            [ "0000000001111100", "ORI.W Imm:(z=01), SR",       IF_000, "Inclusive-OR Immediate to Status Register", ],
             [ "0100100001sssSSS", "PEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Push Effective Address", ],
+            [ "0100111001110000", "RESET",     IF_000, "Reset External Devices", ],
             [ "1110vvvazz011DDD", "ROd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Rotate without Extend (register rotate, source immediate)", ],
             [ "1110SSSazz111DDD", "ROd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",       IF_000, "Rotate without Extend (register rotate, source register)", ],
             [ "1110011a11sssSSS", "ROd.W:(d=a) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Rotate without Extend (memory rotate)", ],
             [ "1110vvvazz010DDD", "ROXd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",      IF_000, "Rotate with Extend (register rotate, source immediate)", ],
             [ "1110SSSazz110DDD", "ROXd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",      IF_000, "Rotate with Extend (register rotate, source register)", ],
             [ "1110010a11sssSSS", "ROXd.W:(d=a) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Rotate with Extend (memory rotate)", ],
+            [ "0100111001110011", "RTE",       IF_000, "Return from Exception", ],
             [ "0100111001110111", "RTR",       IF_000, "Return and Restore Condition Codes", ],
             [ "0100111001110101", "RTS",       IF_020, "Return from Subroutine", ],
             [ "1000DDD100000SSS", "SBCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
             [ "1000DDD100001SSS", "SBCD PreARi:(Rn=S),PreARi:(Rn=D)",      IF_000, "Add Decimal With Extend (memory)", ],
             [ "0101cccc11sssSSS", "Scc:(cc=c) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Set According to Condition", ],
+            [ "0100111001110010", "STOP Imm:(xxx=I1.W)",    IF_000, "Load Register Status and Stop", ],
             [ "1001DDD0zzsssSSS", "SUB.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8},DR:(Rn=D)",       IF_000, "Subtract", ],
             [ "1001DDD1zzsssSSS", "SUB.z:(z=z) DR:(Rn=D),EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Subtract", ],
             [ "1001DDD011sssSSS", "SUBA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Subtract Address (word)", ],
@@ -388,14 +394,15 @@ def _process_instruction_info():
             [ "0100111001110110", "TRAPV",     IF_000, "Trap on Overflow", ],
             [ "01001010zzsssSSS", "TST.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}",       IF_000, "Test an Operand", ],
             [ "0100111001011SSS", "UNLK AR:(Rn=S)",      IF_000, "Unlink", ],
+            # 020, 030
+            # These clash with f-line instructions.
+            #[ "1111vvv101sssSSS", "cpRESTORE Imm:(xxx=v), EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}", IF_020|IF_030, "Coprocessor Restore Functions", ],
+            #[ "1111vvv100sssSSS", "cpSAVE Imm:(xxx=v), EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL}", IF_020|IF_030, "Coprocessor Restore Functions", ],
             #1111___01z______ cpBcc
             #1111___001001SSS cpDBcc
             #1111___000sssSSS cpGEN
             #1111___001sssSSS cpScc
             #1111___001111xxx cpTRAPcc
-            # 020, 030
-            [ "1111vvv101sssSSS", "cpRESTORE Imm:(xxx=v), EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}", IF_020|IF_030, "Coprocessor Restore Functions", ],
-            [ "1111vvv100sssSSS", "cpSAVE Imm:(xxx=v), EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL}", IF_020|IF_030, "Coprocessor Restore Functions", ],
         ]
 
         # Pass 1: Replace any instruction entry with a ".z" with specific .B, .W, .L entries.
@@ -532,16 +539,6 @@ def _process_instruction_info():
 InstructionInfo = _process_instruction_info()
 del _process_instruction_info
 
-
-# Not 68000 instructions
-#[ "BFCHG",     "1110101011abcdef", 0, "Test Bit Field and Change", ],
-#[ "BFCLR",     "1110110011abcdef", 0, "Test Bit Field and Clear", ],
-#[ "BFEXTS",    "1110101111abcdef", 0, "Extract Bit Field Signed", ],
-#[ "BFEXTU",    "1110100111abcdef", 0, "Extract Bit Field Unsigned", ],
-#[ "BFFFO",     "1110100111abcdef", 0, "Find First One in Bit Field", ],
-#[ "BFINS",     "1110111111abcdef", 0, "Insert Bit Field", ],
-#[ "BFSET",     "1110111011abcdef", 0, "Test Bit Field and Set", ],
-#[ "BFTST",     "1110100011abcdef", 0, "Test Bit Field", ],
 
 def _get_data_by_size_char(data, idx, char):
     if char == "B":
@@ -886,7 +883,9 @@ def _disassemble_vars_pass(I):
             if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
                 var_value = char_string
             else:
-                var_value = char_vars[char_string]
+                var_value = NumericSizeValues.get(char_string, None)
+                if var_value is None:
+                    var_value = char_vars[char_string]
                 if var_name == "cc":
                     var_value = get_cc_label(var_value)
                 elif var_name == "z":
@@ -899,7 +898,7 @@ def _disassemble_vars_pass(I):
     chars = I.specification.mask_char_vars.values()
     for O in I.opcodes:
         for mask_char in O.specification.mask_char_vars.itervalues():
-            if mask_char not in chars:
+            if mask_char not in chars and mask_char not in NumericSizeValues:
                 chars.append(mask_char)
     char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
     # In case anything wants to copy it, and it is explicitly specified.
@@ -1061,7 +1060,7 @@ def get_match_addresses(match):
     return ret
 
 def is_final_instruction(match):
-    return match.specification.key in ("RTS", "RTR", "JMP", "BRA")
+    return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
 
 def is_big_endian():
     return True

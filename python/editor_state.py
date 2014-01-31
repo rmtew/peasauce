@@ -208,7 +208,6 @@ class EditorState(object):
         # Start the work and periodically check for it's completion, or cancellation.
         completed_event = self.worker_thread.add_work(f, *args, **kwargs)
         last_completeness, last_description = None, None
-        t0 = time.time()
         while not completed_event.wait(0.1) and not work_state.is_cancelled():
             work_completeness, work_description = work_state.get_completeness(), work_state.get_description()
             for client in self.clients:
