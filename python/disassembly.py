@@ -18,9 +18,17 @@
 
 DEBUG_ANNOTATE_DISASSEMBLY = True
 
+# COPIED FROM archm68k.py
+MAF_CODE = 1
+MAF_ABSOLUTE_ADDRESS = 2
+MAF_CONSTANT_VALUE = 4
+MAF_UNCERTAIN = 8
+MAF_CERTAIN = 16
+
 import bisect
 import logging
 import os
+import traceback
 
 #from disassembly_data import *
 import loaderlib
@@ -60,6 +68,8 @@ def realise_instruction_entry(program_data, block, block_offset):
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     data_offset_start = block.segment_offset + block_offset
     match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, block.address + block_offset)
+    if match is None:
+        raise RuntimeError("Catastrophic failure at: %x %x" % (data_offset_start, block.address + block_offset))
     return match
 
 
@@ -861,7 +871,8 @@ def split_block(program_data, address, own_midinstruction=False):
 
     insert_block(program_data, block_idx + 1, new_block)
     clear_block_line_count(program_data, block, block_idx)
-    #print "SPLIT BLOCK %d" % disassembly_data.get_block_data_type(block), hex(block.address), "->", hex(block.address + block.length), "LC", get_block_line_count_cached(program_data, block),",", hex(new_block.address), "->", hex(new_block.address + new_block.length), "LC", get_block_line_count_cached(program_data, new_block)
+    #if 0x5f266 <= new_block.address <= 0x5f288:
+    #    print "SPLIT BLOCK %d" % disassembly_data.get_block_data_type(block), hex(block.address), "->", hex(block.address + block.length), "LC", get_block_line_count_cached(program_data, block),",", hex(new_block.address), "->", hex(new_block.address + new_block.length), "LC", get_block_line_count_cached(program_data, new_block)
 
     return new_block, block_idx + 1
 
@@ -895,8 +906,8 @@ def get_uncertain_data_references(program_data):
             results.extend(block.references)
     return results
 
-def _locate_uncertain_code_references(program_data, address, block=None):
-    """ Check for candidate operand values in instructions within the data block from address onwards. """
+def _locate_uncertain_code_references(program_data, address, is_binary_file, block=None):
+    """ Check for candidate operand values in instructions within the code block from address onwards. """
     if block is None:
         block, block_idx = lookup_block_by_address(program_data, address)
     matches = []
@@ -908,15 +919,19 @@ def _locate_uncertain_code_references(program_data, address, block=None):
             address0 = addressN
             addressN += entry.num_bytes
             if addressN >= address:
-                # Is this statement suitable?  Need an 
-                for value, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
-                    if flags & 2: # MAF_ABSOLUTE
+                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).iteritems():
+                    do_match = False
+                    if is_binary_file:
+                        do_match = flags & (MAF_ABSOLUTE_ADDRESS | MAF_CONSTANT_VALUE)
+                    elif match_address not in program_data.loader_relocated_addresses:
+                        do_match = flags & MAF_ABSOLUTE_ADDRESS
+                    if do_match:
                         line_idx = get_line_number_for_address(program_data, address0)
                         code_string = get_file_line(program_data, line_idx, LI_INSTRUCTION)
                         operands_text = get_file_line(program_data, line_idx, LI_OPERANDS)
                         if len(operands_text):
                             code_string += " "+ operands_text
-                        matches.append((address0, value, code_string))
+                        matches.append((address0, match_address, code_string))
     return matches
 
 def get_uncertain_code_references(program_data):
@@ -1017,12 +1032,13 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
         affected_blocks.add(block)
         #print "set_block_data_type -> %d" % data_type, hex(block.address), "->", hex(block.address+block.length), "LC", block.line_count
 
+    is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
     for affected_block in affected_blocks:
         old_references = affected_block.references
         data_type_old = affected_block._old_data_type
         data_type_new = disassembly_data.get_block_data_type(affected_block)
         if data_type_new == disassembly_data.DATA_TYPE_CODE:
-            new_references = _locate_uncertain_code_references(program_data, affected_block.address, affected_block)
+            new_references = _locate_uncertain_code_references(program_data, affected_block.address, is_binary_file, affected_block)
         else:
             new_references = _locate_uncertain_data_references(program_data, affected_block.address)
         if old_references != new_references:
@@ -1030,7 +1046,7 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
             if program_data.uncertain_reference_modification_func is not None:                
                 program_data.uncertain_reference_modification_func(data_type_old, data_type_new, affected_block.address, affected_block.length)
 
-    # logger.debug("Changed data type at %X to %d", address, data_type)
+    logger.debug("Changed data type at %X to %d", address, data_type)
 
 
 def _process_block_as_ascii(program_data, block):
@@ -1122,7 +1138,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         data_bytes_to_skip = 0
         line_data = []
         found_terminating_instruction = False
-        # logger.debug("disassembling block: address=$%X length=%d", address, block.length)
+        #if address == 0x5F266:
+        #    logger.debug("disassembling block.1: address=$%X length=%d", address, block.length)
         while bytes_consumed < block.length:
             data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
             data_offset_start = block.segment_offset + bytes_consumed
@@ -1156,56 +1173,48 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
 
         # Discard any unprocessed block / jump over isolatible unprocessed instructions.
         if bytes_consumed < block.length:
-            new_code_address = None
-            if bytes_consumed == 0:
-                # If we encountered an unknown instruction at the start of a block.
-                if data_bytes_to_skip:
-                    # We'll split at this address, leaving the current block as a processed longword block.
-                    new_code_address = address + data_bytes_to_skip
-                else:
-                    logger.error("Skipping block at %X with no code (length: %X)", data_offset_start, block.length)
+            # [ (address, new_data_type, attempt_to_disassemble), ... ]
+            split_addresses = []
+            last_match_end_address = address + bytes_consumed
+            longword_flags = disassembly_data.get_data_type_block_flags(disassembly_data.DATA_TYPE_LONGWORD)
+            # Reasons we are here:                
+            if found_terminating_instruction:
+                # 1. We reached a terminating instruction before the end of the block (found_terminating_instruction is True).
+                #    ACTION: Split and mark trailing as of unprocessed longword type.
+                split_addresses.append((last_match_end_address, longword_flags, False))
+            elif data_bytes_to_skip:
+                # 2. We encountered a known quantifiable instruction 'A' we could not disassemble (data_bytes_to_skip > 0).
+                #    ACTION: Split before 'A' and mark it's block as processed longword type.
+                split_addresses.append((last_match_end_address, longword_flags | disassembly_data.BLOCK_FLAG_PROCESSED, False))
+                #    ACTION: Split after 'A' and mark trailing as of unprocessed longword type to be disassembled.
+                split_addresses.append((last_match_end_address + data_bytes_to_skip, longword_flags, True))
             else:
-                # Handle the case where we have one instruction and it's a final one.
-                if match_address == block.address:
-                    match_address += bytes_consumed
-                result = split_block(program_data, match_address)
-                if IS_SPLIT_ERR(result[1]):
-                    logger.error("_process_address_as_code/unrecognised-code: At $%06X unexpected splitting error %d, block address %X, bytes consumed %d, found terminating instruction %s", match_address, result[1], block.address, bytes_consumed, found_terminating_instruction)
-                    block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
-                    continue
-
-                trailing_block, trailing_block_idx = result
-                set_block_data_type(program_data, disassembly_data.DATA_TYPE_LONGWORD, trailing_block, block_idx=trailing_block_idx, work_state=work_state)
-
-                # If an unknown instruction was encountered.
-                if not found_terminating_instruction:
-                    # We are marking the code past any bytes to skip as processed here, so we need to mark that as unprocessed again when we split it off brlow.
-                    trailing_block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
-                    # If code resumes after analysis determines we can skip the unknown instruction as data.
-                    if data_bytes_to_skip:
-                        new_code_address = match_address + data_bytes_to_skip
+                if bytes_consumed == 0:
+                    # 3. Unexpected disassembly failure/error immediately at start of block.
+                    pass
                 else:
-                    trailing_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
+                    # 4. Unexpected disassembly failure/error but not at start of block.
+                    #    ACTION: Split after last instruction and mark trailing as processed longword type.
+                    split_addresses.append((last_match_end_address, longword_flags | disassembly_data.BLOCK_FLAG_PROCESSED, False))
 
-            if new_code_address is not None:
-                # TODO: Verify that the split "trailing" block was within the original block.
-                result = split_block(program_data, new_code_address)
-                if IS_SPLIT_ERR(result[1]):
-                    if result[1] == ERR_SPLIT_EXISTING:
-                        # We've skipped into an existing block, only continue disassembling if it is unprocessed.
-                        trailing_block, trailing_block_idx = lookup_block_by_address(program_data, new_code_address)
-                        if not trailing_block.flags & disassembly_data.BLOCK_FLAG_PROCESSED:
-                            disassembly_offsets.add(new_code_address)
-                    else:
-                        logger.error("_process_address_as_code/skipped-data: At $%06X unexpected splitting error #%d", new_code_address, result[1])
-                        block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
-                        continue
-                else:
-                    # We've split off a new block and will continue disassembling here.
-                    trailing_block, trailing_block_idx = result
-                    trailing_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
-                    set_block_data_type(program_data, disassembly_data.DATA_TYPE_LONGWORD, trailing_block, block_idx=trailing_block_idx, work_state=work_state)
-                    disassembly_offsets.add(new_code_address)
+            error = False
+            for split_address, split_flags, will_disassemble in split_addresses:
+                new_block, new_block_idx = split_block(program_data, split_address)
+                if IS_SPLIT_ERR(new_block_idx):
+                    logger.error("_process_address_as_code/unrecognised-code: At $%06X unexpected splitting error %d, block address %X, bytes consumed %d, found terminating instruction %s", split_address, new_block_idx, block.address, bytes_consumed, found_terminating_instruction)
+                    error = True
+                    break
+
+                split_data_type = disassembly_data.get_block_flags_data_type(split_flags)
+                set_block_data_type(program_data, split_data_type, new_block, block_idx=new_block_idx, work_state=work_state)
+                if split_flags & disassembly_data.BLOCK_FLAG_PROCESSED:
+                    new_block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
+                if will_disassemble:
+                    disassembly_offsets.add(split_address)
+            # TODO: Behaviour when a splitting error happens should likely differ depending on which split it happens to.
+            if error:
+                block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
+                continue
 
         # If there were no code statements identified, this will just be processed data.
         block.flags |= disassembly_data.BLOCK_FLAG_PROCESSED
@@ -1222,7 +1231,6 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         disassembly_data.set_block_data_type(temp_block, disassembly_data.DATA_TYPE_CODE)
         temp_block.line_data = line_data
         temp_block.line_count = get_block_line_count(program_data, temp_block)
-        #print "NEW CODE BLOCK", hex(temp_block.address),"->",hex(temp_block.address+temp_block.length), "LC", temp_block.line_count
 
         # 3. Notify listeners the change is about to happen (with metadata).
         line_count_delta = temp_block.line_count - old_line_count
@@ -1246,21 +1254,30 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         # Extract any addresses which are referred to, for later use.
         for type_id, entry in line_data:
             if type_id == disassembly_data.SLD_INSTRUCTION:
-                for match_address, flags in program_data.dis_get_match_addresses_func(entry).iteritems():
-                    if flags & 1: # MAF_CODE
+                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).iteritems():
+                    if flags & MAF_CODE:
                         disassembly_offsets.add(match_address)
                         insert_branch_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
-                    elif flags & 2: # MAF_ABSOLUTE
+                    elif flags & (MAF_ABSOLUTE_ADDRESS | MAF_CONSTANT_VALUE):
                         if match_address in program_data.loader_relocated_addresses:
                             search_address = match_address
                             while search_address < match_address + entry.num_bytes:
                                 if search_address in program_data.loader_relocatable_addresses:
                                     insert_reference_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
-                                    # print "ABS REF LOCATION: %X FOUND Imm ADDRESS %X INS %s" % (entry.pc, match_address, entry.specification.key)
                                     break
                                 search_address += 1
-                    elif flags & 4 != 4: # !MAF_UNCERTAIN
-                        insert_reference_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
+                    elif flags & MAF_UNCERTAIN != MAF_UNCERTAIN:
+                        # This code is unverified.  For relocated programs, it was creating symbols for arbitrary Imm values.
+                        do_insert = None
+                        if flags & MAF_CERTAIN or (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE:
+                            do_insert = True
+                        elif match_address in program_data.loader_relocated_addresses:
+                            do_insert = True
+                        if do_insert:
+                            insert_reference_address(program_data, match_address, entry.pc-2, pending_symbol_addresses)
+                        else:
+                            # TODO: These need to be handled.
+                            print "SKIP REF ADDRESS INSERT SYM, instruction address: %x operand address %x" % (entry.pc-2, match_address)
 
         # DEBUG BLOCK SPILLING BASED ON LOGICAL ASSUMPTION OF MORE CODE.
         if bytes_consumed == block.length and not found_terminating_instruction and not data_bytes_to_skip:
@@ -1472,21 +1489,21 @@ def onload_make_address_ranges(program_data):
                 segment_ids.add(segment_id)
                 program_data.address_ranges[i] = address0, new_addressN-1, segment_ids
                 break
-            elif address0 == new_addressN+1:
+            elif address0 == new_addressN:
                 segment_ids.add(segment_id)
-                program_data.address_ranges[i] = new_address0, addressN-1, segment_ids
+                program_data.address_ranges[i] = new_address0, addressN, segment_ids
                 break
         else:
             program_data.address_ranges.append((new_address0, new_addressN-1, set([segment_id])))
 
 def onload_cache_uncertain_references(program_data):
-    if program_data.flags & disassembly_data.PDF_BINARY_FILE == disassembly_data.PDF_BINARY_FILE:
-        for block in program_data.blocks:
-            data_type = disassembly_data.get_block_data_type(block)
-            if data_type == disassembly_data.DATA_TYPE_CODE:
-                block.references = _locate_uncertain_code_references(program_data, block.address, block)
-            else:
-                block.references = _locate_uncertain_data_references(program_data, block.address, block)
+    is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
+    for block in program_data.blocks:
+        data_type = disassembly_data.get_block_data_type(block)
+        if data_type == disassembly_data.DATA_TYPE_CODE:
+            block.references = _locate_uncertain_code_references(program_data, block.address, is_binary_file, block)
+        elif is_binary_file:
+            block.references = _locate_uncertain_data_references(program_data, block.address, block)
 
 
 def cache_segment_data(program_data, f):

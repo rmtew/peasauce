@@ -54,8 +54,14 @@ BLOCK_SPLIT_BITMASK     = BLOCK_FLAG_ALLOC | DATA_TYPE_BITMASK | BLOCK_FLAG_PROC
 
 NUMERIC_DATA_TYPES = (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE)
 
+def get_block_flags_data_type(flags):
+    return (flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
+
+def get_data_type_block_flags(data_type):
+    return ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
+
 def get_block_data_type(block):
-    return (block.flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
+    return get_block_flags_data_type(block.flags)
 
 def set_block_data_type(block, data_type):
     """
@@ -64,7 +70,7 @@ def set_block_data_type(block, data_type):
     """
     block._old_data_type = get_block_data_type(block)
     block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
-    block.flags |= ((data_type & DATA_TYPE_BITMASK) << DATA_TYPE_BIT0)
+    block.flags |= get_data_type_block_flags(data_type)
 
 ## SegmentBlock line data entry type ids.
 

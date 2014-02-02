@@ -991,8 +991,10 @@ def get_operand_string(instruction, operand, vars, lookup_symbol=None):
         return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
 
 MAF_CODE = 1
-MAF_ABSOLUTE = 2
-MAF_UNCERTAIN = 4
+MAF_ABSOLUTE_ADDRESS = 2
+MAF_CONSTANT_VALUE = 4
+MAF_UNCERTAIN = 8
+MAF_CERTAIN = 16
 
 def get_match_addresses(match):
     # Is it an instruction that exits (RTS, RTR)?
@@ -1005,21 +1007,24 @@ def get_match_addresses(match):
     def _extract_address(match, opcode_idx):
         opcode = match.opcodes[opcode_idx]
         if opcode.key == "PCid16":
-            return match.pc + _signed_value("W", opcode.vars["D16"]) # JSR, JMP?
+            return match.pc + _signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
         elif opcode.key == "PCiId8":
-            return match.pc + _signed_value("W", opcode.vars["D8"]) # JSR, JMP?
+            return match.pc + _signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
         elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
-            return opcode.vars["xxx"]
+            return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
         elif opcode.specification.key == "DISPLACEMENT": # JMP
-            return match.pc + opcode.vars["xxx"]
+            return match.pc + opcode.vars["xxx"], 0
         return None
 
     address = None
+    flags = 0
     instruction_key = match.specification.key
     if instruction_key in ("RTS", "RTR"):
         pass
     elif instruction_key in ("JSR", "JMP"):
-        address = _extract_address(match, 0)
+        result = _extract_address(match, 0)
+        if result is not None:
+            address, flags = result
     elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
         address = match.pc + match.opcodes[0].vars["xxx"]
     elif instruction_key == "DBcc":
@@ -1027,35 +1032,37 @@ def get_match_addresses(match):
 
     ret = {}
     if address is not None:
-        ret[address] = MAF_CODE
+        ret[address] = (None, flags | MAF_CODE)
+        return ret
 
     # Locate any general addressing modes which infer labels.
+    # MAF_CERTAIN -> definitely should be mapped to labels.
     for i, opcode in enumerate(match.opcodes):
         if opcode.key == "PCid16":
             address = match.pc + _signed_value("W", opcode.vars["D16"])
             if address not in ret:
-                ret[address] = 0
+                ret[address] = (i, MAF_CERTAIN)
         elif opcode.key == "PCiId8":
             address = match.pc + _signed_value("W", opcode.vars["D8"])
             if address not in ret:
-                ret[address] = 0
+                ret[address] = (i, MAF_CERTAIN)
         elif opcode.key in ("AbsL", "AbsW"):
             address = opcode.vars["xxx"]
             if address not in ret:
-                ret[address] = 0
+                ret[address] = (i, MAF_ABSOLUTE_ADDRESS)
         elif opcode.key == "Imm" and i == 0:
             # move.w #xxx, SR (no) / move.l #xxx, a0 (yes) / move.l #xxx, AR (yes)
             # Is the destination an address register?
-            # Is the 
             # Imm, AbsL; Imm, DR; Imm, AR
             address = opcode.vars["xxx"]
-            bits = ret.get(address, 0) | MAF_ABSOLUTE
-            if match.specification.key != "MOVE.L":
-                if bits & MAF_CODE != MAF_CODE:
-                    bits |= MAF_UNCERTAIN
+            bits = ret.get(address, (i, 0))
+            bits = (bits[0], bits[1] | MAF_CONSTANT_VALUE)
+            if True or match.specification.key != "MOVE.L":
+                if bits[1] & MAF_CODE != MAF_CODE:
+                    bits = (bits[0], bits[1] | MAF_UNCERTAIN)
             ret[address] = bits
         elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
-            logger.error("Unhandled opcode EA modde (680x0?): %s", opcode.key)
+            logger.error("Unhandled opcode EA mode (680x0?): %s", opcode.key)
 
     return ret
 
