@@ -18,12 +18,12 @@ Using Resource to disassemble within an Amiga emulator is still a wonderful expe
 
 Peasauce can currently do the following:
 
-* Load and attempt to disassemble Amiga executable files.
-* Load and attempt to disassemble Atari ST executable files.
-* Load and attempt to disassemble X68000 executable files.
-* Attempt to disassemble loaded M68000 code
+* Load and attempt to disassemble Amiga m68k executable files.
+* Load and attempt to disassemble Atari ST m68k executable files.
+* Load and attempt to disassemble X68000 m68k executable files.
+* Load and attempt to disassemble m68k binary files, with specified load and entrypoint addresses.
 
-Note that there are limitations, files which include unsupported assembly code or use special executable file features may among other things not get loaded, or disassembled fully.
+While there is comprehensive m68k support, it is not currently complete.  There are also cases where special features of certain executable file formats are not currently supported.
 
 ![Editing a label](http://i.imgur.com/cUMLj.png "Editing a label")
 
@@ -31,7 +31,7 @@ Note that there are limitations, files which include unsupported assembly code o
 
 ## Licensing
 
-All files that comprise this are released under the MIT license.
+This project is licensed under the MIT license.
 
 ## Installation
 
@@ -75,7 +75,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
-* Disassembly: Instruction "move.l $(4.w), a6" is interpreted as referring to offset 4 in executables.  This is a more general problem that creates a label for each absolute address.
+* Project saving: Loading saved projects is currently broken.
 * Disassembly: Instruction "JMP (lbL0057B4,PC,D1.W*1)" is interpreted as lbL0057B4 being a valid jump address and an attempt is made to disassemble there.
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
@@ -85,6 +85,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Functionality
 
+* UI: Add window to show orphaned blocks.  Address, length, leading data..?
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.

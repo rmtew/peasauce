@@ -34,6 +34,12 @@ class System(object):
         if file_info.loader_options is None or not file_info.loader_options.is_binary_file:
             return False
         self.set_arch_name(file_info.loader_options.dis_name)
+        
+        if f_length is None:
+            file_offset2 = input_file.tell()
+            input_file.seek(0, os.SEEK_END)
+            f_length = input_file.tell()
+            input_file.seek(file_offset2, os.SEEK_SET)
 
         file_size = f_length
         relocations = []
