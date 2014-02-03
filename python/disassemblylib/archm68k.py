@@ -826,6 +826,7 @@ def _match_instructions(data, data_idx, data_abs_idx):
 
     word1, data_idx = _get_word(data, data_idx)
     if word1 is None: # Disassembly failure
+        logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
         return [], data_idx
 
     matches = []

@@ -16,7 +16,7 @@ MAF_CERTAIN = 16
 import bisect
 import logging
 import os
-import traceback
+#import traceback
 
 #from disassembly_data import *
 import loaderlib
@@ -57,7 +57,7 @@ def realise_instruction_entry(program_data, block, block_offset):
     data_offset_start = block.segment_offset + block_offset
     match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, block.address + block_offset)
     if match is None:
-        raise RuntimeError("Catastrophic failure at: %x %x" % (data_offset_start, block.address + block_offset))
+        raise RuntimeError("Catastrophic failure. data_ofs=%d block/seg_ofs=%d mem_addr=%x data_len=%d" % (data_offset_start, block.segment_offset, block.address + block_offset, len(data)))
     return match
 
 
@@ -127,7 +127,7 @@ def get_code_block_info_for_address(program_data, address):
                 return previous_result
 
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, block.segment_offset + entry)
+                entry = realise_instruction_entry(program_data, block, entry)
             current_result = line_number, entry
 
             # Exactly this instruction.
@@ -783,8 +783,6 @@ def split_block(program_data, address, own_midinstruction=False):
     segment_length = loaderlib.get_segment_length(segments, block.segment_id)
     if address < segment_address or address >= segment_address + segment_length:
         logger.error("Tried to split at out of bounds address: %06X not within %06X-%06X", address, segment_address, segment_address+segment_length-1)
-        #import traceback
-        #traceback.print_stack()
         return block, ERR_SPLIT_BOUNDS
 
     block_data_type = disassembly_data.get_block_data_type(block)

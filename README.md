@@ -75,7 +75,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Bugs
 
-* Project saving: Loading saved projects is currently broken.
 * Disassembly: Instruction "JMP (lbL0057B4,PC,D1.W*1)" is interpreted as lbL0057B4 being a valid jump address and an attempt is made to disassemble there.
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
 * Metadata: If a code is being processed, and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
