@@ -288,14 +288,4 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    if False:
-        suite = unittest.TestSuite()
-        
-        for ob in globals().values():
-            if type(ob) is types.TypeType:
-                if issubclass(ob, unittest.TestCase):
-                    subsuite = unittest.TestLoader().loadTestsFromTestCase(ob)
-                    suite.addTests(subsuite)
-        runner = unittest.TextTestRunner(verbosity=2)
-        runner.run(suite)
     unittest.main()
