@@ -1563,6 +1563,13 @@ def run():
     # QT will remove it's own arguments from argc, but this does not apply when
     # it is used in PySide.
     def _arg_file_load():
+        """
+        Initial very simple argument parsing.  There are three cases:
+        - Load an executable file.
+        - Load a project file, with optional input file path.
+        - Load a binary file, specifying arch, load address and entrypoint address.
+        See the syntax strings printed out on error, for more detail.
+        """
         file_name = None
         input_file_name = None
         arch_name = None
@@ -1573,12 +1580,7 @@ def run():
             import toolapi
             if len(sys.argv) > 1:
                 file_name = sys.argv[1]
-                if len(sys.argv) >= 5:
-                    if len(sys.argv) == 6:
-                        if not file_name.endswith("."+ PROJECT_SUFFIX):
-                            error_text = "expected project file: "+ file_name
-                        else:
-                            input_file_name = sys.argv[5]
+                if len(sys.argv) == 5:
                     arch_name = sys.argv[2]
                     if arch_name.lower() not in disassemblylib.get_arch_names():
                         error_text = "arch: not recognised"
@@ -1614,7 +1616,9 @@ def run():
             print "error:", error_text
             print "%s: <executable file>" % sys.argv[0]
             print "%s: <project file> <input file>" % sys.argv[0]
-            print "%s: <binary file> <arch name> <load address> <entry address> [input file]" % sys.argv[0]
+            print "%s: <binary file> <arch name> <load address> <entry address>" % sys.argv[0]
+            print
+            print "Addresses should use a leading '$' or '0x' to indicate they are hex, or base 16."
             return False
         return True
     if _arg_file_load():
