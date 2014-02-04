@@ -1563,22 +1563,60 @@ def run():
     # QT will remove it's own arguments from argc, but this does not apply when
     # it is used in PySide.
     def _arg_file_load():
+        file_name = None
+        input_file_name = None
+        arch_name = None
+        load_address = None
+        entrypoint_address = None
+        error_text = None
         if len(sys.argv) > 1:
             import toolapi
             if len(sys.argv) > 1:
                 file_name = sys.argv[1]
-                input_file_name = None
-                if file_name.endswith("."+ PROJECT_SUFFIX) and len(sys.argv) == 3:
-                    input_file_name = sys.argv[2]
-            toolapiob = toolapi.ToolAPI(window.editor_state)
-            result = toolapiob.load_file(file_name, input_file_name)
-            if type(result) is not tuple:
-                print "load failure:", result
-                print "%s: <executable file>" % sys.argv[0]
-                print "%s: <project file> <input file>" % sys.argv[0]
-                print "%s: <binary file> <load address> <entry address> [DOES NOT WORK YET]" % sys.argv[0]
-                return False
-            return True
+                if len(sys.argv) >= 5:
+                    if len(sys.argv) == 6:
+                        if not file_name.endswith("."+ PROJECT_SUFFIX):
+                            error_text = "expected project file: "+ file_name
+                        else:
+                            input_file_name = sys.argv[5]
+                    arch_name = sys.argv[2]
+                    if arch_name.lower() not in disassemblylib.get_arch_names():
+                        error_text = "arch: not recognised"
+                    else:
+                        def process_address_string(s):
+                            s = s.strip().lower()
+                            if s.startswith("$"):
+                                return int(s[1:], 16)
+                            elif s.startswith("0x"):
+                                return int(s[2:], 16)
+                            else:
+                                return int(s)
+                        try:
+                            load_address = process_address_string(sys.argv[3])
+                            try:
+                                entrypoint_address = process_address_string(sys.argv[4])
+                            except ValueError:
+                                error_text = "entrypoint address: unable to extract valid value"
+                        except ValueError:
+                            error_text = "load address: unable to extract valid value"
+                elif len(sys.argv) == 3:
+                    if not file_name.endswith("."+ PROJECT_SUFFIX):
+                        error_text = "expected project file: "+ file_name
+                    else:
+                        input_file_name = sys.argv[2]
+            if error_text is None and file_name is not None:
+                toolapiob = toolapi.ToolAPI(window.editor_state)
+                if arch_name:
+                    error_text = toolapiob.load_binary_file(file_name, arch_name, load_address, entrypoint_address-load_address, input_file_name)
+                else:
+                    error_text = toolapiob.load_file(file_name, input_file_name)
+        if type(error_text) is types.StringType:
+            print "error:", error_text
+            print "%s: <executable file>" % sys.argv[0]
+            print "%s: <project file> <input file>" % sys.argv[0]
+            print "%s: <binary file> <arch name> <load address> <entry address> [input file]" % sys.argv[0]
+            return False
+        return True
     if _arg_file_load():
         # Run successfully.
         sys.exit(app.exec_())
