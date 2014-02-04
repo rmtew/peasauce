@@ -153,8 +153,7 @@ class EditorState(object):
         self.clients = weakref.WeakSet()
         self.reset_state(None)
 
-    def __del__(self):
-        # A worker thread which has been used, will have self-references to keep it alive.  This will clean up those.
+    def on_app_exit(self):
         self.worker_thread.stop()
 
     def register_client(self, client):
@@ -563,6 +562,7 @@ class EditorState(object):
                         self.reset_state(acting_client)
                         return errmsg
                     disassembly.cache_segment_data(self.disassembly_data, input_data_file)
+                    disassembly.load_project_file_finalise(self.disassembly_data)
 
         entrypoint_address = disassembly.get_entrypoint_address(self.disassembly_data)
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, entrypoint_address)

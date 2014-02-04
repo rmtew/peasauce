@@ -1329,12 +1329,13 @@ def load_project_file(save_file, file_name, work_state=None):
 
     onload_set_disassemblylib_functions(program_data)
     onload_make_address_ranges(program_data)
-    onload_cache_uncertain_references(program_data)
 
     DEBUG_log_load_stats(program_data)
 
     return program_data, get_file_line_count(program_data)
 
+def load_project_file_finalise(program_data):
+    onload_cache_uncertain_references(program_data)    
 
 def load_file(input_file, new_options, file_name, work_state=None):
     loader_options = None

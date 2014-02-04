@@ -36,7 +36,7 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
         self.toolapiob = toolapi.ToolAPI()
 
     def tearDown(self):
-        self.toolapiob = None
+        self.toolapiob.on_app_exit()
 
     def test_upgrade_v2_to_vCURRENT(self):
         if "TESTDATA_PATH" not in os.environ:
@@ -64,9 +64,8 @@ class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
         self.toolapiob = toolapi.ToolAPI()
 
     def tearDown(self):
-        self.toolapiob = None
+        self.toolapiob.on_app_exit()
 
-    @unittest.expectedFailure
     def test_bug_monam302_00004_reference(self):
         FILE_NAME = "samples/amiga-executable/MonAm302"
         if not os.path.exists(FILE_NAME):
@@ -95,7 +94,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
         self.toolapiob = toolapi.ToolAPI()
 
     def tearDown(self):
-        self.toolapiob = None
+        self.toolapiob.on_app_exit()
 
     def test_bug_conqueror_4e0f6_data_to_code_leak_4e144_data_reference(self):
         FILE_NAME = "samples/amiga-binary/conqueror-game-load21000-entrypoint57B8A"
@@ -184,7 +183,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         self.data_rows = [ [3], [7], [8], [11] ]
         self.uncertain_data_references_model._row_data = self.data_rows[:]
 
-        self.disassembly_uncertain_reference_modification = qtui.MainWindow.disassembly_uncertain_reference_modification.im_func
+        self.on_uncertain_reference_modification = qtui.MainWindow.on_uncertain_reference_modification.im_func
 
     def tearDown(self):
         self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = disassembly
@@ -193,35 +192,35 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_leading_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 1)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 1, 1))
 
         self.assertEqual(self.code_rows[1:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_leading_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 3)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 1, 3))
 
         self.assertEqual(self.code_rows[2:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 10, 1)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 10, 1))
 
         self.assertEqual(self.code_rows[:-1], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 7, 4)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 7, 4))
 
         self.assertEqual(self.code_rows[:-2], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_mid_block_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 3)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 5, 3))
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:3] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -229,7 +228,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_blocks_not_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = []
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 5)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 5, 5))
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:4] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -237,21 +236,21 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_leading_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[0:1]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 1)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 1, 1))
 
         self.assertEqual(self.code_rows[1:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.code_rows[0:1] + self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_leading_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[0:2]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 1, 3)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 1, 3))
 
         self.assertEqual(self.code_rows[2:], self.uncertain_code_references_model._row_data)
         self.assertEqual(self.code_rows[0:2] + self.data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[-1:]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 10, 1)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 10, 1))
 
         self.assertEqual(self.code_rows[:-1], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-1:]
@@ -260,7 +259,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_trailing_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[-2:]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 7, 4)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 7, 4))
 
         self.assertEqual(self.code_rows[:-2], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-2:]
@@ -269,7 +268,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_block_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[2:3]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 3)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 5, 3))
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:3] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -279,7 +278,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
     def test_mid_blocks_bidirectional(self):
         self.fake_disassembly_module._next_uncertain_references = self.code_rows[2:4]
-        self.disassembly_uncertain_reference_modification(self, "CODE", "DATA", 5, 5)
+        self.on_uncertain_reference_modification(self, ("CODE", "DATA", 5, 5))
 
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:4] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
@@ -289,4 +288,14 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if False:
+        suite = unittest.TestSuite()
+        
+        for ob in globals().values():
+            if type(ob) is types.TypeType:
+                if issubclass(ob, unittest.TestCase):
+                    subsuite = unittest.TestLoader().loadTestsFromTestCase(ob)
+                    suite.addTests(subsuite)
+        runner = unittest.TextTestRunner(verbosity=2)
+        runner.run(suite)
     unittest.main()

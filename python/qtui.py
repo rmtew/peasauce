@@ -510,7 +510,7 @@ class MainWindow(QtGui.QMainWindow):
         """ Intercept the window close event and anything which needs to happen first. """
 
         # Needed to allow the script to exit (ensures the editor state worker thread is exited).
-        self.editor_state = None
+        self.editor_state.on_app_exit()
 
         # Persist window layout.
         self._set_setting("window-geometry", self.saveGeometry())
@@ -984,7 +984,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def on_uncertain_reference_modification(self, args):
         data_type_from, data_type_to, address, length = args
-        # logger.info("disassembly_uncertain_reference_modification: %s %s %s %s", data_type_from, data_type_to, address, length)
+        # logger.info("on_uncertain_reference_modification: %s %s %s %s", data_type_from, data_type_to, address, length)
         if data_type_from == "CODE":
             from_model = self.uncertain_code_references_model
         else:
@@ -1565,11 +1565,27 @@ def run():
     def _arg_file_load():
         if len(sys.argv) > 1:
             import toolapi
+            if len(sys.argv) > 1:
+                file_name = sys.argv[1]
+                input_file_name = None
+                if file_name.endswith("."+ PROJECT_SUFFIX) and len(sys.argv) == 3:
+                    input_file_name = sys.argv[2]
             toolapiob = toolapi.ToolAPI(window.editor_state)
-            toolapiob.load_file(sys.argv[-1])
-    _arg_file_load()
-
-    sys.exit(app.exec_())
+            result = toolapiob.load_file(file_name, input_file_name)
+            if type(result) is not tuple:
+                print "load failure:", result
+                print "%s: <executable file>" % sys.argv[0]
+                print "%s: <project file> <input file>" % sys.argv[0]
+                print "%s: <binary file> <load address> <entry address> [DOES NOT WORK YET]" % sys.argv[0]
+                return False
+            return True
+    if _arg_file_load():
+        # Run successfully.
+        sys.exit(app.exec_())
+        return
+    # Close window and exit (if only it worked...).
+    window.close()
+    QtGui.QApplication.quit()
 
 if __name__ == '__main__':
     run()

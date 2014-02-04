@@ -78,6 +78,9 @@ class ToolAPI(object):
             editor_state_ob = editor_state.EditorState()
         editor_state_ob.register_client(self.editor_client)
         self.editor_state = editor_state_ob
+        
+    def on_app_exit(self):
+        self.editor_state.on_app_exit()
 
     def reset_state(self):
         """ Called by the editor client. """
