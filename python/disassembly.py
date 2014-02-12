@@ -823,18 +823,18 @@ def split_block(program_data, address, own_midinstruction=False):
             if type_id in (disassembly_data.SLD_EQU_LOCATION_RELATIVE, disassembly_data.SLD_INSTRUCTION) and type(entry) is int:
                 split_block_line_data[i] = (type_id, entry-split_offset)
 
-        # References: divide between blocks at the given address.
-        if block.references is not None:
-            for i, entry in enumerate(block.references):
-                if entry[0] >= address:
-                    break
-            new_block_references = block.references[i:]
-            block.references[i:] = []
-        else:
-            new_block_references = None
-
         if address & 1:
             logger.debug("Splitting code block at odd address: %06X", address)
+
+    # References: divide between blocks at the given address.
+    if block.references is not None:
+        for i, entry in enumerate(block.references):
+            if entry[0] >= address:
+                break
+        new_block_references = block.references[i:]
+        block.references[i:] = []
+    else:
+        new_block_references = None
 
     # Truncate the preceding block the address is currently within.
     block.length = block_length_reduced
@@ -843,8 +843,8 @@ def split_block(program_data, address, own_midinstruction=False):
     new_block = disassembly_data.SegmentBlock()
     new_block.flags = block.flags & disassembly_data.BLOCK_SPLIT_BITMASK
     new_block.segment_id = block.segment_id
-    new_block.address = block.address + block.length
     new_block.segment_offset = block.segment_offset + block.length
+    new_block.address = block.address + block.length
     new_block.length = excess_length
 
     if block_data_type == disassembly_data.DATA_TYPE_CODE:
@@ -854,11 +854,13 @@ def split_block(program_data, address, own_midinstruction=False):
     elif block_data_type == disassembly_data.DATA_TYPE_ASCII:
         _process_block_as_ascii(program_data, block)
         _process_block_as_ascii(program_data, new_block)
-
+        
     insert_block(program_data, block_idx + 1, new_block)
     clear_block_line_count(program_data, block, block_idx)
     #if 0x5f266 <= new_block.address <= 0x5f288:
     #    print "SPLIT BLOCK %d" % disassembly_data.get_block_data_type(block), hex(block.address), "->", hex(block.address + block.length), "LC", get_block_line_count_cached(program_data, block),",", hex(new_block.address), "->", hex(new_block.address + new_block.length), "LC", get_block_line_count_cached(program_data, new_block)
+    
+    on_block_created(program_data, new_block)
 
     return new_block, block_idx + 1
 
@@ -929,7 +931,6 @@ def get_uncertain_code_references(program_data):
     return results
 
 def get_uncertain_references_by_address(program_data, address):
-    # That the block is a data block is known.
     block, block_idx = lookup_block_by_address(program_data, address)
     return block.references
 
@@ -958,79 +959,105 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
     # If the address was within the address range of another block, split off a block at the given address and use that.
     if IS_SPLIT_ERR(result[1]):
         if result[1] != ERR_SPLIT_EXISTING:
-            logger.error("set_data_type_at_address: At $%06X unexpected splitting error #%d", address, result[1])
+            logger.error("set_block_data_type: At $%06X unexpected splitting error #%d", address, result[1])
             return
     else:
         block, block_idx = result
 
     # At this point we are attempting to change a block from one data type to another.
-    affected_blocks = set([ ])
-    if data_type == disassembly_data.DATA_TYPE_CODE:
-        # Force this, so that the attempt can go ahead.
-        block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
-        # This can fail, so we do not explicitly change the block ourselves.
-        _process_address_as_code(program_data, address, set([ ]), work_state)
-
-        # Any block that is within the scope of the original block needs recalculation of its data precalculations.
-        block_idx_local = original_block_idx
-        while block_idx_local < len(program_data.blocks):
-            affected_block = program_data.blocks[block_idx_local]
-            if affected_block.address < original_block_address or affected_block.address >= original_block_address + original_block_length:
-                break
-            affected_blocks.add(affected_block)
-            block_idx_local += 1
-    else:
-        # 1. Get the pre-change data.
-        line0 = get_block_line_number(program_data, block_idx)
-        old_line_count = get_block_line_count_cached(program_data, block)
-
-        # 2. Apply the change to a temporary block.
-        temp_block = disassembly_data.SegmentBlock()
-        block.copy_to(temp_block)
-        disassembly_data.set_block_data_type(temp_block, data_type)
-        if data_type == disassembly_data.DATA_TYPE_ASCII:
-            _process_block_as_ascii(program_data, temp_block)
+    program_data.new_block_events = []
+    program_data.block_data_type_events = []
+    try:
+        if data_type == disassembly_data.DATA_TYPE_CODE:
+            # Force this, so that the attempt can go ahead.
+            block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
+            # This can fail, so we do not explicitly change the block ourselves.
+            _process_address_as_code(program_data, address, set([ ]), work_state)
         else:
-            temp_block.line_data = None
-        temp_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
-        temp_block.line_count = get_block_line_count(program_data, temp_block)
+            # 1. Get the pre-change data.
+            line0 = get_block_line_number(program_data, block_idx)
+            old_line_count = get_block_line_count_cached(program_data, block)
 
-        # 3. Notify listeners the change is about to happen (with metadata).
-        line_count_delta = temp_block.line_count - old_line_count
-        if line_count_delta != 0:
-            if program_data.pre_line_change_func:
-                if line_count_delta > 0:
-                    program_data.pre_line_change_func(line0 + old_line_count, line_count_delta)
-                else:
-                    program_data.pre_line_change_func(line0 + old_line_count + line_count_delta, line_count_delta)
+            # 2. Apply the change to a temporary block.
+            temp_block = disassembly_data.SegmentBlock(block)
+            disassembly_data.set_block_data_type(temp_block, data_type)
+            program_data.block_data_type_events.append((block, block_data_type, data_type, original_block_length))
+            if data_type == disassembly_data.DATA_TYPE_ASCII:
+                _process_block_as_ascii(program_data, temp_block)
+            else:
+                temp_block.line_data = None
+            temp_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
+            temp_block.line_count = get_block_line_count(program_data, temp_block)
 
-        # 4. Make the change.
-        temp_block.copy_to(block)
-        if line_count_delta != 0:
-            # We changed the line count, we need to flag a block line numbering recalculation.
-            if program_data.block_line0s_dirtyidx is None or program_data.block_line0s_dirtyidx > block_idx+1:
-                program_data.block_line0s_dirtyidx = block_idx+1
+            # 3. Notify listeners the change is about to happen (with metadata).
+            line_count_delta = temp_block.line_count - old_line_count
+            if line_count_delta != 0:
+                if program_data.pre_line_change_func:
+                    if line_count_delta > 0:
+                        program_data.pre_line_change_func(line0 + old_line_count, line_count_delta)
+                    else:
+                        program_data.pre_line_change_func(line0 + old_line_count + line_count_delta, line_count_delta)
 
-        if line_count_delta != 0:
-            if program_data.post_line_change_func:
-                program_data.post_line_change_func(None, line_count_delta)
+            # 4. Make the change.
+            temp_block.copy_to(block)
+            if line_count_delta != 0:
+                # We changed the line count, we need to flag a block line numbering recalculation.
+                if program_data.block_line0s_dirtyidx is None or program_data.block_line0s_dirtyidx > block_idx+1:
+                    program_data.block_line0s_dirtyidx = block_idx+1
 
-        affected_blocks.add(block)
-        #print "set_block_data_type -> %d" % data_type, hex(block.address), "->", hex(block.address+block.length), "LC", block.line_count
+            if line_count_delta != 0:
+                if program_data.post_line_change_func:
+                    program_data.post_line_change_func(None, line_count_delta)
 
+            #if program_data.state == disassembly_data.STATE_LOADED:
+            #    print "set_block_data_type -> %d" % data_type, hex(block.address), "->", hex(block.address+block.length), "LC", block.line_count
+    finally:
+        #if program_data.state == disassembly_data.STATE_LOADED:
+        #    print "program_data.new_block_events", program_data.new_block_events
+        #    print "program_data.block_data_type_events", program_data.block_data_type_events
+        event_blocks = {}
+        for event_block in program_data.new_block_events:
+            data_type = disassembly_data.get_block_data_type(event_block)
+            data_type_old = None
+            for t in program_data.block_data_type_events:
+                if t[0].address < event_block.address and t[0].address + t[3] > event_block.address:
+                    data_type_old = t[1]
+                    break
+            else:
+                # Error is raised here because this should not happen.
+                # TODO: Fix broken disassembly state in some standard way.
+                raise RuntimeError("unable to identify old block data type")
+            event_blocks[event_block.address] = (event_block, data_type_old, data_type, None)
+        for t in program_data.block_data_type_events:
+            event_blocks[t[0].address] = t
+        program_data.new_block_events = None
+        program_data.block_data_type_events = None
+    
+    # The type of the block has been changed.  If the new type was code, then that may have cascaded changing the
+    # type of other existing blocks, as well as splitting off parts of the original selected block.
+    #
+    # Blocks with changed types have to have new updated references,.
+    # New blocks should already have up-to-date references.
+    #
+    # In both cases, events need to be broadcast as otherwise the only place events are broadcast is on file load.
+    
     is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
-    for affected_block in affected_blocks:
+    for k, (affected_block, data_type_old, data_type_new, length_old) in event_blocks.iteritems():
+        do_broadcast = False
         old_references = affected_block.references
-        data_type_old = affected_block._old_data_type
-        data_type_new = disassembly_data.get_block_data_type(affected_block)
         if data_type_new == disassembly_data.DATA_TYPE_CODE:
-            new_references = _locate_uncertain_code_references(program_data, affected_block.address, is_binary_file, affected_block)
+            affected_block.references = _locate_uncertain_code_references(program_data, affected_block.address, is_binary_file, affected_block)
         else:
-            new_references = _locate_uncertain_data_references(program_data, affected_block.address)
-        if old_references != new_references:
-            affected_block.references = new_references
-            if program_data.uncertain_reference_modification_func is not None:                
-                program_data.uncertain_reference_modification_func(data_type_old, data_type_new, affected_block.address, affected_block.length)
+            affected_block.references = _locate_uncertain_data_references(program_data, affected_block.address)
+        if old_references != affected_block.references:
+            do_broadcast = True
+        if do_broadcast and program_data.uncertain_reference_modification_func is not None:
+            #if program_data.state == disassembly_data.STATE_LOADED:
+            #    print "BROADCAST", affected_block.sequence_id, hex(affected_block.address), "dt:", data_type_old, "->", data_type_new
+            program_data.uncertain_reference_modification_func(data_type_old, data_type_new, affected_block.address, affected_block.length)
+        #else:
+        #    if program_data.state == disassembly_data.STATE_LOADED:
+        #        print "NON-BROADCAST", affected_block.sequence_id, hex(affected_block.address), "dt:", data_type_old, "->", data_type_new
 
     logger.debug("Changed data type at %X to %d", address, data_type)
 
@@ -1106,6 +1133,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         address = disassembly_offsets.pop()
         block, block_idx = lookup_block_by_address(program_data, address)
         block_data_type = disassembly_data.get_block_data_type(block)
+        block_length_original = block.length
         # When the address is mid-block, split the associated portion of the block off.
         if address - block.address > 0:
             result = split_block(program_data, address)
@@ -1210,10 +1238,10 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         # 1. Get the pre-change data.
         line0 = get_block_line_number(program_data, block_idx)
         old_line_count = get_block_line_count_cached(program_data, block)
+        old_data_type = disassembly_data.get_block_data_type(block)
 
         # 2. Apply the change to a temporary block.
-        temp_block = disassembly_data.SegmentBlock()
-        block.copy_to(temp_block)
+        temp_block = disassembly_data.SegmentBlock(block)
         disassembly_data.set_block_data_type(temp_block, disassembly_data.DATA_TYPE_CODE)
         temp_block.line_data = line_data
         temp_block.line_count = get_block_line_count(program_data, temp_block)
@@ -1236,6 +1264,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
 
             if program_data.post_line_change_func:
                 program_data.post_line_change_func(None, line_count_delta)
+
+        on_block_data_type_change(program_data, block, old_data_type, disassembly_data.DATA_TYPE_CODE, block_length_original)
 
         # Extract any addresses which are referred to, for later use.
         for type_id, entry in line_data:
@@ -1329,6 +1359,7 @@ def load_project_file(save_file, file_name, work_state=None):
 
     onload_set_disassemblylib_functions(program_data)
     onload_make_address_ranges(program_data)
+    disassembly_data.program_data_set_state(program_data, disassembly_data.STATE_LOADED)
 
     DEBUG_log_load_stats(program_data)
 
@@ -1412,18 +1443,22 @@ def load_file(input_file, new_options, file_name, work_state=None):
         program_data.block_addresses.append(block.address)
         program_data.block_line0s.append(None)
         program_data.blocks.append(block)
+        
+        on_block_created(program_data, block)
 
         if segment_length > data_length:
             block = disassembly_data.SegmentBlock()
             block.flags |= disassembly_data.BLOCK_FLAG_ALLOC
             disassembly_data.set_block_data_type(block, disassembly_data.DATA_TYPE_LONGWORD)
             block.segment_id = segment_id
-            block.address = address + data_length
             block.segment_offset = data_length
+            block.address = address + data_length
             block.length = segment_length - data_length
             program_data.block_addresses.append(block.address)
             program_data.block_line0s.append(None)
             program_data.blocks.append(block)
+            
+            on_block_created(program_data, block)
 
     # Pass 2: Stuff.
     # Incorporate known symbols.
@@ -1455,6 +1490,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
     ## Any analysis / post-processing that does not change line count should go below.
     onload_cache_uncertain_references(program_data)
+    disassembly_data.program_data_set_state(program_data, disassembly_data.STATE_LOADED)
 
     DEBUG_log_load_stats(program_data)
 
@@ -1506,6 +1542,14 @@ def is_segment_data_cached(program_data):
         if loaderlib.get_segment_data(segments, i) is not None:
             return True
     return False
+    
+def on_block_created(program_data, block):
+    if program_data.new_block_events is not None:
+        program_data.new_block_events.append(block)
+        
+def on_block_data_type_change(program_data, block, old_data_type, new_data_type, old_length):
+    if program_data.block_data_type_events is not None:
+        program_data.block_data_type_events.append((block, old_data_type, new_data_type, old_length))
 
 def DEBUG_log_load_stats(program_data):
     # Log debug statistics

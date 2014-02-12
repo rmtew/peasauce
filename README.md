@@ -76,17 +76,17 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Bugs
 
 * Disassembly: Instruction "JMP (lbL0057B4,PC,D1.W*1)" is interpreted as lbL0057B4 being a valid jump address and an attempt is made to disassemble there.
-* Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled. 
-* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
+* Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled.  What was wanted here is now unclear with passing of time..
+* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.  What was wanted here is now unclear with passing of time..
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
-* UI: No progress dialog for lockup after successful loading of a file, while priming UI data.
-* UI: Can't pass a saved project path to 'run.sh' to be loaded, as this needs more work.
+* UI: There is a period of time between when the loading dialog goes away and when the view is updated with the loaded file data, where the user could use the UI and interfere with things in an unexpected way.  A progress dialog should stay on screen for the duration of this period to prevent this happening through the nature of modal dialogs.
 
 #### Functionality
 
 * UI: Add window to show orphaned blocks.  Address, length, leading data..?
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
+* UI: Add undo/redo functionality.
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
@@ -103,7 +103,6 @@ This is intended to be a summarised list of points that briefly note intended wo
 * Coding style: Look at ways to make the code more straightforward.
 * Disassembly: Do a correct formatting check on the instruction table II_NAME column.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
-* Disassembly: block._old_data_type is not a safe way to track block data type changes for later use, redress this.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 * Editor state: Error messages should be reconsidered.  Return the message name, not the text?
 * File loading: Saved projects save relocation metadata, but have to reload the relocation data to do the relocations (which recalculates the metadata).

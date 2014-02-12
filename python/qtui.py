@@ -984,7 +984,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def on_uncertain_reference_modification(self, args):
         data_type_from, data_type_to, address, length = args
-        # logger.info("on_uncertain_reference_modification: %s %s %s %s", data_type_from, data_type_to, address, length)
+        logger.info("on_uncertain_reference_modification: %s %s %x %d", data_type_from, data_type_to, address, length)
         if data_type_from == "CODE":
             from_model = self.uncertain_code_references_model
         else:
@@ -1000,10 +1000,11 @@ class MainWindow(QtGui.QMainWindow):
                 break
             if removal_idx0 is None:
                 removal_idx0 = i
-        if removal_idx0 is None:
-            removal_idx0 = 0
-        from_row_data[removal_idx0:removal_idxN] = []
-        from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
+        #print "FROM", (removal_idx0, removal_idxN-1)
+        if removal_idx0 is not None:
+            # REMOVAL_DATA = from_row_data[removal_idx0:removal_idxN]
+            from_row_data[removal_idx0:removal_idxN] = []
+            from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
 
         addition_rows = self.editor_state.get_uncertain_references_by_address(self.editor_client, address)
         if len(addition_rows):
@@ -1030,6 +1031,7 @@ class MainWindow(QtGui.QMainWindow):
                 to_idx += 1
             if len(insert_ranges):
                 to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
+                #print "TO", insert_ranges[-1][0], insert_ranges[-1][1]
 
     # TODO: FIX
     def _add_symbol_to_model(self, symbol_address, symbol_label, row_index=None):

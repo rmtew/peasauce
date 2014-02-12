@@ -16,6 +16,7 @@ import types
 import unittest
 
 import disassembly
+import disassembly_data
 import editor_state
 import qtui
 import toolapi
@@ -31,6 +32,20 @@ if LOGGING_SPAM:
     logger.addHandler(ch)
 
 
+class CORE_ProgramData_TestCase(unittest.TestCase):
+    def setUp(self):
+        self.program_data = disassembly_data.ProgramData()
+        
+    def test_state_initialisation(self):
+        """Program data requires a program to be loaded, so starts in the loading state."""
+        self.assertEqual(self.program_data.state, disassembly_data.STATE_LOADING)
+        
+    def test_state_modification(self):
+        """Program data gets it's state set to loaded when the program is finished loading."""
+        disassembly_data.program_data_set_state(self.program_data, disassembly_data.STATE_LOADED)
+        self.assertEqual(self.program_data.state, disassembly_data.STATE_LOADED)
+
+        
 class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
@@ -128,7 +143,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
         data_references = self.toolapiob.get_uncertain_data_references()
         for entry in data_references:
             if entry[0] == LEAKED_REFERENCE_ADDRESS:
-                self.fail("Found leaked data reference")
+                self.fail("Found leaked data reference %s" % str(entry))
                 break
 
 
