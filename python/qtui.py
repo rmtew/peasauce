@@ -458,12 +458,15 @@ class MainWindow(QtGui.QMainWindow):
 
         self.editor_state = editor_state.EditorState()
         self.editor_state.register_client(self.editor_client)
+        
+        self.tracked_models = []
 
         ## GENERATE THE UI
 
         self.setWindowTitle(APPLICATION_NAME)
 
         self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
+        self.tracked_models.append(self.list_model)
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table))
@@ -533,6 +536,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Log", self)
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
         self.log_model = create_table_model(self, [ ("Time", str), ("Level", str), ("System", str), ("Description", str), ])
+        self.tracked_models.append(self.log_model)
         self.log_table = create_table_widget(dock, self.log_model)
         self.log_table.setAlternatingRowColors(True) # Non-standard
         dock.setWidget(self.log_table)
@@ -543,6 +547,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Symbol List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.symbols_model = create_table_model(self, [ ("Address", hex), ("Symbol", str), ])
+        self.tracked_models.append(self.symbols_model)
         self.symbols_table = create_table_widget(dock, self.symbols_model)
         self.symbols_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.symbols_table)
@@ -560,6 +565,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_code_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.tracked_models.append(self.uncertain_code_references_model)
         self.uncertain_code_references_table = create_table_widget(dock, self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_code_references_table)
@@ -574,11 +580,9 @@ class MainWindow(QtGui.QMainWindow):
             self.scroll_to_address(new_address)
         self.uncertain_code_references_table.doubleClicked.connect(uncertain_code_references_doubleClicked)
         def uncertain_code_references_customContextMenuRequested(pos):
-            relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda*args:None)
-            clear_action = QtGui.QAction("Clear labelisation", self, statusTip="Clear any specified rows label usage", triggered=lambda*args:None)
+            relocate_action = QtGui.QAction("Create label", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_code_references_table, UNCERTAIN_ADDRESS_IDX))
             menu = QtGui.QMenu(self)
             menu.addAction(relocate_action)
-            menu.addAction(clear_action)
             menu.exec_(self.uncertain_code_references_table.mapToGlobal(pos))
         self.uncertain_code_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.uncertain_code_references_table.customContextMenuRequested.connect(uncertain_code_references_customContextMenuRequested)
@@ -587,6 +591,7 @@ class MainWindow(QtGui.QMainWindow):
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_data_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.tracked_models.append(self.uncertain_data_references_model)
         self.uncertain_data_references_table = create_table_widget(dock, self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_data_references_table)
@@ -600,25 +605,33 @@ class MainWindow(QtGui.QMainWindow):
             new_address = self.uncertain_data_references_model._lookup_cell_value(row_index, UNCERTAIN_ADDRESS_IDX)
             self.scroll_to_address(new_address)
         self.uncertain_data_references_table.doubleClicked.connect(uncertain_data_references_doubleClicked)
-        if False:
-            def uncertain_data_references_customContextMenuRequested(pos):
-                relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda*args:None)
-                clear_action = QtGui.QAction("Clear labelisation", self, statusTip="Clear any specified rows label usage", triggered=lambda*args:None)
-                menu = QtGui.QMenu(self)
-                menu.addAction(relocate_action)
-                menu.addAction(clear_action)
-                menu.exec_(self.uncertain_data_references_table.mapToGlobal(pos))
-            self.uncertain_data_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self.uncertain_data_references_table.customContextMenuRequested.connect(uncertain_data_references_customContextMenuRequested)
+        def uncertain_data_references_customContextMenuRequested(pos):
+            relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_data_references_table, UNCERTAIN_ADDRESS_IDX))
+            menu = QtGui.QMenu(self)
+            menu.addAction(relocate_action)
+            menu.exec_(self.uncertain_data_references_table.mapToGlobal(pos))
+        self.uncertain_data_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.uncertain_data_references_table.customContextMenuRequested.connect(uncertain_data_references_customContextMenuRequested)
 
         dock = QtGui.QDockWidget("Segment List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.segments_model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
-        self.segments_table = create_table_widget(dock, self.segments_model)
+        model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
+        self.tracked_models.append(model)
+        self.segments_table = create_table_widget(dock, model)
         dock.setWidget(self.segments_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-segments") # State/geometry persistence requirement.
+        
+        dock = QtGui.QDockWidget("Orphaned Blocks", self)
+        dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
+        model = create_table_model(self, [ ("Address", hex), ("Length", int), ("Source Code", str), ])
+        self.tracked_models.append(model)
+        self.orphaned_blocks_table = create_table_widget(dock, model)
+        dock.setWidget(self.orphaned_blocks_table)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+        self.viewMenu.addAction(dock.toggleViewAction())
+        dock.setObjectName("dock-orphaned-blocks") # State/geometry persistence requirement.
 
     def create_menus(self):
         self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
@@ -706,7 +719,7 @@ class MainWindow(QtGui.QMainWindow):
         self.reset_state()
 
     def reset_ui(self):
-        for model in (self.list_model, self.symbols_model, self.uncertain_data_references_model, self.uncertain_code_references_model, self.segments_model, self.log_model):
+        for model in self.tracked_models:
             model._clear_data()
 
     def reset_state(self):
@@ -1080,7 +1093,18 @@ class MainWindow(QtGui.QMainWindow):
 
         self._progress_dialog = None
         self._progress_dialog_steps = 0
+        
+    def _get_rows_from_indices(self, indices):
+        # Whether the selection model is per-row (rather than per-cell) or not, we get all
+        # selected cells.  So use a set generator expression to get a unique set of rows.
+        return { indice.row() for indice in indices }
 
+    def _create_labels_for_selected_rows(self, table, address_row_idx):
+        model = table.model()
+        selected_row_indices = self._get_rows_from_indices(table.selectedIndexes())
+        addresses = set()
+        for row_idx in selected_row_indices:
+            addresses.add(self.uncertain_code_references_model._lookup_cell_value(row_idx, address_row_idx))
 
 
 ## Option dialogs.

@@ -100,8 +100,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 #### Technical Debt
 
 * Binary files: Separate platform and file loading.  Then binary files can be assigned a platform.
-* Coding style: Look at ways to make the code more straightforward.
-* Disassembly: Do a correct formatting check on the instruction table II_NAME column.
+* Disassembly: Do an automated check on the instruction table II_NAME column for correct formatting.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 * Editor state: Error messages should be reconsidered.  Return the message name, not the text?

@@ -1061,3 +1061,23 @@ def is_final_instruction(match):
 def is_big_endian():
     return True
 
+def get_default_symbol_name(address, metadata):
+    if metadata == "midinstruction":
+        return "SYM%06X" % address
+    elif metadata == "bounds":
+        return "lbZ%06X" % address
+    if metadata == "ascii":
+        char = "A"
+    elif metadata == "code":
+        char = "C"
+    elif metadata == "data08":
+        char = "B"
+    elif metadata == "data16":
+        char = "W"
+    elif metadata == "data32":
+        char = "L"
+    else:
+        # Default to a character which means the unexpexted case.
+        char = "X"
+        logger.error("Asked for label name at address %X with metadata %s", address, metadata)
+    return "lb%s%06X" % (char, address)

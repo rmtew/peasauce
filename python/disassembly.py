@@ -1121,6 +1121,24 @@ def _get_byte_representation(byte):
     else:
         return "$%X" % byte
 
+__label_metadata = {
+    disassembly_data.DATA_TYPE_CODE: "code",
+    disassembly_data.DATA_TYPE_ASCII: "ascii",
+    disassembly_data.DATA_TYPE_BYTE: "data08",
+    disassembly_data.DATA_TYPE_WORD: "data16",
+    disassembly_data.DATA_TYPE_LONGWORD: "data32"
+}
+
+def get_auto_label(program_data, address, data_type):
+    return program_data.dis_get_default_symbol_name_func(address, __label_metadata[data_type]) 
+        
+def _get_auto_label_for_block(program_data, block=None, address=None, data_type=None):
+    if data_type is None:
+        data_type = disassembly_data.get_block_data_type(block)
+    if address is None:
+        address = block.address
+    return _get_auto_label(program_data, address, data_type)
+
 def _process_address_as_code(program_data, address, pending_symbol_addresses, work_state=None):
     debug_offsets = set()
     disassembly_offsets = set([ address ])
@@ -1309,15 +1327,16 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                 if IS_SPLIT_ERR(result[1]):
                     # These are the only possible block splitting errors.
                     if result[1] == ERR_SPLIT_BOUNDS:
-                        insert_symbol(program_data, address, "lbZ%06X" % address)
+                        label = program_data.dis_get_default_symbol_name_func(address, "bounds")
+                        insert_symbol(program_data, address, label)
                     elif result[1] == ERR_SPLIT_MIDINSTRUCTION:
-                        insert_symbol(program_data, address, "SYM%06X" % address)
+                        label = program_data.dis_get_default_symbol_name_func(address, "midinstruction") 
+                        insert_symbol(program_data, address, label)
                     else:
                         logger.error("_process_address_as_code/labeling: At $%06X unexpected splitting error #%d", address, result[1])
                     continue
                 block, block_idx = result
-            label = "lb"+ { disassembly_data.DATA_TYPE_CODE: "C", disassembly_data.DATA_TYPE_ASCII: "A", disassembly_data.DATA_TYPE_BYTE: "B", disassembly_data.DATA_TYPE_WORD: "W", disassembly_data.DATA_TYPE_LONGWORD: "L" }[disassembly_data.get_block_data_type(block)] + ("%06X" % address)
-            insert_symbol(program_data, address, label)
+            insert_symbol(program_data, address, _get_auto_label_for_block(program_data, block, address))
 
     for address in debug_offsets:
         block, block_idx = lookup_block_by_address(program_data, address)
