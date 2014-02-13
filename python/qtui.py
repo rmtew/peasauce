@@ -333,6 +333,7 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
     post_line_change_signal = QtCore.Signal(tuple)
     uncertain_reference_modification_signal = QtCore.Signal(tuple)
     symbol_added_signal = QtCore.Signal(tuple)
+    symbol_removed_signal = QtCore.Signal(tuple)
 
     def __init__(self, *args, **kwargs):
         super(QTUIEditorClient, self).__init__(*args, **kwargs)
@@ -464,6 +465,9 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def event_symbol_added(self, active_client, symbol_address, symbol_label):
         self.symbol_added_signal.emit((symbol_address, symbol_label))
+        
+    def event_symbol_removed(self, active_client, symbol_address, symbol_label):
+        self.symbol_removed_signal.emit((symbol_address, symbol_label))
 
 
 
@@ -487,6 +491,7 @@ class MainWindow(QtGui.QMainWindow):
         self.editor_client.post_line_change_signal.connect(self.on_post_line_change)
         self.editor_client.uncertain_reference_modification_signal.connect(self.on_uncertain_reference_modification)
         self.editor_client.symbol_added_signal.connect(self.on_disassembly_symbol_added)
+        self.editor_client.symbol_removed_signal.connect(self.on_disassembly_symbol_removed)
 
         self.editor_state = editor_state.EditorState()
         self.editor_state.register_client(self.editor_client)
@@ -983,6 +988,7 @@ class MainWindow(QtGui.QMainWindow):
         ## SYMBOLS
 
         row_data = self.editor_state.get_symbols(self.editor_client)
+        self.symbols_model._sort_list(row_data)
         self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
@@ -1013,10 +1019,19 @@ class MainWindow(QtGui.QMainWindow):
 
     def on_disassembly_symbol_added(self, args):
         symbol_address, symbol_label = args
+        logger.info("on_disassembly_symbol_added: %x %s", symbol_address, symbol_label)
 
-        model = self.symbols_model
-        model.insertRows(model.rowCount(), 1, QtCore.QModelIndex())
-        self._add_symbol_to_model(symbol_address, symbol_label)
+        self._add_rows_to_model(self.symbols_model, [ (symbol_address, symbol_label), ])
+
+        self.symbols_table.resizeColumnsToContents()
+        self.symbols_table.horizontalHeader().setStretchLastSection(True)
+
+    def on_disassembly_symbol_removed(self, args):
+        # TODO: When these events are actually sent, remove this note indicating the case is otherwise.
+        symbol_address, symbol_label = args
+        logger.info("on_disassembly_symbol_removed: UNTESTED %x %s", symbol_address, symbol_label)
+
+        self._remove_address_range_from_model(self.symbols_model, symbol_address, 1)
 
         self.symbols_table.resizeColumnsToContents()
         self.symbols_table.horizontalHeader().setStretchLastSection(True)
@@ -1028,8 +1043,19 @@ class MainWindow(QtGui.QMainWindow):
             from_model = self.uncertain_code_references_model
         else:
             from_model = self.uncertain_data_references_model
-        # Bundle addresses to remove into contiguous batches.
+        self._remove_address_range_from_model(from_model, address, length)
+
+        addition_rows = self.editor_state.get_uncertain_references_by_address(self.editor_client, address)
+        if len(addition_rows):
+            if data_type_to == "CODE":
+                to_model = self.uncertain_code_references_model
+            else:
+                to_model = self.uncertain_data_references_model
+            self._add_rows_to_model(to_model, addition_rows)
+
+    def _remove_address_range_from_model(self, from_model, address, length):
         from_row_data = from_model._get_row_data()
+        # Bundle addresses to remove into contiguous batches.
         removal_idx0 = removal_idxN = None
         batches = []
         for i, entry in enumerate(from_row_data):
@@ -1050,46 +1076,34 @@ class MainWindow(QtGui.QMainWindow):
             from_row_data[idx0:idxN+1] = []
             from_model._set_row_data(from_row_data, removal_rows=(idx0, idxN))
 
-        addition_rows = self.editor_state.get_uncertain_references_by_address(self.editor_client, address)
-        if len(addition_rows):
-            if data_type_to == "CODE":
-                to_model = self.uncertain_code_references_model
-            else:
-                to_model = self.uncertain_data_references_model
-            to_row_data = to_model._get_row_data()
-            # Ensure we do not break the original reference ordering.
-            addition_rows = addition_rows[:]
-            # Sort the rows to be added in the same ordering as the model rows.
-            to_model._sort_list(addition_rows)
+    def _add_rows_to_model(self, to_model, addition_rows):
+        to_row_data = to_model._get_row_data()
+        # Ensure we do not break the original reference ordering.
+        addition_rows = addition_rows[:]
+        # Sort the rows to be added in the same ordering as the model rows.
+        to_model._sort_list(addition_rows)
 
-            if to_model._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
-                op = operator.lt
-            else:
-                op = operator.ge
-            sort_column1 = to_model._sort_column1
-            to_index = from_index = 0
-            insert_ranges = []
-            while to_index < len(to_row_data) and from_index < len(addition_rows):
-                insert_row = addition_rows[from_index]
-                if op(insert_row[sort_column1], to_row_data[to_index][sort_column1]):
-                    to_row_data.insert(to_index, insert_row)
-                    if len(insert_ranges) and insert_ranges[-1][1] == to_index-1:
-                        insert_ranges[-1][1] = to_index
-                    else:
-                        if len(insert_ranges):
-                            to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
-                        insert_ranges.append([ to_index, to_index ])
-                    from_index += 1
-                to_index += 1
-            if len(insert_ranges):
-                to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
-
-    def _add_symbol_to_model(self, symbol_address, symbol_label, row_index=None):
-        model = self.symbols_model
-        if row_index is None:
-            row_index = model.rowCount()-1
-        model.setData(model.index(row_index, 0, QtCore.QModelIndex()), symbol_label)
-        model.setData(model.index(row_index, 1, QtCore.QModelIndex()), "%X" % symbol_address)
+        if to_model._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
+            op = operator.lt
+        else:
+            op = operator.ge
+        sort_column1 = to_model._sort_column1
+        to_index = from_index = 0
+        insert_ranges = []
+        while to_index < len(to_row_data) and from_index < len(addition_rows):
+            insert_row = addition_rows[from_index]
+            if op(insert_row[sort_column1], to_row_data[to_index][sort_column1]):
+                to_row_data.insert(to_index, insert_row)
+                if len(insert_ranges) and insert_ranges[-1][1] == to_index-1:
+                    insert_ranges[-1][1] = to_index
+                else:
+                    if len(insert_ranges):
+                        to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
+                    insert_ranges.append([ to_index, to_index ])
+                from_index += 1
+            to_index += 1
+        if len(insert_ranges):
+            to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
 
     def show_progress_dialog(self, args):
         title, description, can_cancel, step_count, abort_callback = args

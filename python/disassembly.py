@@ -676,12 +676,16 @@ def get_address_for_symbol(program_data, symbol_name):
 
 def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
+    
+def set_symbol_delete_func(program_data, f):
+    program_data.symbol_delete_func = f
 
 def insert_symbol(program_data, address, name):
     if not check_known_address(program_data, address):
         return
     program_data.symbols_by_address[address] = name
     if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
+    # symbol_delete_func
 
 def get_symbol_for_address(program_data, address, absolute_info=None):
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.

@@ -132,6 +132,8 @@ class ProgramData(object):
         "Callback application can register to be notified."
         self.symbol_insert_func = None
         "Callback application can register to be notified."
+        self.symbol_delete_func = None
+        "Callback application can register to be notified."
         self.uncertain_reference_modification_func = None
         "Callback application can register to be notified."
         self.pre_line_change_func = None

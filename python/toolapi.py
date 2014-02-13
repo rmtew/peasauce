@@ -66,6 +66,7 @@ class ToolEditorClient(editor_state.ClientAPI):
     def event_post_line_change(self, active_client, line0, line_count): pass
     def event_uncertain_reference_modification(self, active_client, data_type_from, data_type_to, address, length): pass
     def event_symbol_added(self, active_client, symbol_address, symbol_label): pass
+    def event_symbol_removed(self, active_client, symbol_address, symbol_label): pass
 
 
 class ToolAPI(object):

@@ -87,6 +87,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
 * UI: Add undo/redo functionality.
+* UI: Uncertain references: use context menu to add labels for one or more selected entries (should work in a macro-like fashion / window.toolapiob).
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.

@@ -126,7 +126,10 @@ class ClientAPI(object):
         raise NotImplementedError
 
     def event_symbol_added(self, active_client, symbol_address, symbol_label):
-        raise NotImplementedError        
+        raise NotImplementedError
+        
+    def event_symbol_removed(self, active_client, symbol_address, symbol_label):
+        raise NotImplementedError
 
 
 class WorkState(object):
@@ -410,6 +413,11 @@ class EditorState(object):
         for client in self.clients:
             client.event_symbol_added(client is acting_client, symbol_address, symbol_label)
 
+    def _symbol_delete_callback(self, symbol_address, symbol_label):
+        acting_client = None # TODO: Reconsider whether this is valid.
+        for client in self.clients:
+            client.event_symbol_removed(client is acting_client, symbol_address, symbol_label)
+
     def set_label_name(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
@@ -528,6 +536,7 @@ class EditorState(object):
         # Register our event dispatching callbacks.
         disassembly.set_uncertain_reference_modification_func(self.disassembly_data, self._uncertain_reference_modification_callback)
         disassembly.set_symbol_insert_func(self.disassembly_data, self._symbol_insert_callback)
+        disassembly.set_symbol_delete_func(self.disassembly_data, self._symbol_delete_callback)
 
         if line_count == 0:
             self.reset_state(acting_client)
