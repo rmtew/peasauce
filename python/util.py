@@ -16,3 +16,15 @@ def calculate_file_checksum(input_file):
         hasher.update(data)
         data = input_file.read(256 * 1024)
     return hasher.digest()
+
+def str_to_int(s):
+    """ Takes a string provided through user input, which may be hexadecimal or an integer, and
+        converts it to the actual corresponding integer.  """
+    s = s.strip().lower()
+    if s.startswith("$"):
+        return int(s[1:], 16)
+    elif s.startswith("0x"):
+        return int(s[2:], 16)
+    else:
+        return int(s)
+ 

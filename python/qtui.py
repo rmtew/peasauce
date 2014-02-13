@@ -25,6 +25,7 @@ import collections
 import cPickle
 import logging
 import new
+import operator
 import os
 import sys
 import time
@@ -37,6 +38,7 @@ import disassemblylib
 import editor_state
 import res
 import util
+import toolapi
 
 
 SETTINGS_FILE = "settings.pikl"
@@ -51,7 +53,7 @@ ERRMSG_BAD_NEW_PROJECT_OPTIONS = "ERRMSG_BAD_NEW_PROJECT_OPTIONS"
 logger = logging.getLogger("UI")
 
 
-UNCERTAIN_ADDRESS_IDX = 1
+UNCERTAIN_ADDRESS_IDX = 0
 
 
 class BaseItemModel(QtCore.QAbstractItemModel):
@@ -154,6 +156,9 @@ class CustomItemModel(BaseItemModel):
     """ The main reason for this subclass is to give custom column alignment. """
     def __init__(self, columns, parent):
         self._row_data = []
+        self._sort_column1 = 0
+        self._sort_column2 = 0
+        self._sort_order = QtCore.Qt.SortOrder.AscendingOrder
 
         super(CustomItemModel, self).__init__(columns, parent)
 
@@ -167,13 +172,41 @@ class CustomItemModel(BaseItemModel):
             self.endRemoveRows()
 
     def _get_row_data(self):
+        # If you use this data, remember it may be arbitrarily sorted by column.
         return self._row_data
 
     def _lookup_cell_value(self, row, column):
         return self._row_data[row][column]
+        
+    def _get_sort_column1(self):
+        return self._sort_column1
+        
+    def _get_sort_column2(self):
+        return self._sort_column2
 
     def rowCount(self, parent=None):
         return len(self._row_data)
+        
+    def _sort_list(self, l):
+        ix1 = self._sort_column1
+        ix2 = self._sort_column2
+        if self._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
+            f = lambda t1, t2: cmp((t1[ix1], t1[ix2]), (t2[ix1], t2[ix2]))
+        else:
+            f = lambda t1, t2: cmp((t2[ix1], t2[ix2]), (t1[ix1], t1[ix2]))
+        l.sort(f)
+
+    def sort(self, column, sort_order):
+        if self._sort_column1 == column and self._sort_order == sort_order:
+            return
+
+        self._sort_column1 = column
+        self._sort_order = sort_order
+        if len(self._row_data):
+            # The QT docs suggest this is the sequence for sorting.  Sequence has more steps, but not sure they apply.
+            self.layoutAboutToBeChanged.emit()
+            self._sort_list(self._row_data)
+            self.layoutChanged.emit()
 
 
 def create_table_model(parent, columns, _class=None):
@@ -274,6 +307,8 @@ def create_table_widget(parent, model, multiselect=False):
     table.setCornerButtonEnabled(False)
     table.setGridStyle(QtCore.Qt.NoPen)
     table.setSortingEnabled(False)
+    if isinstance(model, CustomItemModel):
+        table.sortByColumn(model._sort_column1, model._sort_order)
     # Hide row numbers.
     table.verticalHeader().setVisible(False)
     table.verticalHeader().setDefaultSectionSize(14)
@@ -305,7 +340,6 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         self.file_path = None
 
     def reset_state(self):
-        # TODO: owner.reset_all() or just owner.reset_state()
         self.file_path = None
         self.owner_ref().reset_state()
 
@@ -360,10 +394,7 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
         text = text.strip()
         if ok and text != '':
-            if text.startswith("0x") or text.startswith("$"):
-                return int(text, 16)
-            else:
-                return text
+            return util.str_to_int(text)
 
     def request_address_selection(self, title_text, body_text, button_text, address_rows, row_keys):
         """
@@ -435,6 +466,7 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         self.symbol_added_signal.emit((symbol_address, symbol_label))
 
 
+
 class MainWindow(QtGui.QMainWindow):
     _settings = None
 
@@ -458,6 +490,8 @@ class MainWindow(QtGui.QMainWindow):
 
         self.editor_state = editor_state.EditorState()
         self.editor_state.register_client(self.editor_client)
+        
+        self.toolapiob = toolapi.ToolAPI(self.editor_state)
         
         self.tracked_models = []
 
@@ -564,7 +598,7 @@ class MainWindow(QtGui.QMainWindow):
         # The "Uncertain Code References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_code_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_code_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.tracked_models.append(self.uncertain_code_references_model)
         self.uncertain_code_references_table = create_table_widget(dock, self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
@@ -590,7 +624,7 @@ class MainWindow(QtGui.QMainWindow):
         # The "Uncertain Data References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_data_references_model = create_table_model(self, [ ("F", str), ("Address", hex), ("Value", hex), ("Source Code", str), ])
+        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ]) 
         self.tracked_models.append(self.uncertain_data_references_model)
         self.uncertain_data_references_table = create_table_widget(dock, self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
@@ -934,7 +968,6 @@ class MainWindow(QtGui.QMainWindow):
         if not self.editor_state.in_loaded_state(self.editor_client):
             return
 
-        # TODO: Fix what the result is.
         # Successfully completed.
         self.on_file_opened()
 
@@ -956,19 +989,12 @@ class MainWindow(QtGui.QMainWindow):
 
         ## UNCERTAIN REFERENCES
 
-        def _lookup_cell_value(self, row, column):
-            if column == 0:
-                return u"\u2713"
-            return CustomItemModel._lookup_cell_value(self, row, column-1)
-
         results = self.editor_state.get_uncertain_code_references(self.editor_client)
-        self.uncertain_code_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_code_references_model, CustomItemModel)
         self.uncertain_code_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_code_references_table.resizeColumnsToContents()
         self.uncertain_code_references_table.horizontalHeader().setStretchLastSection(True)
 
         results = self.editor_state.get_uncertain_data_references(self.editor_client)
-        self.uncertain_data_references_model._lookup_cell_value = new.instancemethod(_lookup_cell_value, self.uncertain_data_references_model, CustomItemModel)
         self.uncertain_data_references_model._set_row_data(results, addition_rows=(0, len(results)-1))
         self.uncertain_data_references_table.resizeColumnsToContents()
         self.uncertain_data_references_table.horizontalHeader().setStretchLastSection(True)
@@ -1002,22 +1028,27 @@ class MainWindow(QtGui.QMainWindow):
             from_model = self.uncertain_code_references_model
         else:
             from_model = self.uncertain_data_references_model
+        # Bundle addresses to remove into contiguous batches.
         from_row_data = from_model._get_row_data()
-        removal_idx0 = None
-        removal_idxN = len(from_row_data)
+        removal_idx0 = removal_idxN = None
+        batches = []
         for i, entry in enumerate(from_row_data):
-            if entry[0] < address:
-                continue
-            if entry[0] >= address + length:
-                removal_idxN = i
-                break
-            if removal_idx0 is None:
-                removal_idx0 = i
-        #print "FROM", (removal_idx0, removal_idxN-1)
-        if removal_idx0 is not None:
-            # REMOVAL_DATA = from_row_data[removal_idx0:removal_idxN]
-            from_row_data[removal_idx0:removal_idxN] = []
-            from_model._set_row_data(from_row_data, removal_rows=(removal_idx0, removal_idxN-1))
+            if entry[0] >= address and entry[0] < address + length:
+                if removal_idx0 is None:
+                    removal_idx0 = i
+                else:
+                    removal_idxN = i
+            elif removal_idx0 is not None:
+                batches.append((removal_idx0, removal_idx0 if removal_idxN is None else removal_idxN))
+                removal_idx0 = removal_idxN = None
+        else:
+            if removal_idx0 is not None:
+                batches.append((removal_idx0, removal_idx0 if removal_idxN is None else removal_idxN))
+        # Clip out from the end backwards, so indexes do not change due to removal of preceding data.
+        batches.reverse()
+        for idx0, idxN in batches:
+            from_row_data[idx0:idxN+1] = []
+            from_model._set_row_data(from_row_data, removal_rows=(idx0, idxN))
 
         addition_rows = self.editor_state.get_uncertain_references_by_address(self.editor_client, address)
         if len(addition_rows):
@@ -1026,27 +1057,33 @@ class MainWindow(QtGui.QMainWindow):
             else:
                 to_model = self.uncertain_data_references_model
             to_row_data = to_model._get_row_data()
+            # Ensure we do not break the original reference ordering.
+            addition_rows = addition_rows[:]
+            # Sort the rows to be added in the same ordering as the model rows.
+            to_model._sort_list(addition_rows)
 
-            from_idx = 0
-            to_idx = 0
+            if to_model._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
+                op = operator.lt
+            else:
+                op = operator.ge
+            sort_column1 = to_model._sort_column1
+            to_index = from_index = 0
             insert_ranges = []
-            while to_idx < len(to_row_data) and from_idx < len(addition_rows):
-                insert_value = addition_rows[from_idx]
-                if insert_value < to_row_data[to_idx]:
-                    to_row_data.insert(to_idx, insert_value)
-                    if len(insert_ranges) and insert_ranges[-1][1] == to_idx-1:
-                        insert_ranges[-1][1] = to_idx
+            while to_index < len(to_row_data) and from_index < len(addition_rows):
+                insert_row = addition_rows[from_index]
+                if op(insert_row[sort_column1], to_row_data[to_index][sort_column1]):
+                    to_row_data.insert(to_index, insert_row)
+                    if len(insert_ranges) and insert_ranges[-1][1] == to_index-1:
+                        insert_ranges[-1][1] = to_index
                     else:
                         if len(insert_ranges):
                             to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
-                        insert_ranges.append([ to_idx, to_idx ])
-                    from_idx += 1
-                to_idx += 1
+                        insert_ranges.append([ to_index, to_index ])
+                    from_index += 1
+                to_index += 1
             if len(insert_ranges):
                 to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
-                #print "TO", insert_ranges[-1][0], insert_ranges[-1][1]
 
-    # TODO: FIX
     def _add_symbol_to_model(self, symbol_address, symbol_label, row_index=None):
         model = self.symbols_model
         if row_index is None:
@@ -1444,8 +1481,8 @@ class NewProjectDialog(QtGui.QDialog):
     def accept(self):
         if self.new_options.is_binary_file:
             self.new_options.dis_name = self.file_arch_value_combobox.currentText()
-            self.new_options.loader_load_address = to_int(self.processing_loadaddress_value_textedit.text())
-            self.new_options.loader_entrypoint_offset = to_int(self.processing_entryaddress_value_textedit.text()) - self.new_options.loader_load_address
+            self.new_options.loader_load_address = util.str_to_int(self.processing_loadaddress_value_textedit.text())
+            self.new_options.loader_entrypoint_offset = util.str_to_int(self.processing_entryaddress_value_textedit.text()) - self.new_options.loader_load_address
         return super(NewProjectDialog, self).accept()
 
 
@@ -1533,12 +1570,6 @@ class RowSelectionDialog(QtGui.QDialog):
         return super(RowSelectionDialog, self).accept()
 
 
-# TODO: int(, 16) chokes on $ prefix.  Done elsewhere too.
-def to_int(value):
-    if value.startswith("0x") or value.startswith("$"):
-        return int(value, 16)
-    return int(value)
-
 
 ## General script startup code.
 
@@ -1603,7 +1634,6 @@ def run():
         entrypoint_address = None
         error_text = None
         if len(sys.argv) > 1:
-            import toolapi
             if len(sys.argv) > 1:
                 file_name = sys.argv[1]
                 if len(sys.argv) == 5:
@@ -1611,18 +1641,10 @@ def run():
                     if arch_name.lower() not in disassemblylib.get_arch_names():
                         error_text = "arch: not recognised"
                     else:
-                        def process_address_string(s):
-                            s = s.strip().lower()
-                            if s.startswith("$"):
-                                return int(s[1:], 16)
-                            elif s.startswith("0x"):
-                                return int(s[2:], 16)
-                            else:
-                                return int(s)
                         try:
-                            load_address = process_address_string(sys.argv[3])
+                            load_address = util.str_to_int(sys.argv[3])
                             try:
-                                entrypoint_address = process_address_string(sys.argv[4])
+                                entrypoint_address = util.str_to_int(sys.argv[4])
                             except ValueError:
                                 error_text = "entrypoint address: unable to extract valid value"
                         except ValueError:
@@ -1633,11 +1655,10 @@ def run():
                     else:
                         input_file_name = sys.argv[2]
             if error_text is None and file_name is not None:
-                toolapiob = toolapi.ToolAPI(window.editor_state)
                 if arch_name:
-                    error_text = toolapiob.load_binary_file(file_name, arch_name, load_address, entrypoint_address-load_address, input_file_name)
+                    error_text = window.toolapiob.load_binary_file(file_name, arch_name, load_address, entrypoint_address-load_address, input_file_name)
                 else:
-                    error_text = toolapiob.load_file(file_name, input_file_name)
+                    error_text = window.toolapiob.load_file(file_name, input_file_name)
         if type(error_text) is types.StringType:
             print "error:", error_text
             print "%s: <executable file>" % sys.argv[0]

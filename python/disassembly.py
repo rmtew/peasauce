@@ -1137,7 +1137,7 @@ def _get_auto_label_for_block(program_data, block=None, address=None, data_type=
         data_type = disassembly_data.get_block_data_type(block)
     if address is None:
         address = block.address
-    return _get_auto_label(program_data, address, data_type)
+    return get_auto_label(program_data, address, data_type)
 
 def _process_address_as_code(program_data, address, pending_symbol_addresses, work_state=None):
     debug_offsets = set()
