@@ -644,18 +644,14 @@ def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_add
     if not check_known_address(program_data, address):
         return False
     # These get split as their turn to be disassembled comes up.
-    referring_addresses = program_data.branch_addresses.setdefault(address, set())
-    referring_addresses.add(src_abs_idx)
-    #program_data.branch_addresses[address] = referring_addresses
+    program_data.branch_addresses.setdefault(address, set()).add(src_abs_idx)
     pending_symbol_addresses.add(address)
     return True
 
 def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_addresses):
     if not check_known_address(program_data, address):
         return False
-    referring_addresses = program_data.reference_addresses.setdefault(address, set())
-    referring_addresses.add(src_abs_idx)
-    #program_data.reference_addresses[address] = referring_addresses
+    program_data.reference_addresses.setdefault(address, set()).add(src_abs_idx)
     pending_symbol_addresses.add(address)
     return True
 
@@ -685,7 +681,6 @@ def insert_symbol(program_data, address, name):
         return
     program_data.symbols_by_address[address] = name
     if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
-    # symbol_delete_func
 
 def get_symbol_for_address(program_data, address, absolute_info=None):
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
@@ -1028,9 +1023,9 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
                     data_type_old = t[1]
                     break
             else:
-                # Error is raised here because this should not happen.
-                # TODO: Fix broken disassembly state in some standard way.
-                raise RuntimeError("unable to identify old block data type")
+                logger.warning("set_block_data_type: unable to identify old block data type for %x", event_block.address)
+                # Assuming there was a simple split in this case.
+                data_type_old = data_type
             event_blocks[event_block.address] = (event_block, data_type_old, data_type, None)
         for t in program_data.block_data_type_events:
             event_blocks[t[0].address] = t
@@ -1134,7 +1129,11 @@ __label_metadata = {
 }
 
 def get_auto_label(program_data, address, data_type):
-    return program_data.dis_get_default_symbol_name_func(address, __label_metadata[data_type]) 
+    label = program_data.dis_get_default_symbol_name_func(address, __label_metadata[data_type])
+    # For now indicate whether address was relocated, to give a hint why there is a symbol, but no referrers.
+    if address in program_data.loader_relocated_addresses:
+        label += "r"
+    return label
         
 def _get_auto_label_for_block(program_data, block=None, address=None, data_type=None):
     if data_type is None:

@@ -339,10 +339,12 @@ class EditorState(object):
     def goto_referring_address(self, acting_client):
         current_address = self.get_address(acting_client)
         if current_address is None:
+            print "yyy",1
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         addresses = list(disassembly.get_referring_addresses(self.disassembly_data, current_address))
         if not len(addresses):
+            print "yyy",2
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         # Addresses appear in numerical order.
