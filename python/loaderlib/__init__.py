@@ -125,11 +125,8 @@ def relocate_segment_data(segments, data_types, relocations, relocatable_address
             for local_offset in local_offsets:
                 value = data_types.uint32_value(data[local_offset:local_offset+4])
                 address = value + target_address
-                if relocated_addresses is not None:
-                    if address not in relocated_addresses:
-                        relocated_addresses.add(address)
-                if relocatable_addresses is not None:
-                    relocatable_addresses.add(local_address + local_offset)
+                relocated_addresses.setdefault(address, set()).add(local_address + local_offset)
+                relocatable_addresses.add(local_address + local_offset)
                 data[local_offset:local_offset+4] = data_types.uint32_bytes(address)
 
 

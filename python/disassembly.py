@@ -659,8 +659,13 @@ def get_referring_addresses(program_data, address):
     referring_addresses = set()
     referring_addresses.update(program_data.branch_addresses.get(address, set()))
     referring_addresses.update(program_data.reference_addresses.get(address, set()))
+    other_addresses = program_data.loader_relocated_addresses.get(address, None)
+# TODO:  These other addresses don't seem to be treated as symbols, and are instead shown as values??
+# ....: ./run.sh samples/amiga-executable/Tutorial2
+    if other_addresses is not None:
+        referring_addresses.update(other_addresses)
     return referring_addresses
-
+    
 def get_entrypoint_address(program_data):
     return loaderlib.get_segment_address(program_data.loader_segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
 
@@ -1419,7 +1424,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
     program_data.loader_system_name = file_info.system.system_name
     program_data.loader_relocatable_addresses = set()
-    program_data.loader_relocated_addresses = set()
+    program_data.loader_relocated_addresses = dict()
 
     program_data.file_name = file_name
     input_file.seek(0, os.SEEK_END)
@@ -1493,7 +1498,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
     # Pass 3: Do a disassembly pass.
     # Static pre-known addresses to make into symbols / labels.
     existing_symbol_addresses = program_data.symbols_by_address.keys()
-    pending_symbol_addresses = program_data.loader_relocated_addresses.copy()
+    pending_symbol_addresses = set(program_data.loader_relocated_addresses)
     pending_symbol_addresses.add(entrypoint_address)
 
     # Follow the disassembly at the given address, as far as it takes us.

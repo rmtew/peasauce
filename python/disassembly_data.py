@@ -111,7 +111,7 @@ class ProgramData(object):
         self.loader_system_name = None
         self.loader_segments = []
         self.loader_relocated_addresses = None # set()
-        self.loader_relocatable_addresses = None # set()
+        self.loader_relocatable_addresses = None # dict()
         self.loader_entrypoint_segment_id = None
         self.loader_entrypoint_offset = None
         self.loader_internal_data = None # PERSISTED VIA LOADERLIB
