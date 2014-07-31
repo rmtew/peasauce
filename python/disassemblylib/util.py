@@ -1,5 +1,7 @@
 #
 
+# IDEA: Sizes should be specified for architectures in bits.  The size label should be an affectation.
+
 # See the end of the file for the __all__ definition.
 
 def memoize(function):
@@ -21,9 +23,17 @@ II_TEXT = 3
 II_ANDMASK = 4
 II_CMPMASK = 5
 II_EXTRAWORDS = 6
-II_SRCEAMASK = 7
-II_DSTEAMASK = 8
-II_LENGTH = 9
+II_OPERANDMASKS = 7
+II_LENGTH = 8
+
+# Syntax:               ...
+EAMI_LABEL = 0
+# Formatting:           Where the arguments are injected to make the operand source code.
+EAMI_FORMAT = 1
+EAMI_MATCH_FIELDS = 2
+EAMI_DATA_FIELDS = 3
+# Description:          Text description.
+EAMI_DESCRIPTION = 4
 
 def make_operand_mask(mask_string):
     and_mask = cmp_mask = 0
@@ -125,11 +135,10 @@ def process_instruction_list(_A, _list):
         entry.extend([ None ] * (II_LENGTH - len(entry)))
 
         # Matching and comparison masks.
-        and_mask, cmp_mask = make_operand_mask(operand_mask)
-        entry[II_ANDMASK] = and_mask
-        entry[II_CMPMASK] = cmp_mask
+        entry[II_ANDMASK], entry[II_CMPMASK] = make_operand_mask(operand_mask)
+        entry[II_OPERANDMASKS] = [ None ] * _A.constant_operand_count_max
 
-        # Extra word needs.
+        # Take into account if the instruction needs extra words from the stream for it's definition.
         max_extra_words = 0
         line_bits = entry[II_NAME].split(" ", 1)
         if len(line_bits) > 1:
@@ -144,7 +153,7 @@ def process_instruction_list(_A, _list):
                             extra_words = word_idx
                             size_char = value_name[size_idx+1]
                             # B (extracted from given word), W (extracted from given word), L (requires extra word)
-                            if size_char == "L":
+                            if size_char == "L": # TODO: m68k specific specifier.
                                 extra_words += 1
                             if extra_words > max_extra_words:
                                 max_extra_words = extra_words
@@ -158,11 +167,8 @@ def process_instruction_list(_A, _list):
                 spec = _make_specification(operand_string)
                 if spec.filter_keys is not None:
                     for ea_key in spec.filter_keys:
-                        mask |= 1 << get_EAM_id(ea_key)
-                if i == 0:
-                    entry[II_SRCEAMASK] = mask
-                elif i == 1:
-                    entry[II_DSTEAMASK] = mask
+                        mask |= 1 << _A.get_eam_index_by_name(ea_key)
+                entry[II_OPERANDMASKS][i] = mask
 
         # Sort..
         sort_key = ""
@@ -196,6 +202,8 @@ class ArchInterface(object):
 
     """ Constant: Prefix for immediate values. """
     constant_immediate_prefix = ""
+    """ Constant: Prefix for register names. """
+    constant_register_prefix = ""
     """ Constant: Prefix for binary values. """
     constant_binary_prefix = "arch-constant-undefined"
     """ Constant: Suffix for binary values. """
@@ -208,8 +216,12 @@ class ArchInterface(object):
     constant_hexadecimal_prefix = "arch-constant-undefined"
     """ Constant: Suffix for hexadecimal values. """
     constant_hexadecimal_suffix = "arch-constant-undefined"
+    """ Constant: Character which indicates trailing text is comment. """
+    constant_comment_prefix = "arch-constant-undefined"
     """ Constant: Core architecture bit mask. """
     constant_core_architecture_mask = 0
+    """ Constant: Maximum number of operands per instruction. """
+    constant_operand_count_max = 0
 
     """ Function: Identify if the given instruction alters the program counter. """
     function_is_final_instruction = _unimplemented_function
@@ -232,7 +244,26 @@ class ArchInterface(object):
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
         pass
 
+    def set_operand_type_table(self, table_EAM):
+        self.table_EAM = table_EAM
+    
+        idToLabel = {}
+        labelToId = {}
+        labelToMask = {}
+        for i, t in enumerate(table_EAM):
+            idToLabel[i] = t[EAMI_LABEL]
+            labelToId[t[EAMI_LABEL]] = i
+            
+        self.dict_eam_label_to_index = labelToId
+        self.dict_eam_index_to_label = idToLabel
 
+    def get_eam_name_by_index(self, idx):
+        return self.dict_eam_index_to_label[idx]
+        
+    def get_eam_index_by_name(self, idx):
+        return self.dict_eam_label_to_index[idx]
+
+        
 def binary2number(s):
     v = 0
     while len(s):
@@ -266,9 +297,9 @@ def signed_hex_string(_A, v):
 
 
 def generate_all():
-    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "make_operand_mask", "memoize" ]
+    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "make_operand_mask", "memoize", "process_instruction_list" ]
     for k in globals().keys():
-        if k.startswith("II_"):
+        if k.startswith("II_") or k.startswith("EAMI"):
             l.append(k)
     return l
 __all__ = generate_all()

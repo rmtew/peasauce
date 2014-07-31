@@ -8,24 +8,28 @@ from disassemblylib import archmips, archm68k, util
 
 class archmipsTestCase(unittest.TestCase):
     def setUp(self):
-        pass
+        self.arch = archmips.ArchMIPS()
 
     def tearDown(self):
         pass
 
     def testInstructionParsing(self):
-        pass
+        self.arch.set_operand_type_table(archmips.operand_type_table)
+        d = util.process_instruction_list(self.arch, archmips.instruction_table)
 
         
 class archm68kTestCase(unittest.TestCase):
     def setUp(self):
-        pass
+        self.arch = archm68k.ArchM68k()
 
     def tearDown(self):
         pass
 
     def testInstructionParsing(self):
-        pass
+        self.arch.set_operand_type_table(archm68k.operand_type_table)
+        d = util.process_instruction_list(self.arch, archm68k.instruction_table)
+        # print d
+
 
 class binaryConversionTestCase(unittest.TestCase):
     def testToNumber(self):

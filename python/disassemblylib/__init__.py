@@ -5,7 +5,10 @@
 """
 
 def get_arch_names():
-    return [ "m68k" ]
+    return [
+        "m68k",
+        #"mips32", # Assume little endian for now.  Can be both apparently.
+    ]
 
 def get_api(arch_name):
     if arch_name == "m68k":
