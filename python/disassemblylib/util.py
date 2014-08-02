@@ -92,6 +92,11 @@ def _make_specification(format):
     return spec
 
 
+# TODO: Verification.
+# - Check that all variable bits in the mask are used by the name column.
+# - Check that operand types used in the name column exist.
+# - Check that name column operand type variable names all exist in the operand type spec.
+    
 def process_instruction_list(_A, _list):
     # Pass 1: Each instruction entry with a ".z" size wildcard are expanded to specific entries.
     #         e.g. INSTR.z OP, OP -> INSTR.w OP, OP / INSTR.l OP, OP / ...
