@@ -10,22 +10,13 @@ def get_arch_names():
         #"mips32", # Assume little endian for now.  Can be both apparently.
     ]
 
-def get_api(arch_name):
+def get_arch(arch_name):
     if arch_name == "m68k":
-        import archm68k as module
+        from archm68k import ArchM68k as ArchClass
+        from archm68k import instruction_table
+        from archm68k import operand_type_table
 
-    api_func_names = [
-        "is_final_instruction",
-        "get_match_addresses",
-        "get_instruction_string",
-        "get_operand_string",
-        "disassemble_one_line",
-        "disassemble_as_data",
-        "get_default_symbol_name",
-    ]
-
-    api = []
-    for func_name in api_func_names:
-        func = getattr(module, func_name)
-        api.append((func_name, func))
-    return api
+    arch = ArchClass()
+    arch.set_operand_type_table(operand_type_table)
+    arch.set_instruction_table(instruction_table)
+    return arch

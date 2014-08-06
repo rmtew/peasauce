@@ -38,6 +38,14 @@ class ArchMIPS(ArchInterface):
 
     constant_core_architecture_mask = IF_MIPS32
     constant_operand_count_max = 4
+
+    constant_table_bits = [
+        [     32, 'S' ],  # Floating point
+        [     64, 'D' ],  # Floating point
+        [     32, 'W' ],  # Fixed point
+        [     64, 'L' ],  # Fixed point
+        [ 2 * 32, 'PS' ], # Floating point
+    ]
     
     def function_is_final_instruction(cls, *args, **kwargs):
         pass

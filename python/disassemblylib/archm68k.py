@@ -63,27 +63,503 @@ class ArchM68k(ArchInterface):
 
     constant_core_architecture_mask = IF_000
     constant_operand_count_max = 2
+    
+    constant_table_bits = [
+        [ 8,  'B' ],
+        [ 16, 'W' ],
+        [ 32, 'L' ],
+    ]
+    
+    def function_is_final_instruction(self, match):
+        return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
 
-    def function_is_final_instruction(self, *args, **kwargs):
-        pass
+    def function_get_match_addresses(self, match):
+        # Is it an instruction that exits (RTS, RTR)?
+        # Is it an instruction that conditionally branches (Bcc, Dbcc)?
+        # Is it an instruction that branches and returns (JSR, BSR)?
+        # Is it an instruction that jumps (BRA, JMP)?
+        # Given a branch/jump address, have we seen it before?
+        # Given a branch/jump address, should it be queued?
+        # Given a branch/jump address, should it be done next?
+        def _extract_address(match, opcode_idx):
+            opcode = match.opcodes[opcode_idx]
+            if opcode.key == "PCid16":
+                return match.pc + _signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
+            elif opcode.key == "PCiId8":
+                return match.pc + _signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
+            elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
+                return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
+            elif opcode.specification.key == "DISPLACEMENT": # JMP
+                return match.pc + opcode.vars["xxx"], 0
+            return None
 
-    def function_get_match_addresses(self, *args, **kwargs):
-        pass
+        address = None
+        flags = 0
+        instruction_key = match.specification.key
+        if instruction_key in ("RTS", "RTR"):
+            pass
+        elif instruction_key in ("JSR", "JMP"):
+            result = _extract_address(match, 0)
+            if result is not None:
+                address, flags = result
+        elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
+            address = match.pc + match.opcodes[0].vars["xxx"]
+        elif instruction_key == "DBcc":
+            address = match.pc + match.opcodes[1].vars["xxx"]
 
-    def function_get_instruction_string(self, *args, **kwargs):
-        pass
+        ret = {}
+        if address is not None:
+            ret[address] = (None, flags | MAF_CODE)
+            return ret
+
+        # Locate any general addressing modes which infer labels.
+        # MAF_CERTAIN -> definitely should be mapped to labels.
+        for i, opcode in enumerate(match.opcodes):
+            if opcode.key == "PCid16":
+                address = match.pc + _signed_value("W", opcode.vars["D16"])
+                if address not in ret:
+                    ret[address] = (i, MAF_CERTAIN)
+            elif opcode.key == "PCiId8":
+                address = match.pc + _signed_value("W", opcode.vars["D8"])
+                if address not in ret:
+                    ret[address] = (i, MAF_CERTAIN)
+            elif opcode.key in ("AbsL", "AbsW"):
+                address = opcode.vars["xxx"]
+                if address not in ret:
+                    ret[address] = (i, MAF_ABSOLUTE_ADDRESS)
+            elif opcode.key == "Imm" and i == 0:
+                # move.w #xxx, SR (no) / move.l #xxx, a0 (yes) / move.l #xxx, AR (yes)
+                # Is the destination an address register?
+                # Imm, AbsL; Imm, DR; Imm, AR
+                address = opcode.vars["xxx"]
+                bits = ret.get(address, (i, 0))
+                bits = (bits[0], bits[1] | MAF_CONSTANT_VALUE)
+                if True or match.specification.key != "MOVE.L":
+                    if bits[1] & MAF_CODE != MAF_CODE:
+                        bits = (bits[0], bits[1] | MAF_UNCERTAIN)
+                ret[address] = bits
+            elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
+                logger.error("Unhandled opcode EA mode (680x0?): %s", opcode.key)
+
+        return ret
+
+    def function_get_instruction_string(self, instruction, vars):
+        """ Get a printable representation of an instruction. """
+        def _get_formatted_description(key, vars):
+            description = key
+            for var_name, var_value in vars.iteritems():
+                description = description.replace(var_name, str(var_value))
+            return description
+            
+        key = instruction.specification.key
+        return _get_formatted_description(key, vars)
        
-    def function_get_operand_string(self, *args, **kwargs):
-        pass
+    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
+        """ Get a printable representation of an instruction operand. """
+        def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
+            pc = instruction.pc
+            id = self.dict_operand_label_to_index[key]
+            mode_format = self.table_operand_types[id][EAMI_FORMAT]
+            reg_field = self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG]
+            for k, v in vars.iteritems():
+                if k == "D16" or k == "D8":
+                    value = _signed_value({ "D8": "B", "D16": "W", }[k], vars[k])
+                    """ [ "PCid16",     "(D16,PC)",             "111",          "010",               "D16=+W",      "Program Counter Indirect with Displacement Mode", ],
+                        [ "PCiId8",     "(D8,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
+                        [ "PCiIdb",     "(bd,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (Base Displacement) Mode", ],
+                        [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Postindexed Mode", ],
+                        [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Preindexed Mode", ], """
+                    value_string = None
+                    if key in ("PCid16", "PCiId8"):
+                        value += pc
+                        value_string = lookup_symbol(value)
+                    if value_string is None:
+                        value_string = signed_hex_string(self, value)
+                    mode_format = mode_format.replace(k, value_string)
+                elif k == "Rn":
+                    Rn = vars["Rn"]
+                    if reg_field == "Rn":
+                        mode_format = mode_format.replace("Dn", "D"+str(Rn))
+                        mode_format = mode_format.replace("An", "A"+str(Rn))
+                    elif reg_field == Rn:
+                        pass # TODO: Use to validate
+                elif k == "xxx":
+                    value = vars["xxx"]
+                    is_absolute = key in ("Imm", "AbsL", "AbsW")
+                    value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
+                    if value_string is None:
+                        value_string = "$%x" % value
+                    mode_format = mode_format.replace("xxx",  value_string)
+                else:
+                    mode_format = mode_format.replace(k, str(v))
+            return mode_format
+        
+        pc = instruction.pc
+        key = operand.key
+        if key is None:
+            key = operand.specification.key
+        if key == "RL":
+            # D0-D3/D7/A0-A2
+            ranges = []
+            for ri, mask in enumerate(operand.rl_bits):
+                rsn = -1
+                for rn in range(8):
+                    if mask & (1 << rn):
+                        # Note the start of a range.
+                        if rsn == -1:
+                            rsn = rn
+                    elif rsn > -1:
+                        ranges.append((ri, (rsn, rn-1)))
+                        rsn = -1
+                if rsn > -1:
+                    ranges.append((ri, (rsn, rn)))
+            s = ""
+            for (i, (r0, rn)) in ranges:
+                key = [ "DR", "AR" ][i]
+                if len(s):
+                    s += "/"
+                s += _get_formatted_ea_description(instruction, key, {"Rn":r0})
+                if r0 < rn:
+                    s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
+            return s
+        elif key == "DISPLACEMENT":
+            value = vars["xxx"]
+            if instruction.specification.key[0:4] == "LINK":
+                value_string = None
+            else:
+                value_string = lookup_symbol(instruction.pc + value)
+            if value_string is None:
+                value_string = signed_hex_string(self, value)
+            return value_string
+        elif key in SpecialRegisters:
+            return key
+        else:
+            return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
        
-    def function_disassemble_one_line(self, *args, **kwargs):
-        pass
+    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        """ Tokenise one disassembled instruction with its operands. """
         
-    def function_disassemble_as_data(self, *args, **kwargs):
-        pass
+        def _disassemble_vars_pass(I):
+            def _get_var_values(chars, data_word1, mask_string):
+                var_values = {}
+                if chars:
+                    for mask_char in chars:
+                        if mask_char in mask_string:
+                            var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
+                return var_values
+
+            def copy_values(mask_char_vars, char_vars):
+                d = {}
+                for var_name, char_string in mask_char_vars.iteritems():
+                    if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
+                        var_value = char_string
+                    else:
+                        var_value = NumericSizeValues.get(char_string, None)
+                        if var_value is None:
+                            var_value = char_vars[char_string]
+                        if var_name == "cc":
+                            var_value = ConditionCodes[var_value]
+                        elif var_name == "z":
+                            var_value = ["B","W","L"][var_value]
+                        elif var_name == "d":
+                            var_value = ["R","L"][var_value]
+                    d[var_name] = var_value
+                return d
+
+            chars = I.specification.mask_char_vars.values()
+            for O in I.opcodes:
+                for mask_char in O.specification.mask_char_vars.itervalues():
+                    if mask_char not in chars and mask_char not in NumericSizeValues:
+                        chars.append(mask_char)
+            char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
+            # In case anything wants to copy it, and it is explicitly specified.
+            if I.specification.key[-2] == "." and I.specification.key[-1] in ("B", "W", "L"):
+                char_vars["z"] = get_size_value(I.specification.key[-1])
+            I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
+            for O in I.opcodes:
+                O.vars = copy_values(O.specification.mask_char_vars, char_vars) 
+
+        def _match_instructions(data, data_idx, data_abs_idx):
+            """ Read one word from the stream, and return matching instructions by order of decreasing confidence. """
+            @memoize
+            def get_instruction_format_parts(instr_format):
+                opcode_sidx = instr_format.find(" ")
+                if opcode_sidx == -1:
+                    return [ instr_format ]
+                ret = [ instr_format[:opcode_sidx] ]
+                opcode_string = instr_format[opcode_sidx+1:]
+                opcode_bits = opcode_string.replace(" ", "").split(",")
+                ret.extend(opcode_bits)
+                return ret
+
+            word1, data_idx = _get_word(data, data_idx)
+            if word1 is None: # Disassembly failure
+                logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
+                return [], data_idx
+
+            matches = []
+            for t in self.table_instructions:
+                mask_string = t[II_MASK]
+                and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
+                if (word1 & and_mask) == cmp_mask:
+                    instruction_parts = get_instruction_format_parts(t[II_NAME])
+
+                    M = Match()
+                    M.pc = data_abs_idx + 2
+                    M.data_words = [ word1 ]
+
+                    M.table_text = t[II_TEXT]
+                    M.table_mask = mask_string
+                    M.table_extra_words = t[II_EXTRAWORDS]
+                    M.table_ea_masks = t[II_OPERANDMASKS]
+
+                    M.format = instruction_parts[0]
+                    M.specification = _make_specification(M.format)
+                    M.opcodes = []
+                    for i, opcode_format in enumerate(instruction_parts[1:]):
+                        T = MatchOpcode()
+                        T.format = opcode_format
+                        T.specification = _make_specification(T.format)
+                        M.opcodes.append(T)
+                    matches.append(M)
+
+            return matches, data_idx
+
+        def _decode_operand(data, data_idx, operand_idx, M, T):
+            def _data_word_lookup(data_words, text):
+                size_idx = text.find(".")
+                if size_idx > 0:
+                    size_char = text[size_idx+1]
+                    word_idx = int(text[1:size_idx])
+                    if size_char == "B":
+                        if data_words[word_idx] & ~0xFF: return # Sanity check.
+                        return data_words[word_idx] & 0xFF, size_char
+                    elif size_char == "W":
+                        return data_words[word_idx], size_char
+                    elif size_char == "L":
+                        return (data_words[word_idx] << 16) + data_words[word_idx+1], size_char
+
+            def _resolve_specific_ea_key(mode_bits, register_bits, operand_ea_mask):
+                for i, line in enumerate(self.table_operand_types):
+                    if operand_ea_mask & (1 << i) and line[EAMI_MATCH_FIELDS][EAMI_MATCH_MODE] == mode_bits:
+                        if line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != "Rn" and line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != register_bits:
+                            continue
+                        return line[EAMI_LABEL]
+                        
+            if T.specification.key == "RL":
+                T2 = M.opcodes[1-operand_idx]
+                word, size_char = _data_word_lookup(M.data_words, T.vars["xxx"])
+                if word is None:
+                    logger.error("_decode_operand$%X: _data_word_lookup failure 1", M.pc)
+                    return None
+                T2_key = T2.specification.key
+                if T2_key == "EA":
+                    T2_key =  (T2.vars["mode"], T2.vars["register"], M.table_ea_masks[1-operand_idx])
+                    if T2_key is None:
+                        logger.debug("_decode_operand$%X: failed to resolve EA key mode:%%%s register:%%%s operand: %d instruction: %s ea_mask: %X",
+                            M.pc, _n2b(T2.vars["mode"]), _n2b(T2.vars["register"]), operand_idx, M.specification.key, M.table_ea_masks[1-operand_idx])
+                        return None
+                if T2_key == "PreARi":
+                    mask = 0x8000
+                else:
+                    mask = 0x0001
+                dm = am = 0
+                for i in range(16):
+                    if word & mask:
+                        if i > 7: # a0-a7
+                            am |= 1<<(i-8)
+                        else: # d0-d7
+                            dm |= 1<<i
+                    if mask == 0x0001:
+                        word >>= 1
+                    else:
+                        word <<= 1
+                T.rl_bits = dm, am
+                return data_idx
+            elif T.specification.key == "DISPLACEMENT":
+                value = T.vars["xxx"]
+                if type(value) is str:
+                    value, size_char = _data_word_lookup(M.data_words, value)
+                else:
+                    size_char = "B"
+                    if value == 0:
+                        size_char = "W"
+                        value, data_idx = _get_word(data, data_idx)
+                    elif value == 0xFF:
+                        size_char = "L"
+                        value, data_idx = _get_long(data, data_idx)
+                if value is None: # Disassembly failure
+                    logger.error("_decode_operand: Failed to obtain displacement offset")
+                    return None
+                T.vars["xxx"] = _signed_value(size_char, value)
+                return data_idx
+            elif T.specification.key in SpecialRegisters:
+                return data_idx
+
+            # General EA possibility, or specific EA mode
+            instruction_key = M.specification.key
+            instruction_key4 = instruction_key[:4]
+            operand_key = specific_key = T.specification.key
+
+            if specific_key == "EA":
+                specific_key = T.key = _resolve_specific_ea_key(T.vars["mode"], T.vars["register"], M.table_ea_masks[operand_idx])
+                if specific_key is None:
+                    #logger.debug("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", M.pc, M.specification.key, _n2b(T.vars["mode"]), _n2b(T.vars["register"]))
+                    return None
+                T.vars["Rn"] = T.vars["register"]
+
+            eam_line = self.table_operand_types[self.dict_operand_label_to_index[specific_key]]
+            read_string = eam_line[EAMI_DATA_FIELDS][EAMI_DATA_READS]
+
+            # Special case.
+            if specific_key == "Imm":
+                if operand_key == "EA":
+                    if "z" in T.vars:
+                        size_char = T.vars["z"]
+                    elif "z" in M.vars:
+                        size_char = M.vars["z"]
+                    elif instruction_key[-2] == "." and instruction_key[-1] in ("B", "W", "L"):
+                        size_char = instruction_key[-1]
+                    else:
+                        # Presumably an F-line instruction.
+                        return None
+
+                    #try:
+                    value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
+                    #except Exception:
+                    #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
+                    #    raise
+                    if value is None: # Disassembly failure.
+                        logger.debug("Failed to fetch EA/Imm data")
+                        return None
+                    T.vars["xxx"] = value
+                elif operand_key == "Imm" and "z" in T.vars and "xxx" not in T.vars:
+                    value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
+                    T.vars["xxx"] = value
+                elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
+                   if T.vars["xxx"] == 0:
+                        T.vars["xxx"] = 8
+
+            if "xxx" in T.vars:
+                if T.vars["xxx"] == "+z":
+                    value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
+                    if value is None: # Disassembly failure.
+                        logger.debug("Failed to fetch xxx/+z data")
+                        return None
+                    T.vars["xxx"] = value
+
+            # Populate EA mode specific variables.
+            if read_string == "EW":
+                ew1, data_idx = _get_word(data, data_idx)
+                if ew1 is None: # Disassembly failure.
+                    logger.debug("Failed to extension word1")
+                    return None
+
+                register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
+                register_number = _extract_masked_value(ew1, EffectiveAddressingWordMask, "R")
+                index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
+                scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
+                full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
+                # Xn.z*S                
+                T.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
+                T.vars["z"] = ["W", "L"][index_size]
+                T.vars["S"] = [1,2,4,8][scale]
+
+                if full_extension_word:
+                    ew2, data_idx = _get_word(data, data_idx)
+                    base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
+                    index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
+                    base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
+                    index_selection = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "I")
+                    # ...
+                    base_displacement = 0
+                    if base_displacement_size == 2: # %10
+                        base_displacement, data_idx = _get_word(data, data_idx)
+                    elif base_displacement_size == 3: # %11
+                        base_displacement, data_idx = _get_long(data, data_idx)
+                    if base_displacement is None: # Disassembly failure.
+                        return None
+                    # TODO: Finish implementation.
+                    logger.debug("%X: Skipping full extension word for instruction '%s'", M.pc-2, M.specification.key)
+                    return None
+                    # raise RuntimeError("Full displacement incomplete", M.specification.key)
+                else:
+                    T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
+            elif read_string:
+                k, v = [ s.strip() for s in read_string.split("=") ]
+                size_char = v[1]
+                value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
+                if value is None: # Disassembly failure.
+                    logger.error("Failed to read extra size char")
+                    return None
+                T.vars[k] = value
+            return data_idx
+            
+        def _extract_masked_value(data_word, mask_string, mask_char):
+            @memoize
+            def _extract_mask_bits(mask_string, s):
+                mask = 0
+                for i in range(len(mask_string)):
+                    mask <<= 1
+                    if mask_string[i] == s:
+                        mask |= 1
+                shift = 0
+                if mask:
+                    mask_copy = mask
+                    while mask_copy & 1 == 0:
+                        mask_copy >>= 1
+                        shift += 1
+                return mask, shift
+
+            mask, shift = _extract_mask_bits(mask_string, mask_char)
+            return (data_word & mask) >> shift
+            
+        idx0 = data_idx
+        matches, data_idx = _match_instructions(data, data_idx, data_abs_idx)
+        if not len(matches):
+            return None, idx0
+
+        M = matches[0]
+        # An instruction may have multiple words to it, before operand data..  e.g. MOVEM
+        for i in range(M.table_extra_words):
+            data_word, data_idx = _get_word(data, data_idx)
+            M.data_words.append(data_word)
+
+        _disassemble_vars_pass(M)
+        for operand_idx, O in enumerate(M.opcodes):
+            data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
+            if data_idx is None: # Disassembly failure.
+                return None, idx0
+        M.num_bytes = data_idx - idx0
+        return M, data_idx
         
-    def function_get_default_symbol_name(self, *args, **kwargs):
-        pass
+    def function_disassemble_as_data(self, data, data_idx):
+        # F-line instruction.
+        if _get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
+            return 2
+        return 0
+        
+    def function_get_default_symbol_name(self, address, metadata):
+        if metadata == "midinstruction":
+            return "SYM%06X" % address
+        elif metadata == "bounds":
+            return "lbZ%06X" % address
+
+        if metadata == "ascii":
+            char = "A"
+        elif metadata == "code":
+            char = "C"
+        elif metadata == "data08":
+            char = "B"
+        elif metadata == "data16":
+            char = "W"
+        elif metadata == "data32":
+            char = "L"
+        else:
+            # Default to a character which means the unexpected case.
+            char = "X"
+            logger.error("Asked for label name at address %X with metadata %s", address, metadata)
+        return "lb%s%06X" % (char, address)
 
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
         new_entries = []
@@ -94,7 +570,13 @@ class ArchM68k(ArchInterface):
             new_entries.append(new_entry)
         return new_entries
 
+    def get_extra_words_for_size_char(self, size_char):
+        # B (extracted from given word), W (extracted from given word), L (requires extra word)
+        if size_char == "L":
+            return 1
+        return 0
 
+        
 def get_size_value(label):
     if label == "B": return 0
     if label == "W": return 1
@@ -341,6 +823,10 @@ def _get_long(data, idx):
         return (data[idx] << 24) +  (data[idx+1] << 16) +  (data[idx+2] << 8) +  data[idx+3], idx + 4
     return None, idx
 
+def _signed_value(size_char, value):
+    unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
+    return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
+
 class Match(object):
     table_mask = None
     table_text = None
@@ -361,410 +847,6 @@ class MatchOpcode(object):
     vars = None
     rl_bits = None
 
-def _resolve_specific_ea_key(mode_bits, register_bits, operand_ea_mask):
-    for i, line in enumerate(_A.ea_table):
-        if operand_ea_mask & (1 << i) and line[EAMI_MATCH_FIELDS][EAMI_MATCH_MODE] == mode_bits:
-            if line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != "Rn" and line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != register_bits:
-                continue
-            return line[EAMI_LABEL]
-
-def _signed_value(size_char, value):
-    unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
-    return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
-
-def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
-    pc = instruction.pc
-    id = get_EAM_id(key)
-    mode_format = _A.ea_table[id][EAMI_FORMAT]
-    reg_field = _A.ea_table[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG]
-    for k, v in vars.iteritems():
-        if k == "D16" or k == "D8":
-            value = _signed_value({ "D8": "B", "D16": "W", }[k], vars[k])
-            """ [ "PCid16",     "(D16,PC)",             "111",          "010",               "D16=+W",      "Program Counter Indirect with Displacement Mode", ],
-                [ "PCiId8",     "(D8,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
-                [ "PCiIdb",     "(bd,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (Base Displacement) Mode", ],
-                [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Postindexed Mode", ],
-                [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Preindexed Mode", ], """
-            value_string = None
-            if key in ("PCid16", "PCiId8"):
-                value += pc
-                value_string = lookup_symbol(value)
-            if value_string is None:
-                value_string = signed_hex_string(_A, value)
-            mode_format = mode_format.replace(k, value_string)
-        elif k == "Rn":
-            Rn = vars["Rn"]
-            if reg_field == "Rn":
-                mode_format = mode_format.replace("Dn", "D"+str(Rn))
-                mode_format = mode_format.replace("An", "A"+str(Rn))
-            elif reg_field == Rn:
-                pass # TODO: Use to validate
-        elif k == "xxx":
-            value = vars["xxx"]
-            is_absolute = key in ("Imm", "AbsL", "AbsW")
-            value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
-            if value_string is None:
-                value_string = "$%x" % value
-            mode_format = mode_format.replace("xxx",  value_string)
-        else:
-            mode_format = mode_format.replace(k, str(v))
-    return mode_format
-
-@memoize
-def _extract_mask_bits(mask_string, s):
-    mask = 0
-    for i in range(len(mask_string)):
-        mask <<= 1
-        if mask_string[i] == s:
-            mask |= 1
-    shift = 0
-    if mask:
-        mask_copy = mask
-        while mask_copy & 1 == 0:
-            mask_copy >>= 1
-            shift += 1
-    return mask, shift
-
-def _extract_masked_value(data_word, mask_string, mask_char):
-    mask, shift = _extract_mask_bits(mask_string, mask_char)
-    return (data_word & mask) >> shift
-
-def _get_formatted_description(key, vars):
-    description = key
-    for var_name, var_value in vars.iteritems():
-        description = description.replace(var_name, str(var_value))
-    return description
-
-def _data_word_lookup(data_words, text):
-    size_idx = text.find(".")
-    if size_idx > 0:
-        size_char = text[size_idx+1]
-        word_idx = int(text[1:size_idx])
-        if size_char == "B":
-            if data_words[word_idx] & ~0xFF: return # Sanity check.
-            return data_words[word_idx] & 0xFF, size_char
-        elif size_char == "W":
-            return data_words[word_idx], size_char
-        elif size_char == "L":
-            return (data_words[word_idx] << 16) + data_words[word_idx+1], size_char
-
-def _decode_operand(data, data_idx, operand_idx, M, T):
-    if T.specification.key == "RL":
-        T2 = M.opcodes[1-operand_idx]
-        word, size_char = _data_word_lookup(M.data_words, T.vars["xxx"])
-        if word is None:
-            logger.error("_decode_operand$%X: _data_word_lookup failure 1", M.pc)
-            return None
-        T2_key = T2.specification.key
-        if T2_key == "EA":
-            T2_key =  (T2.vars["mode"], T2.vars["register"], M.table_ea_masks[1-operand_idx])
-            if T2_key is None:
-                logger.debug("_decode_operand$%X: failed to resolve EA key mode:%%%s register:%%%s operand: %d instruction: %s ea_mask: %X",
-                    M.pc, _n2b(T2.vars["mode"]), _n2b(T2.vars["register"]), operand_idx, M.specification.key, M.table_ea_masks[1-operand_idx])
-                return None
-        if T2_key == "PreARi":
-            mask = 0x8000
-        else:
-            mask = 0x0001
-        dm = am = 0
-        for i in range(16):
-            if word & mask:
-                if i > 7: # a0-a7
-                    am |= 1<<(i-8)
-                else: # d0-d7
-                    dm |= 1<<i
-            if mask == 0x0001:
-                word >>= 1
-            else:
-                word <<= 1
-        T.rl_bits = dm, am
-        return data_idx
-    elif T.specification.key == "DISPLACEMENT":
-        value = T.vars["xxx"]
-        if type(value) is str:
-            value, size_char = _data_word_lookup(M.data_words, value)
-        else:
-            size_char = "B"
-            if value == 0:
-                size_char = "W"
-                value, data_idx = _get_word(data, data_idx)
-            elif value == 0xFF:
-                size_char = "L"
-                value, data_idx = _get_long(data, data_idx)
-        if value is None: # Disassembly failure
-            logger.error("_decode_operand: Failed to obtain displacement offset")
-            return None
-        T.vars["xxx"] = _signed_value(size_char, value)
-        return data_idx
-    elif T.specification.key in SpecialRegisters:
-        return data_idx
-
-    # General EA possibility, or specific EA mode
-    instruction_key = M.specification.key
-    instruction_key4 = instruction_key[:4]
-    operand_key = specific_key = T.specification.key
-
-    if specific_key == "EA":
-        specific_key = T.key = _resolve_specific_ea_key(T.vars["mode"], T.vars["register"], M.table_ea_masks[operand_idx])
-        if specific_key is None:
-            #logger.debug("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", M.pc, M.specification.key, _n2b(T.vars["mode"]), _n2b(T.vars["register"]))
-            return None
-        T.vars["Rn"] = T.vars["register"]
-
-    eam_line = _A.table_ea[get_EAM_id(specific_key)]
-    read_string = eam_line[EAMI_DATA_FIELDS][EAMI_READS]
-
-    # Special case.
-    if specific_key == "Imm":
-        if operand_key == "EA":
-            if "z" in T.vars:
-                size_char = T.vars["z"]
-            elif "z" in M.vars:
-                size_char = M.vars["z"]
-            elif instruction_key[-2] == "." and instruction_key[-1] in ("B", "W", "L"):
-                size_char = instruction_key[-1]
-            else:
-                # Presumably an F-line instruction.
-                return None
-
-            #try:
-            value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
-            #except Exception:
-            #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
-            #    raise
-            if value is None: # Disassembly failure.
-                logger.debug("Failed to fetch EA/Imm data")
-                return None
-            T.vars["xxx"] = value
-        elif operand_key == "Imm" and "z" in T.vars and "xxx" not in T.vars:
-            value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
-            T.vars["xxx"] = value
-        elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
-           if T.vars["xxx"] == 0:
-                T.vars["xxx"] = 8
-
-    if "xxx" in T.vars:
-        if T.vars["xxx"] == "+z":
-            value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
-            if value is None: # Disassembly failure.
-                logger.debug("Failed to fetch xxx/+z data")
-                return None
-            T.vars["xxx"] = value
-
-    # Populate EA mode specific variables.
-    if read_string == "EW":
-        ew1, data_idx = _get_word(data, data_idx)
-        if ew1 is None: # Disassembly failure.
-            logger.debug("Failed to extension word1")
-            return None
-
-        register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
-        register_number = _extract_masked_value(ew1, EffectiveAddressingWordMask, "R")
-        index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
-        scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
-        full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
-        # Xn.z*S                
-        T.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
-        T.vars["z"] = ["W", "L"][index_size]
-        T.vars["S"] = [1,2,4,8][scale]
-
-        if full_extension_word:
-            ew2, data_idx = _get_word(data, data_idx)
-            base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
-            index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
-            base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
-            index_selection = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "I")
-            # ...
-            base_displacement = 0
-            if base_displacement_size == 2: # %10
-                base_displacement, data_idx = _get_word(data, data_idx)
-            elif base_displacement_size == 3: # %11
-                base_displacement, data_idx = _get_long(data, data_idx)
-            if base_displacement is None: # Disassembly failure.
-                return None
-            # TODO: Finish implementation.
-            logger.debug("%X: Skipping full extension word for instruction '%s'", M.pc-2, M.specification.key)
-            return None
-            # raise RuntimeError("Full displacement incomplete", M.specification.key)
-        else:
-            T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
-    elif read_string:
-        k, v = [ s.strip() for s in read_string.split("=") ]
-        size_char = v[1]
-        value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
-        if value is None: # Disassembly failure.
-            logger.error("Failed to read extra size char")
-            return None
-        T.vars[k] = value
-    return data_idx
-
-def _match_instructions(data, data_idx, data_abs_idx):
-    """ Read one word from the stream, and return matching instructions by order of decreasing confidence. """
-    @memoize
-    def get_instruction_format_parts(instr_format):
-        opcode_sidx = instr_format.find(" ")
-        if opcode_sidx == -1:
-            return [ instr_format ]
-        ret = [ instr_format[:opcode_sidx] ]
-        opcode_string = instr_format[opcode_sidx+1:]
-        opcode_bits = opcode_string.replace(" ", "").split(",")
-        ret.extend(opcode_bits)
-        return ret
-
-    word1, data_idx = _get_word(data, data_idx)
-    if word1 is None: # Disassembly failure
-        logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
-        return [], data_idx
-
-    matches = []
-    for t in InstructionInfo:
-        mask_string = t[II_MASK]
-        and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
-        if (word1 & and_mask) == cmp_mask:
-            instruction_parts = get_instruction_format_parts(t[II_NAME])
-
-            M = Match()
-            M.pc = data_abs_idx + 2
-            M.data_words = [ word1 ]
-
-            M.table_text = t[II_TEXT]
-            M.table_mask = mask_string
-            M.table_extra_words = t[II_EXTRAWORDS]
-            M.table_ea_masks = t[II_OPERANDMASKS]
-
-            M.format = instruction_parts[0]
-            M.specification = _make_specification(M.format)
-            M.opcodes = []
-            for i, opcode_format in enumerate(instruction_parts[1:]):
-                T = MatchOpcode()
-                T.format = opcode_format
-                T.specification = _make_specification(T.format)
-                M.opcodes.append(T)
-            matches.append(M)
-
-    return matches, data_idx
-
-def _disassemble_vars_pass(I):
-    def _get_var_values(chars, data_word1, mask_string):
-        var_values = {}
-        if chars:
-            for mask_char in chars:
-                if mask_char in mask_string:
-                    var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
-        return var_values
-
-    def copy_values(mask_char_vars, char_vars):
-        d = {}
-        for var_name, char_string in mask_char_vars.iteritems():
-            if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
-                var_value = char_string
-            else:
-                var_value = NumericSizeValues.get(char_string, None)
-                if var_value is None:
-                    var_value = char_vars[char_string]
-                if var_name == "cc":
-                    var_value = ConditionCodes[var_value]
-                elif var_name == "z":
-                    var_value = ["B","W","L"][var_value]
-                elif var_name == "d":
-                    var_value = ["R","L"][var_value]
-            d[var_name] = var_value
-        return d
-
-    chars = I.specification.mask_char_vars.values()
-    for O in I.opcodes:
-        for mask_char in O.specification.mask_char_vars.itervalues():
-            if mask_char not in chars and mask_char not in NumericSizeValues:
-                chars.append(mask_char)
-    char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
-    # In case anything wants to copy it, and it is explicitly specified.
-    if I.specification.key[-2] == "." and I.specification.key[-1] in ("B", "W", "L"):
-        char_vars["z"] = get_size_value(I.specification.key[-1])
-    I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
-    for O in I.opcodes:
-        O.vars = copy_values(O.specification.mask_char_vars, char_vars) 
-
-# External API
-
-# TODO: Will want to specify printable configuration
-# - constant value type
-# - constant value numeric base
-
-def disassemble_one_line(data, data_idx, data_abs_idx):
-    """ Tokenise one disassembled instruction with its operands. """
-    idx0 = data_idx
-    matches, data_idx = _match_instructions(data, data_idx, data_abs_idx)
-    if not len(matches):
-        return None, idx0
-
-    M = matches[0]
-    # An instruction may have multiple words to it, before operand data..  e.g. MOVEM
-    for i in range(M.table_extra_words):
-        data_word, data_idx = _get_word(data, data_idx)
-        M.data_words.append(data_word)
-
-    _disassemble_vars_pass(M)
-    for operand_idx, O in enumerate(M.opcodes):
-        data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
-        if data_idx is None: # Disassembly failure.
-            return None, idx0
-    M.num_bytes = data_idx - idx0
-    return M, data_idx
-
-def disassemble_as_data(data, data_idx):
-    # F-line instruction.
-    if _get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
-        return 2
-    return 0
-
-def get_instruction_string(instruction, vars):
-    """ Get a printable representation of an instruction. """
-    key = instruction.specification.key
-    return _get_formatted_description(key, vars)
-
-def get_operand_string(instruction, operand, vars, lookup_symbol=None):
-    """ Get a printable representation of an instruction operand. """
-    pc = instruction.pc
-    key = operand.key
-    if key is None:
-        key = operand.specification.key
-    if key == "RL":
-        # D0-D3/D7/A0-A2
-        ranges = []
-        for ri, mask in enumerate(operand.rl_bits):
-            rsn = -1
-            for rn in range(8):
-                if mask & (1 << rn):
-                    # Note the start of a range.
-                    if rsn == -1:
-                        rsn = rn
-                elif rsn > -1:
-                    ranges.append((ri, (rsn, rn-1)))
-                    rsn = -1
-            if rsn > -1:
-                ranges.append((ri, (rsn, rn)))
-        s = ""
-        for (i, (r0, rn)) in ranges:
-            key = [ "DR", "AR" ][i]
-            if len(s):
-                s += "/"
-            s += _get_formatted_ea_description(instruction, key, {"Rn":r0})
-            if r0 < rn:
-                s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
-        return s
-    elif key == "DISPLACEMENT":
-        value = vars["xxx"]
-        if instruction.specification.key[0:4] == "LINK":
-            value_string = None
-        else:
-            value_string = lookup_symbol(instruction.pc + value)
-        if value_string is None:
-            value_string = signed_hex_string(_A, value)
-        return value_string
-    elif key in SpecialRegisters:
-        return key
-    else:
-        return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
 
 MAF_CODE = 1
 MAF_ABSOLUTE_ADDRESS = 2
@@ -772,99 +854,5 @@ MAF_CONSTANT_VALUE = 4
 MAF_UNCERTAIN = 8
 MAF_CERTAIN = 16
 
-def get_match_addresses(match):
-    # Is it an instruction that exits (RTS, RTR)?
-    # Is it an instruction that conditionally branches (Bcc, Dbcc)?
-    # Is it an instruction that branches and returns (JSR, BSR)?
-    # Is it an instruction that jumps (BRA, JMP)?
-    # Given a branch/jump address, have we seen it before?
-    # Given a branch/jump address, should it be queued?
-    # Given a branch/jump address, should it be done next?
-    def _extract_address(match, opcode_idx):
-        opcode = match.opcodes[opcode_idx]
-        if opcode.key == "PCid16":
-            return match.pc + _signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
-        elif opcode.key == "PCiId8":
-            return match.pc + _signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
-        elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
-            return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
-        elif opcode.specification.key == "DISPLACEMENT": # JMP
-            return match.pc + opcode.vars["xxx"], 0
-        return None
-
-    address = None
-    flags = 0
-    instruction_key = match.specification.key
-    if instruction_key in ("RTS", "RTR"):
-        pass
-    elif instruction_key in ("JSR", "JMP"):
-        result = _extract_address(match, 0)
-        if result is not None:
-            address, flags = result
-    elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
-        address = match.pc + match.opcodes[0].vars["xxx"]
-    elif instruction_key == "DBcc":
-        address = match.pc + match.opcodes[1].vars["xxx"]
-
-    ret = {}
-    if address is not None:
-        ret[address] = (None, flags | MAF_CODE)
-        return ret
-
-    # Locate any general addressing modes which infer labels.
-    # MAF_CERTAIN -> definitely should be mapped to labels.
-    for i, opcode in enumerate(match.opcodes):
-        if opcode.key == "PCid16":
-            address = match.pc + _signed_value("W", opcode.vars["D16"])
-            if address not in ret:
-                ret[address] = (i, MAF_CERTAIN)
-        elif opcode.key == "PCiId8":
-            address = match.pc + _signed_value("W", opcode.vars["D8"])
-            if address not in ret:
-                ret[address] = (i, MAF_CERTAIN)
-        elif opcode.key in ("AbsL", "AbsW"):
-            address = opcode.vars["xxx"]
-            if address not in ret:
-                ret[address] = (i, MAF_ABSOLUTE_ADDRESS)
-        elif opcode.key == "Imm" and i == 0:
-            # move.w #xxx, SR (no) / move.l #xxx, a0 (yes) / move.l #xxx, AR (yes)
-            # Is the destination an address register?
-            # Imm, AbsL; Imm, DR; Imm, AR
-            address = opcode.vars["xxx"]
-            bits = ret.get(address, (i, 0))
-            bits = (bits[0], bits[1] | MAF_CONSTANT_VALUE)
-            if True or match.specification.key != "MOVE.L":
-                if bits[1] & MAF_CODE != MAF_CODE:
-                    bits = (bits[0], bits[1] | MAF_UNCERTAIN)
-            ret[address] = bits
-        elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
-            logger.error("Unhandled opcode EA mode (680x0?): %s", opcode.key)
-
-    return ret
-
-def is_final_instruction(match):
-    return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
-
 def is_big_endian():
     return True
-
-def get_default_symbol_name(address, metadata):
-    if metadata == "midinstruction":
-        return "SYM%06X" % address
-    elif metadata == "bounds":
-        return "lbZ%06X" % address
-    if metadata == "ascii":
-        char = "A"
-    elif metadata == "code":
-        char = "C"
-    elif metadata == "data08":
-        char = "B"
-    elif metadata == "data16":
-        char = "W"
-    elif metadata == "data32":
-        char = "L"
-    else:
-        # Default to a character which means the unexpexted case.
-        char = "X"
-        logger.error("Asked for label name at address %X with metadata %s", address, metadata)
-    return "lb%s%06X" % (char, address)

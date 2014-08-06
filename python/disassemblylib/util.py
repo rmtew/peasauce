@@ -91,11 +91,6 @@ def _make_specification(format):
 
     return spec
 
-
-# TODO: Verification.
-# - Check that all variable bits in the mask are used by the name column.
-# - Check that operand types used in the name column exist.
-# - Check that name column operand type variable names all exist in the operand type spec.
     
 def process_instruction_list(_A, _list):
     # Pass 1: Each instruction entry with a ".z" size wildcard are expanded to specific entries.
@@ -151,15 +146,13 @@ def process_instruction_list(_A, _list):
             for operand_string in operands_bits:
                 spec = _make_specification(operand_string)
                 for var_name, value_name in spec.mask_char_vars.iteritems():
-                    if value_name[0] == "I":
+                    if value_name[0] == "I": # I<word_idx>.<size_char>
                         size_idx = value_name.find(".")
                         if size_idx > 0:
                             word_idx = int(value_name[1:size_idx])
                             extra_words = word_idx
                             size_char = value_name[size_idx+1]
-                            # B (extracted from given word), W (extracted from given word), L (requires extra word)
-                            if size_char == "L": # TODO: m68k specific specifier.
-                                extra_words += 1
+                            extra_words += _A.get_extra_words_for_size_char(size_char)
                             if extra_words > max_extra_words:
                                 max_extra_words = extra_words
         entry[II_EXTRAWORDS] = max_extra_words
@@ -175,7 +168,7 @@ def process_instruction_list(_A, _list):
                         mask |= 1 << _A.get_eam_index_by_name(ea_key)
                 entry[II_OPERANDMASKS][i] = mask
 
-        # Sort..
+        # Sort the masks.  These are ordered in terms of how many known bits there are, leaving variable masks lower in priority.
         sort_key = ""
         sort_idx = 0
         for i, c in enumerate(operand_mask):
@@ -194,6 +187,20 @@ def process_instruction_list(_A, _list):
     ls.sort()
     _list = [ d[k] for k in ls ]
     
+    # Pass 3: Validate instruction list.
+    for entry in _list:
+        name_bits = entry[II_NAME].split(" ", 1)
+        if len(name_bits) > 1:
+            for i, operand_string in enumerate(name_bits[1].split(",")):
+                spec = _make_specification(operand_string)
+                #print operand_string, spec.mask_char_vars
+                #raise RuntimeError("ddd")
+    
+# TODO: Verification.
+# - Check that all variable bits in the mask are used by the name column.
+# - Check that operand types used in the name column exist.
+# - Check that name column operand type variable names all exist in the operand type spec.    
+ 
     return _list
 
 
@@ -249,24 +256,30 @@ class ArchInterface(object):
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
         pass
 
-    def set_operand_type_table(self, table_EAM):
-        self.table_EAM = table_EAM
+    def get_extra_words_for_size_char(self, size_char):
+        raise NotImplementedError("arch-function-undefined")
+        
+    def set_instruction_table(self, table_data):
+        self.table_instructions = process_instruction_list(self, table_data)
+
+    def set_operand_type_table(self, table_data):
+        self.table_operand_types = table_data
     
         idToLabel = {}
         labelToId = {}
         labelToMask = {}
-        for i, t in enumerate(table_EAM):
+        for i, t in enumerate(table_data):
             idToLabel[i] = t[EAMI_LABEL]
             labelToId[t[EAMI_LABEL]] = i
             
-        self.dict_eam_label_to_index = labelToId
-        self.dict_eam_index_to_label = idToLabel
+        self.dict_operand_label_to_index = labelToId
+        self.dict_operand_index_to_label = idToLabel
 
     def get_eam_name_by_index(self, idx):
-        return self.dict_eam_index_to_label[idx]
+        return self.dict_operand_index_to_label[idx]
         
     def get_eam_index_by_name(self, idx):
-        return self.dict_eam_label_to_index[idx]
+        return self.dict_operand_label_to_index[idx]
 
         
 def binary2number(s):
@@ -293,16 +306,16 @@ def number2binary(v, dynamic_padding=False, padded_length=None):
     return "0"*(w-len(s)) + s
 _n2b = number2binary
 
-def signed_hex_string(_A, v):
+def signed_hex_string(_arch, v):
     sign_char = ""
     if v < 0:
         sign_char = "-"
         v = -v
-    return sign_char + _A.constant_hexadecimal_prefix + ("%x" % v) + _A.constant_hexadecimal_suffix
+    return sign_char + _arch.constant_hexadecimal_prefix + ("%x" % v) + _arch.constant_hexadecimal_suffix
 
 
 def generate_all():
-    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "make_operand_mask", "memoize", "process_instruction_list" ]
+    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string" ]
     for k in globals().keys():
         if k.startswith("II_") or k.startswith("EAMI"):
             l.append(k)

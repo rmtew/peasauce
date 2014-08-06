@@ -1525,8 +1525,14 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
 
 def onload_set_disassemblylib_functions(program_data):
-    for func_name, func in disassemblylib.get_api(program_data.dis_name):
-        setattr(program_data, "dis_"+ func_name +"_func", func)
+    arch = disassemblylib.get_arch(program_data.dis_name)
+    program_data.dis_is_final_instruction_func = arch.function_is_final_instruction
+    program_data.dis_get_match_addresses_func = arch.function_get_match_addresses
+    program_data.dis_get_instruction_string_func = arch.function_get_instruction_string
+    program_data.dis_get_operand_string_func = arch.function_get_operand_string
+    program_data.dis_disassemble_one_line_func = arch.function_disassemble_one_line
+    program_data.dis_disassemble_as_data_func = arch.function_disassemble_as_data
+    program_data.dis_get_default_symbol_name_func = arch.function_get_default_symbol_name
 
 def onload_make_address_ranges(program_data):
     program_data.address_ranges = []
