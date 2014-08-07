@@ -298,7 +298,7 @@ class ArchM68k(ArchInterface):
                 return [], data_idx
 
             matches = []
-            for t in self.table_instructions:
+            for i, t in enumerate(self.table_instructions):
                 mask_string = t[II_MASK]
                 and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
                 if (word1 & and_mask) == cmp_mask:
@@ -517,6 +517,8 @@ class ArchM68k(ArchInterface):
         idx0 = data_idx
         matches, data_idx = _match_instructions(data, data_idx, data_abs_idx)
         if not len(matches):
+            if data_abs_idx == 0x4e0f6:
+                print "A1", data_idx, idx0
             return None, idx0
 
         M = matches[0]
@@ -529,6 +531,8 @@ class ArchM68k(ArchInterface):
         for operand_idx, O in enumerate(M.opcodes):
             data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
             if data_idx is None: # Disassembly failure.
+                if data_abs_idx == 0x4e0f6:
+                    print "A2"
                 return None, idx0
         M.num_bytes = data_idx - idx0
         return M, data_idx

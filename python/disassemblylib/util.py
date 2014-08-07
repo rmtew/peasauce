@@ -95,7 +95,7 @@ def _make_specification(format):
 def process_instruction_list(_A, _list):
     # Pass 1: Each instruction entry with a ".z" size wildcard are expanded to specific entries.
     #         e.g. INSTR.z OP, OP -> INSTR.w OP, OP / INSTR.l OP, OP / ...
-    _list_old = _list
+    _list_old = _list[:]
     _list = []
     while len(_list_old):
         entry = _list_old.pop()

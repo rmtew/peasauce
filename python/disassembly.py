@@ -1178,8 +1178,6 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
         data_bytes_to_skip = 0
         line_data = []
         found_terminating_instruction = False
-        #if address == 0x5F266:
-        #    logger.debug("disassembling block.1: address=$%X length=%d", address, block.length)
         while bytes_consumed < block.length:
             data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
             data_offset_start = block.segment_offset + bytes_consumed

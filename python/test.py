@@ -25,16 +25,6 @@ import qtui
 import toolapi
 
 
-LOGGING_SPAM = False
-
-if LOGGING_SPAM:
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    logger.addHandler(ch)
-
-
 class CORE_ProgramData_TestCase(unittest.TestCase):
     def setUp(self):
         self.program_data = disassembly_data.ProgramData()
@@ -316,4 +306,14 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    DISPLAY_LOGGING = False
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    if DISPLAY_LOGGING:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch = logging.NullHandler()
+    logger.addHandler(ch)
     unittest.main()

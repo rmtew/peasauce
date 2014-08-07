@@ -10,6 +10,8 @@ interface, whether a user facing GUI or separate script, might use it without
 reproducing the same logic.
 """
 
+# TODO: Look at revisiting the navigation by line numbers (see get_address commentary).
+
 import os
 import types
 import threading
@@ -175,6 +177,7 @@ class EditorState(object):
     def reset_state(self, acting_client):
         self.disassembly_data = None
         self.line_number = 0
+        self.specific_address = None
         self.address_stack = []
 
         # Clear out related data.
@@ -261,6 +264,12 @@ class EditorState(object):
         return list(disassembly.get_referring_addresses(self.disassembly_data, address))
 
     def get_address(self, acting_client):
+        # The current line number is the start of the block line which the specific address falls
+        # within.  If the units are 16 bits, the line number may be for 0x10000 and the actual
+        # specific user targeted address may be 0x10001.  This is a complication, and it may be
+        # worth reconsidering dealing with things in terms of line numbers.  TODO.
+        if self.specific_address is not None:
+            return self.specific_address
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
 
     def get_line_number_for_address(self, acting_client, address):
@@ -269,10 +278,11 @@ class EditorState(object):
     def get_line_number(self, acting_client):
         return self.line_number
 
-    def set_line_number(self, acting_client, line_number):
+    def set_line_number(self, acting_client, line_number, specific_address=None):
         if type(line_number) not in (int, long):
             raise ValueError("expected numeric type, got %s (%s)" % (line_number.__class__.__name__, line_number))
         self.line_number = line_number
+        self.specific_address = specific_address
 
     def get_line_count(self, acting_client):
         if self.disassembly_data is None:
@@ -291,7 +301,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        current_address = self.get_address(acting_client)
         if current_address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
 
@@ -322,7 +332,7 @@ class EditorState(object):
         self.set_line_number(acting_client, line_number)
 
     def goto_address(self, acting_client):
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None: # Current line does not have an address.
             address = 0
         result = acting_client.request_address(address)
@@ -334,17 +344,15 @@ class EditorState(object):
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, result)
-        self.set_line_number(acting_client, line_number)
+        self.set_line_number(acting_client, line_number, result)
 
     def goto_referring_address(self, acting_client):
         current_address = self.get_address(acting_client)
         if current_address is None:
-            print "yyy",1
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         addresses = list(disassembly.get_referring_addresses(self.disassembly_data, current_address))
         if not len(addresses):
-            print "yyy",2
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         # Addresses appear in numerical order.
@@ -424,7 +432,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        current_address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        current_address = self.get_address(acting_client)
         symbol_name = disassembly.get_symbol_for_address(self.disassembly_data, current_address)
         # Prompt user to edit the current label, or add a new one.
         new_symbol_name = acting_client.request_label_name(symbol_name)
@@ -438,7 +446,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_CODE)
@@ -447,7 +455,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_LONGWORD)
@@ -456,7 +464,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_WORD)
@@ -465,7 +473,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_BYTE)
@@ -474,7 +482,7 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        address = disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
+        address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_ASCII)
