@@ -63,12 +63,17 @@ class ArchM68k(ArchInterface):
 
     constant_core_architecture_mask = IF_000
     constant_operand_count_max = 2
-    
+    constant_endian_types = ">"
+    constant_word_size = 16
+    constant_pc_offset = 2
+
     constant_table_bits = [
         [ 8,  'B' ],
         [ 16, 'W' ],
         [ 32, 'L' ],
     ]
+
+    variable_endian_type = ">"
     
     def function_is_final_instruction(self, match):
         return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
@@ -84,9 +89,9 @@ class ArchM68k(ArchInterface):
         def _extract_address(match, opcode_idx):
             opcode = match.opcodes[opcode_idx]
             if opcode.key == "PCid16":
-                return match.pc + _signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
             elif opcode.key == "PCiId8":
-                return match.pc + _signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
             elif opcode.specification.key == "DISPLACEMENT": # JMP
@@ -116,11 +121,11 @@ class ArchM68k(ArchInterface):
         # MAF_CERTAIN -> definitely should be mapped to labels.
         for i, opcode in enumerate(match.opcodes):
             if opcode.key == "PCid16":
-                address = match.pc + _signed_value("W", opcode.vars["D16"])
+                address = match.pc + self._signed_value("W", opcode.vars["D16"])
                 if address not in ret:
                     ret[address] = (i, MAF_CERTAIN)
             elif opcode.key == "PCiId8":
-                address = match.pc + _signed_value("W", opcode.vars["D8"])
+                address = match.pc + self._signed_value("W", opcode.vars["D8"])
                 if address not in ret:
                     ret[address] = (i, MAF_CERTAIN)
             elif opcode.key in ("AbsL", "AbsW"):
@@ -163,7 +168,7 @@ class ArchM68k(ArchInterface):
             reg_field = self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG]
             for k, v in vars.iteritems():
                 if k == "D16" or k == "D8":
-                    value = _signed_value({ "D8": "B", "D16": "W", }[k], vars[k])
+                    value = self._signed_value({ "D8": "B", "D16": "W", }[k], vars[k])
                     """ [ "PCid16",     "(D16,PC)",             "111",          "010",               "D16=+W",      "Program Counter Indirect with Displacement Mode", ],
                         [ "PCiId8",     "(D8,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
                         [ "PCiIdb",     "(bd,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (Base Displacement) Mode", ],
@@ -279,52 +284,6 @@ class ArchM68k(ArchInterface):
             for O in I.opcodes:
                 O.vars = copy_values(O.specification.mask_char_vars, char_vars) 
 
-        def _match_instructions(data, data_idx, data_abs_idx):
-            """ Read one word from the stream, and return matching instructions by order of decreasing confidence. """
-            @memoize
-            def get_instruction_format_parts(instr_format):
-                opcode_sidx = instr_format.find(" ")
-                if opcode_sidx == -1:
-                    return [ instr_format ]
-                ret = [ instr_format[:opcode_sidx] ]
-                opcode_string = instr_format[opcode_sidx+1:]
-                opcode_bits = opcode_string.replace(" ", "").split(",")
-                ret.extend(opcode_bits)
-                return ret
-
-            word1, data_idx = _get_word(data, data_idx)
-            if word1 is None: # Disassembly failure
-                logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
-                return [], data_idx
-
-            matches = []
-            for i, t in enumerate(self.table_instructions):
-                mask_string = t[II_MASK]
-                and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
-                if (word1 & and_mask) == cmp_mask:
-                    instruction_parts = get_instruction_format_parts(t[II_NAME])
-
-                    M = Match()
-                    M.pc = data_abs_idx + 2
-                    M.data_words = [ word1 ]
-
-                    M.table_text = t[II_TEXT]
-                    M.table_mask = mask_string
-                    M.table_extra_words = t[II_EXTRAWORDS]
-                    M.table_ea_masks = t[II_OPERANDMASKS]
-
-                    M.format = instruction_parts[0]
-                    M.specification = _make_specification(M.format)
-                    M.opcodes = []
-                    for i, opcode_format in enumerate(instruction_parts[1:]):
-                        T = MatchOpcode()
-                        T.format = opcode_format
-                        T.specification = _make_specification(T.format)
-                        M.opcodes.append(T)
-                    matches.append(M)
-
-            return matches, data_idx
-
         def _decode_operand(data, data_idx, operand_idx, M, T):
             def _data_word_lookup(data_words, text):
                 size_idx = text.find(".")
@@ -384,14 +343,14 @@ class ArchM68k(ArchInterface):
                     size_char = "B"
                     if value == 0:
                         size_char = "W"
-                        value, data_idx = _get_word(data, data_idx)
+                        value, data_idx = self._get_word(data, data_idx)
                     elif value == 0xFF:
                         size_char = "L"
-                        value, data_idx = _get_long(data, data_idx)
+                        value, data_idx = self._get_long(data, data_idx)
                 if value is None: # Disassembly failure
                     logger.error("_decode_operand: Failed to obtain displacement offset")
                     return None
-                T.vars["xxx"] = _signed_value(size_char, value)
+                T.vars["xxx"] = self._signed_value(size_char, value)
                 return data_idx
             elif T.specification.key in SpecialRegisters:
                 return data_idx
@@ -425,7 +384,7 @@ class ArchM68k(ArchInterface):
                         return None
 
                     #try:
-                    value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
+                    value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
                     #except Exception:
                     #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
                     #    raise
@@ -434,7 +393,7 @@ class ArchM68k(ArchInterface):
                         return None
                     T.vars["xxx"] = value
                 elif operand_key == "Imm" and "z" in T.vars and "xxx" not in T.vars:
-                    value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
+                    value, data_idx = self._get_data_by_size_char(data, data_idx, T.vars["z"])
                     T.vars["xxx"] = value
                 elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
                    if T.vars["xxx"] == 0:
@@ -442,7 +401,7 @@ class ArchM68k(ArchInterface):
 
             if "xxx" in T.vars:
                 if T.vars["xxx"] == "+z":
-                    value, data_idx = _get_data_by_size_char(data, data_idx, T.vars["z"])
+                    value, data_idx = self._get_data_by_size_char(data, data_idx, T.vars["z"])
                     if value is None: # Disassembly failure.
                         logger.debug("Failed to fetch xxx/+z data")
                         return None
@@ -450,7 +409,7 @@ class ArchM68k(ArchInterface):
 
             # Populate EA mode specific variables.
             if read_string == "EW":
-                ew1, data_idx = _get_word(data, data_idx)
+                ew1, data_idx = self._get_word(data, data_idx)
                 if ew1 is None: # Disassembly failure.
                     logger.debug("Failed to extension word1")
                     return None
@@ -466,7 +425,7 @@ class ArchM68k(ArchInterface):
                 T.vars["S"] = [1,2,4,8][scale]
 
                 if full_extension_word:
-                    ew2, data_idx = _get_word(data, data_idx)
+                    ew2, data_idx = self._get_word(data, data_idx)
                     base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
                     index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
                     base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
@@ -474,9 +433,9 @@ class ArchM68k(ArchInterface):
                     # ...
                     base_displacement = 0
                     if base_displacement_size == 2: # %10
-                        base_displacement, data_idx = _get_word(data, data_idx)
+                        base_displacement, data_idx = self._get_word(data, data_idx)
                     elif base_displacement_size == 3: # %11
-                        base_displacement, data_idx = _get_long(data, data_idx)
+                        base_displacement, data_idx = self._get_long(data, data_idx)
                     if base_displacement is None: # Disassembly failure.
                         return None
                     # TODO: Finish implementation.
@@ -488,7 +447,7 @@ class ArchM68k(ArchInterface):
             elif read_string:
                 k, v = [ s.strip() for s in read_string.split("=") ]
                 size_char = v[1]
-                value, data_idx = _get_data_by_size_char(data, data_idx, size_char)
+                value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
                 if value is None: # Disassembly failure.
                     logger.error("Failed to read extra size char")
                     return None
@@ -515,31 +474,27 @@ class ArchM68k(ArchInterface):
             return (data_word & mask) >> shift
             
         idx0 = data_idx
-        matches, data_idx = _match_instructions(data, data_idx, data_abs_idx)
+        matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
         if not len(matches):
-            if data_abs_idx == 0x4e0f6:
-                print "A1", data_idx, idx0
             return None, idx0
 
         M = matches[0]
         # An instruction may have multiple words to it, before operand data..  e.g. MOVEM
         for i in range(M.table_extra_words):
-            data_word, data_idx = _get_word(data, data_idx)
+            data_word, data_idx = self._get_word(data, data_idx)
             M.data_words.append(data_word)
 
         _disassemble_vars_pass(M)
         for operand_idx, O in enumerate(M.opcodes):
             data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
             if data_idx is None: # Disassembly failure.
-                if data_abs_idx == 0x4e0f6:
-                    print "A2"
                 return None, idx0
         M.num_bytes = data_idx - idx0
         return M, data_idx
         
     def function_disassemble_as_data(self, data, data_idx):
         # F-line instruction.
-        if _get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
+        if self._get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
             return 2
         return 0
         
@@ -580,7 +535,29 @@ class ArchM68k(ArchInterface):
             return 1
         return 0
 
+    def _get_long(self, data, data_idx):
+        return self._get_value(data, data_idx, 32, False)
         
+    def _get_byte(self, data, data_idx):
+        return self._get_value(data, data_idx, 8, False)
+    
+    def _signed_value(self, size_char, value):
+        unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
+        return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
+    
+    def _get_data_by_size_char(self, data, idx, char):
+        if char == "B":
+            word, idx = self._get_word(data, idx)
+            if word is None:
+                return None, idx
+            word &= 0xFF
+            return word, idx
+        elif char == "W":
+            return self._get_word(data, idx)
+        elif char == "L":
+            return self._get_long(data, idx)
+
+            
 def get_size_value(label):
     if label == "B": return 0
     if label == "W": return 1
@@ -800,63 +777,8 @@ instruction_table = [
 ]
 
 
-def _get_data_by_size_char(data, idx, char):
-    if char == "B":
-        word, idx = _get_word(data, idx)
-        if word is None:
-            return None, idx
-        word &= 0xFF
-        return word, idx
-    elif char == "W":
-        return _get_word(data, idx)
-    elif char == "L":
-        return _get_long(data, idx)
-
-def _get_byte(data, idx):
-    if idx + 1 <= len(data):
-        return data[idx], idx + 1
-    return None, idx
-
-def _get_word(data, idx):
-    if idx + 2 <= len(data):
-        return (data[idx] << 8) +  data[idx+1], idx + 2
-    return None, idx
-
-def _get_long(data, idx):
-    if idx + 4 <= len(data):
-        return (data[idx] << 24) +  (data[idx+1] << 16) +  (data[idx+2] << 8) +  data[idx+3], idx + 4
-    return None, idx
-
-def _signed_value(size_char, value):
-    unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
-    return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
-
-class Match(object):
-    table_mask = None
-    table_text = None
-    table_extra_words = None
-    format = None
-    specification = None
-    description = None
-    data_words = None
-    opcodes = None
-    vars = None
-    num_bytes = None
-
-class MatchOpcode(object):
-    key = None # Overrides the one in the spec
-    format = None
-    specification = None
-    description = None
-    vars = None
-    rl_bits = None
-
-
 MAF_CODE = 1
 MAF_ABSOLUTE_ADDRESS = 2
 MAF_CONSTANT_VALUE = 4
 MAF_UNCERTAIN = 8
 MAF_CERTAIN = 16
-
-def is_big_endian():
-    return True

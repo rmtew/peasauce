@@ -19,11 +19,17 @@ logger = logging.getLogger("disassembler-mips")
 ### IF_010/IF_020/... -> IF_000
 ## All subarchitectures implicitly get the core architecture instructions.
 
+# Flags to indicate which architecture variant the instruction belongs to.
 IF_MIPS32     = 1<<0
 IF_MIPS32R2   = 1<<1
 IF_MIPS64     = 1<<2
 IF_SMARTMIPS  = 1<<3
 IF_EJTAG      = 1<<4
+
+# Flags to indicate special attributes about the given instruction.
+IFX_ENDSEQ    = 1<<10       # Indicates the end of a sequence of instructions.  
+IFX_ENDSEQ_BD = 1<<11       # Indicates the end of a sequence of instructions.  Next instruction is still executed on the way (the branch delay slot).
+
 
 class ArchMIPS(ArchInterface):
     constant_immediate_prefix = ""
@@ -38,6 +44,8 @@ class ArchMIPS(ArchInterface):
 
     constant_core_architecture_mask = IF_MIPS32
     constant_operand_count_max = 4
+    constant_endian_types = ">"
+    constant_word_size = 16
 
     constant_table_bits = [
         [     32, 'S' ],  # Floating point
@@ -46,29 +54,59 @@ class ArchMIPS(ArchInterface):
         [     64, 'L' ],  # Fixed point
         [ 2 * 32, 'PS' ], # Floating point
     ]
-    
-    def function_is_final_instruction(cls, *args, **kwargs):
-        pass
 
-    def function_get_match_addresses(cls, *args, **kwargs):
-        pass
+    variable_endian_type = ">"
 
-    def function_get_instruction_string(cls, *args, **kwargs):
-        pass
+    # TODO: Pass in 
+    def function_is_final_instruction(self, match):
+        """ Indicate if the current instruction is the last in a sequence. """
+        # MIPS cases which need to work:
+        # - If the current instruction is an end of sequence that does not execute the branch delay slot (the next instruction).
+        if (match.table_iflags & IFX_ENDSEQ) == IFX_ENDSEQ:
+            return True
+        # - If the preceding instruction is an end of sequence, and the current instruction is the branch delay slot.
+        # - Cases where the PC register is altered directly?
+
+    def function_get_match_addresses(self, match):
+        for i, opcode in enumerate(match.opcodes):
+            pass
+        return {}
+
+    def function_get_instruction_string(self, instruction, vars):
+        return instruction.specification.key
        
-    def function_get_operand_string(cls, *args, **kwargs):
-        pass
+    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
+        return operand.specification.key
        
-    def function_disassemble_one_line(cls, *args, **kwargs):
-        pass
+    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        def _decode_operand(data, data_idx, operand_idx, M, T):
+            """ ... """
+            instruction_key = M.specification.key
+            operand_key = T.specification.key
+            return data_idx
+
+        idx0 = data_idx
+        matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
+        if not len(matches):
+            return None, idx0
+        M = matches[0]
+        for operand_idx, O in enumerate(M.opcodes):
+            data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
+            if data_idx is None: # Disassembly failure.
+                return None, idx0
+        M.num_bytes = data_idx - idx0
+        return M, data_idx
         
-    def function_disassemble_as_data(cls, *args, **kwargs):
-        pass
+    def function_disassemble_as_data(self, data, data_idx):
+        """ If a non-zero value is returned, it is the number of bytes to disassemble as data. """
+        return 0
         
-    def function_get_default_symbol_name(cls, *args, **kwargs):
-        pass
+    def function_get_default_symbol_name(self, address, metadata):
+        char = "X"
+        return "lb%s%06X" % (char, address)
 
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
+        """ This expands instructions with parameterised sizes into the individual sized variants. """
         if entry[II_MASK].startswith("010001"): # COP1 instruction
             fmt_table = cop1_fmt_table
             match = "zzzzz" # bits 25..21
@@ -210,7 +248,7 @@ instruction_table = [
     [ "010011rrrrrtttttsssssddddd000001", "ALNV.PS          FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t), GPR:(Rn=s)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Align Variable" ],
     [ "000000ssssstttttddddd00000100100", "AND              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "And" ],
     [ "001100ssssstttttvvvvvvvvvvvvvvvv", "ANDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "And Immediate Word" ],
-    [ "0001000000000000vvvvvvvvvvvvvvvv", "B                PCRelative:(xxx=v)",                                IF_MIPS32, "Unconditional Branch" ],
+    [ "0001000000000000vvvvvvvvvvvvvvvv", "B                PCRelative:(xxx=v)",                                IF_MIPS32|IFX_ENDSEQ_BD, "Unconditional Branch" ],
     [ "0000010000010001vvvvvvvvvvvvvvvv", "BAL              PCRelative:(xxx=v)",                                IF_MIPS32, "Branch And Link" ],
     [ "01000101000ccc00vvvvvvvvvvvvvvvv", "BC1F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP False" ],
     [ "01000101000ccc10vvvvvvvvvvvvvvvv", "BC1FL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP False Likely" ],
@@ -268,7 +306,7 @@ instruction_table = [
     [ "0100011011000000sssssddddd100000", "CVT.S.PU         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Convert Pair Upper to Single Floating Point" ],
     [ "0100011000000000sssssddddd100100", "CVT.W.S          FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Convert to Word Floating Point" ],
     [ "0100011000100000sssssddddd100100", "CVT.W.D          FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Convert to Word Floating Point" ],
-    [ "01000010000000000000000000011111", "DERET",                                                              IF_EJTAG, "Debug Exception Return" ],
+    [ "01000010000000000000000000011111", "DERET",                                                              IF_EJTAG|IFX_ENDSEQ, "Debug Exception Return" ],
     [ "01000001011ttttt0110000000000000", "DI               GPR:(Rn=t)",                                        IF_MIPS32R2, "Disable Interrupts" ],
     [ "000000sssssttttt0000000000011010", "DIV              GPR:(Rn=s), GPR:(Rn=t)",                            IF_MIPS32, "Divide Word" ],
     [ "01000110000tttttsssssddddd000011", "DIV.S            FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32, "Floating Point Divide" ],
@@ -276,19 +314,19 @@ instruction_table = [
     [ "000000sssssttttt0000000000011011", "DIVU             GPR:(Rn=s), GPR:(Rn=t)",                            IF_MIPS32, "Divide Unsigned Word" ],
     [ "00000000000000000000000011000000", "EHB",                                                                IF_MIPS32R2, "Execution Hazard Barrier" ],
     [ "01000001011ttttt0110000000100000", "EI               GPR:(Rn=t)",                                        IF_MIPS32R2, "Enable Interrupts" ],
-    [ "01000010000000000000000000011000", "ERET",                                                               IF_MIPS32, "Exception Return" ],
+    [ "01000010000000000000000000011000", "ERET",                                                               IF_MIPS32|IFX_ENDSEQ, "Exception Return" ],
     [ "011111ssssstttttmmmmmbbbbb011010", "EXT              GPR:(Rn=t), GPR:(Rn=s), Imm:(v=b), Imm:(v=m-1)",    IF_MIPS32R2, "Extract Bit Field" ],
     [ "010001zzzzz00000sssssddddd001011", "FLOOR.L.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Floor Convert to Long Fixed Point" ],
     [ "010001zzzzz00000sssssddddd001111", "FLOOR.W.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Floor Convert to Word Fixed Point" ],
     [ "011111ssssstttttmmmmmbbbbb000100", "INS              GPR:(Rn=t), GPR:(Rn=s), Imm:(v=b), Imm:(v=b+m-1)",  IF_MIPS32R2, "Insert Bit Field" ],
-    [ "000010vvvvvvvvvvvvvvvvvvvvvvvvvv", "J                PCRegion:(xxx=v)",                                  IF_MIPS32, "Jump" ],
+    [ "000010vvvvvvvvvvvvvvvvvvvvvvvvvv", "J                PCRegion:(xxx=v)",                                  IF_MIPS32|IFX_ENDSEQ_BD, "Jump" ],
     [ "000011vvvvvvvvvvvvvvvvvvvvvvvvvv", "JAL              PCRegion:(xxx=v)",                                  IF_MIPS32, "Jump And Link" ],
     [ "000000sssss000001111100000001001", "JALR             GPR:(Rn=s)",                                        IF_MIPS32, "Jump And Link Register" ],
     [ "000000sssss00000ddddd00000001001", "JALR             GPR:(Rn=d), GPR:(Rn=s)",                            IF_MIPS32, "Jump And Link Register" ],
     [ "000000sssss00000111111hhhh001001", "JALR.HB          GPR:(Rn=s), Imm:(v=h)",                             IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
     [ "000000sssss00000ddddd1hhhh001001", "JALR.HB          GPR:(Rn=d), GPR:(Rn=s), Imm:(v=h)",                 IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
-    [ "000000sssss000000000000000001000", "JR               GPR:(Rn=s)",                                        IF_MIPS32, "Jump Register" ],
-    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(v=h)",                             IF_MIPS32R2, "Jump Register With Hazard Barrier" ],
+    [ "000000sssss000000000000000001000", "JR               GPR:(Rn=s)",                                        IF_MIPS32|IFX_ENDSEQ_BD, "Jump Register" ],
+    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(v=h)",                             IF_MIPS32R2|IFX_ENDSEQ_BD, "Jump Register With Hazard Barrier" ],
     [ "100000bbbbbtttttvvvvvvvvvvvvvvvv", "LB               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte" ],
     [ "100100bbbbbtttttvvvvvvvvvvvvvvvv", "LBU              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte Unsigned" ],
     [ "110101bbbbbtttttvvvvvvvvvvvvvvvv", "LDC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Double Word to Floating Point" ],
@@ -453,36 +491,3 @@ instruction_table = [
     [ "000000ssssstttttddddd00000100110", "XOR              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Exclusive OR" ],
     [ "001110ssssstttttvvvvvvvvvvvvvvvv", "XORI             GPR:(Rn=t), GPR:(Rn=s), IMM:(v=v)",                 IF_MIPS32, "Exclusive OR Immediate" ],
 ]
- 
-
-def is_final_instruction(match):
-    """ description """
-    return False # match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
-
-def get_match_addresses(match):
-    """ description """
-    pass
-
-def get_instruction_string(instruction, vars):
-    """ description """
-    pass
-
-def get_operand_string(instruction, operand, vars, lookup_symbol=None):
-    """ description """
-    pass
-
-def disassemble_one_line(data, data_idx, data_abs_idx):
-    """ description """
-    pass
-
-def disassemble_as_data(data, data_idx):
-    """ description """
-    pass
-
-def is_big_endian():
-    """ description """
-    return False
-
-def get_default_symbol_name(address, metadata):
-    """ description """
-    raise NotImplementedError("")

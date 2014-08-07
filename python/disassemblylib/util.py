@@ -1,3 +1,5 @@
+import struct
+
 #
 
 # IDEA: Sizes should be specified for architectures in bits.  The size label should be an affectation.
@@ -48,6 +50,26 @@ def make_operand_mask(mask_string):
     return and_mask, cmp_mask
 
 
+class Match(object):
+    table_mask = None
+    table_text = None
+    table_extra_words = None
+    format = None
+    specification = None
+    description = None
+    data_words = None
+    opcodes = None
+    vars = None
+    num_bytes = None
+
+class MatchOpcode(object):
+    key = None # Overrides the one in the spec
+    format = None
+    specification = None
+    description = None
+    vars = None
+    rl_bits = None
+
 class Specification(object):
     key = None
     mask_char_vars = None
@@ -91,7 +113,7 @@ def _make_specification(format):
 
     return spec
 
-    
+
 def process_instruction_list(_A, _list):
     # Pass 1: Each instruction entry with a ".z" size wildcard are expanded to specific entries.
     #         e.g. INSTR.z OP, OP -> INSTR.w OP, OP / INSTR.l OP, OP / ...
@@ -165,7 +187,7 @@ def process_instruction_list(_A, _list):
                 spec = _make_specification(operand_string)
                 if spec.filter_keys is not None:
                     for ea_key in spec.filter_keys:
-                        mask |= 1 << _A.get_eam_index_by_name(ea_key)
+                        mask |= 1 << _A.dict_operand_label_to_index[ea_key]
                 entry[II_OPERANDMASKS][i] = mask
 
         # Sort the masks.  These are ordered in terms of how many known bits there are, leaving variable masks lower in priority.
@@ -230,10 +252,20 @@ class ArchInterface(object):
     constant_hexadecimal_suffix = "arch-constant-undefined"
     """ Constant: Character which indicates trailing text is comment. """
     constant_comment_prefix = "arch-constant-undefined"
+
     """ Constant: Core architecture bit mask. """
     constant_core_architecture_mask = 0
     """ Constant: Maximum number of operands per instruction. """
     constant_operand_count_max = 0
+    """ Constant: The architecture supported endian types.  little endian '<' big endian '>'."""
+    constant_endian_types = None
+    """ Constant: How many bits an architectural word is comprised of. """
+    constant_word_size = None
+    """ Constant: How far from the start of the current instruction PC is offset while it is executing. """
+    constant_pc_offset = 0
+
+    """ Variable: The implicit (or user selected) endian type. """
+    variable_endian_type = None
 
     """ Function: Identify if the given instruction alters the program counter. """
     function_is_final_instruction = _unimplemented_function
@@ -275,12 +307,75 @@ class ArchInterface(object):
         self.dict_operand_label_to_index = labelToId
         self.dict_operand_index_to_label = idToLabel
 
-    def get_eam_name_by_index(self, idx):
-        return self.dict_operand_index_to_label[idx]
-        
-    def get_eam_index_by_name(self, idx):
-        return self.dict_operand_label_to_index[idx]
+    # ...
+    
+    def _get_word(self, data, data_idx):
+        return self._get_value(data, data_idx, self.constant_word_size, False)
 
+    def _get_value(self, data, data_idx, bits, signed):
+        k = (bits, signed)
+        d = {
+            (64, False):   "Q",
+            (64, True):    "q",
+            (32, False):   "I",
+            (32, True):    "i",
+            (16, False):   "H",
+            (16, True):    "h",
+            (8,  False):   "B",
+            (8,  True):    "b",
+        }
+        sfmt = self.variable_endian_type + d[k]
+        size = struct.calcsize(sfmt)
+        if data_idx + size <= len(data):
+            return struct.unpack(sfmt, data[data_idx:data_idx+size])[0], data_idx+size
+        return None, data_idx
+
+    def _match_instructions(self, data, data_idx, data_abs_idx):
+        """ Read one word from the stream, and return matching instructions by order of decreasing confidence. """
+        @memoize
+        def get_instruction_format_parts(instr_format):
+            opcode_sidx = instr_format.find(" ")
+            if opcode_sidx == -1:
+                return [ instr_format ]
+            ret = [ instr_format[:opcode_sidx] ]
+            opcode_string = instr_format[opcode_sidx+1:]
+            opcode_bits = opcode_string.replace(" ", "").split(",")
+            ret.extend(opcode_bits)
+            return ret
+
+        word1, data_idx = self._get_word(data, data_idx)
+        if word1 is None: # Disassembly failure
+            logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
+            return [], data_idx
+
+        matches = []
+        for i, t in enumerate(self.table_instructions):
+            mask_string = t[II_MASK]
+            and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
+            if (word1 & and_mask) == cmp_mask:
+                instruction_parts = get_instruction_format_parts(t[II_NAME])
+
+                M = Match()
+                M.pc = data_abs_idx + self.constant_pc_offset
+                M.data_words = [ word1 ]
+
+                M.table_text = t[II_TEXT]
+                M.table_mask = mask_string
+                M.table_extra_words = t[II_EXTRAWORDS]
+                M.table_ea_masks = t[II_OPERANDMASKS]
+                M.table_iflags = t[II_FLAGS]
+
+                M.format = instruction_parts[0]
+                M.specification = _make_specification(M.format)
+                M.opcodes = []
+                for i, opcode_format in enumerate(instruction_parts[1:]):
+                    T = MatchOpcode()
+                    T.format = opcode_format
+                    T.specification = _make_specification(T.format)
+                    M.opcodes.append(T)
+                matches.append(M)
+
+        return matches, data_idx
         
 def binary2number(s):
     v = 0
