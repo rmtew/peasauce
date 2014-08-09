@@ -26,10 +26,6 @@ IF_MIPS64     = 1<<2
 IF_SMARTMIPS  = 1<<3
 IF_EJTAG      = 1<<4
 
-# Flags to indicate special attributes about the given instruction.
-IFX_ENDSEQ    = 1<<10       # Indicates the end of a sequence of instructions.  
-IFX_ENDSEQ_BD = 1<<11       # Indicates the end of a sequence of instructions.  Next instruction is still executed on the way (the branch delay slot).
-
 
 class ArchMIPS(ArchInterface):
     constant_immediate_prefix = ""
@@ -45,7 +41,7 @@ class ArchMIPS(ArchInterface):
     constant_core_architecture_mask = IF_MIPS32
     constant_operand_count_max = 4
     constant_endian_types = ">"
-    constant_word_size = 16
+    constant_word_size = 32
 
     constant_table_bits = [
         [     32, 'S' ],  # Floating point
@@ -54,6 +50,28 @@ class ArchMIPS(ArchInterface):
         [     64, 'L' ],  # Fixed point
         [ 2 * 32, 'PS' ], # Floating point
     ]
+
+    constant_operand_var_constant_substitutions = {
+    }
+    
+    constant_table_condition_codes = {
+        _b2n("00000"): "F",
+        _b2n("00001"): "UN",
+        _b2n("00010"): "EQ",
+        _b2n("00011"): "UEQ",
+        _b2n("00100"): "OLT",
+        _b2n("00101"): "ULT",
+        _b2n("00110"): "OLE",
+        _b2n("00111"): "ULE",
+        _b2n("10000"): "SF",
+        _b2n("10001"): "NGLE",
+        _b2n("10010"): "SEQ",
+        _b2n("10011"): "NGL",
+        _b2n("10100"): "LT",
+        _b2n("10101"): "NGE",
+        _b2n("10110"): "LE",
+        _b2n("10111"): "NGT",
+    }
 
     variable_endian_type = ">"
 
@@ -76,20 +94,55 @@ class ArchMIPS(ArchInterface):
         return instruction.specification.key
        
     def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
-        return operand.specification.key
+        key = operand.key
+        if key is None:
+            key = operand.specification.key
+        operand_idx = self.dict_operand_label_to_index[key]
+        mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
+        for k, v in vars.iteritems():
+            mode_format = mode_format.replace(k, str(v))
+        return mode_format
        
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        def _disassemble_vars_pass(I):
+            def copy_values(mask_char_vars, char_vars):
+                d = {}
+                for var_name, char_string in mask_char_vars.iteritems():
+                    if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
+                        var_value = char_string
+                    else:
+                        var_value = NumericSizeValues.get(char_string, None)
+                        if var_value is None:
+                            var_value = char_vars[char_string]
+                        if var_name == "cc":
+                            var_value = ConditionCodes[var_value]
+                        elif var_name == "z":
+                            var_value = ["B","W","L"][var_value]
+                        elif var_name == "d":
+                            var_value = ["R","L"][var_value]
+                    d[var_name] = var_value
+                return d
+            pass
+
         def _decode_operand(data, data_idx, operand_idx, M, T):
             """ ... """
-            instruction_key = M.specification.key
             operand_key = T.specification.key
+            operand_idx = self.dict_operand_label_to_index[operand_key]
+            mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
+            #if mode_format == "
+            #instruction_key = M.specification.key
+            #operand_key = T.specification.key
+            print T.specification.__dict__
+            T.vars = {}
             return data_idx
 
         idx0 = data_idx
         matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
         if not len(matches):
             return None, idx0
+
         M = matches[0]
+        _disassemble_vars_pass(M)
         for operand_idx, O in enumerate(M.opcodes):
             data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
             if data_idx is None: # Disassembly failure.
@@ -179,24 +232,6 @@ def PLACEHOLDER_get_gpr_name(num):
 #   COP1: 0x15: 10101: .L: 
 #   COP1: 0x16: 10110: .PS: 
 
-fp_cond_table = [
-    [ _b2n("00000"), "F", ],
-    [ _b2n("00001"), "UN", ],
-    [ _b2n("00010"), "EQ", ],
-    [ _b2n("00011"), "UEQ", ],
-    [ _b2n("00100"), "OLT", ],
-    [ _b2n("00101"), "ULT", ],
-    [ _b2n("00110"), "OLE", ],
-    [ _b2n("00111"), "ULE", ],
-    [ _b2n("10000"), "SF", ],
-    [ _b2n("10001"), "NGLE", ],
-    [ _b2n("10010"), "SEQ", ],
-    [ _b2n("10011"), "NGL", ],
-    [ _b2n("10100"), "LT", ],
-    [ _b2n("10101"), "NGE", ],
-    [ _b2n("10110"), "LE", ],
-    [ _b2n("10111"), "NGT", ],
-]
 
 cop1_fmt_table = [
     [ 0x10, "S"  ],

@@ -73,6 +73,31 @@ class ArchM68k(ArchInterface):
         [ 32, 'L' ],
     ]
 
+    constant_table_condition_codes = [
+        "T",  # %0000
+        "F",  # %0001
+        "HI", # %0010
+        "LS", # %0011
+        "CC", # %0100
+        "CS", # %0101
+        "NE", # %0110
+        "EQ", # %0111
+        "VC", # %1000
+        "VS", # %1001
+        "PL", # %1010
+        "MI", # %1011
+        "GE", # %1100
+        "LT", # %1101
+        "GT", # %1110
+        "LE", # %1111
+    ]
+    
+    constant_operand_var_constant_substitutions = {
+        "00": 0,
+        "01": 1,
+        "10": 2,
+    }
+    
     variable_endian_type = ">"
     
     def function_is_final_instruction(self, match):
@@ -245,25 +270,17 @@ class ArchM68k(ArchInterface):
         """ Tokenise one disassembled instruction with its operands. """
         
         def _disassemble_vars_pass(I):
-            def _get_var_values(chars, data_word1, mask_string):
-                var_values = {}
-                if chars:
-                    for mask_char in chars:
-                        if mask_char in mask_string:
-                            var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
-                return var_values
-
             def copy_values(mask_char_vars, char_vars):
                 d = {}
                 for var_name, char_string in mask_char_vars.iteritems():
                     if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
                         var_value = char_string
                     else:
-                        var_value = NumericSizeValues.get(char_string, None)
+                        var_value = self.constant_operand_var_constant_substitutions.get(char_string, None)
                         if var_value is None:
                             var_value = char_vars[char_string]
                         if var_name == "cc":
-                            var_value = ConditionCodes[var_value]
+                            var_value = self.constant_table_condition_codes[var_value]
                         elif var_name == "z":
                             var_value = ["B","W","L"][var_value]
                         elif var_name == "d":
@@ -274,7 +291,8 @@ class ArchM68k(ArchInterface):
             chars = I.specification.mask_char_vars.values()
             for O in I.opcodes:
                 for mask_char in O.specification.mask_char_vars.itervalues():
-                    if mask_char not in chars and mask_char not in NumericSizeValues:
+                    # Chars are the variable names, not the constants.
+                    if mask_char not in chars and mask_char not in self.constant_operand_var_constant_substitutions:
                         chars.append(mask_char)
             char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
             # In case anything wants to copy it, and it is explicitly specified.
@@ -282,7 +300,7 @@ class ArchM68k(ArchInterface):
                 char_vars["z"] = get_size_value(I.specification.key[-1])
             I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
             for O in I.opcodes:
-                O.vars = copy_values(O.specification.mask_char_vars, char_vars) 
+                O.vars = copy_values(O.specification.mask_char_vars, char_vars)
 
         def _decode_operand(data, data_idx, operand_idx, M, T):
             def _data_word_lookup(data_words, text):
@@ -454,25 +472,6 @@ class ArchM68k(ArchInterface):
                 T.vars[k] = value
             return data_idx
             
-        def _extract_masked_value(data_word, mask_string, mask_char):
-            @memoize
-            def _extract_mask_bits(mask_string, s):
-                mask = 0
-                for i in range(len(mask_string)):
-                    mask <<= 1
-                    if mask_string[i] == s:
-                        mask |= 1
-                shift = 0
-                if mask:
-                    mask_copy = mask
-                    while mask_copy & 1 == 0:
-                        mask_copy >>= 1
-                        shift += 1
-                return mask, shift
-
-            mask, shift = _extract_mask_bits(mask_string, mask_char)
-            return (data_word & mask) >> shift
-            
         idx0 = data_idx
         matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
         if not len(matches):
@@ -499,6 +498,10 @@ class ArchM68k(ArchInterface):
         return 0
         
     def function_get_default_symbol_name(self, address, metadata):
+        """
+        'Resource'-style disassembly variable naming.
+        See amiga-dev wiki page.  Link to be inserted here asap.
+        """
         if metadata == "midinstruction":
             return "SYM%06X" % address
         elif metadata == "bounds":
@@ -521,6 +524,7 @@ class ArchM68k(ArchInterface):
         return "lb%s%06X" % (char, address)
 
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
+        """ This expands instructions with parameterised sizes into the individual sized variants. """
         new_entries = []
         for value, text in FmtTable:
             new_entry = entry[:]
@@ -563,33 +567,11 @@ def get_size_value(label):
     if label == "W": return 1
     if label == "L": return 2
 
-NumericSizeValues = { "00": 0, "01": 1, "10": 2 }
-
 FmtTable = [
     [ _b2n("00"), "B" ],
     [ _b2n("01"), "W" ],
     [ _b2n("10"), "L" ],
 ]
-
-ConditionCodes = [
-    "T",  # %0000
-    "F",  # %0001
-    "HI", # %0010
-    "LS", # %0011
-    "CC", # %0100
-    "CS", # %0101
-    "NE", # %0110
-    "EQ", # %0111
-    "VC", # %1000
-    "VS", # %1001
-    "PL", # %1010
-    "MI", # %1011
-    "GE", # %1100
-    "LT", # %1101
-    "GT", # %1110
-    "LE", # %1111
-]
-
 
 SpecialRegisters = ("CCR", "SR")
 

@@ -16,8 +16,7 @@ def memoize(function):
         return rv
     return wrapper
 
-## Instruction definition and parsing.
-
+## Instruction table columns.
 II_MASK = 0
 II_NAME = 1
 II_FLAGS = 2
@@ -28,7 +27,14 @@ II_EXTRAWORDS = 6
 II_OPERANDMASKS = 7
 II_LENGTH = 8
 
-# Syntax:               ...
+## Instruction table II_FLAGS general bits.
+# Flags to indicate special attributes about the given instruction, these overlap the architecture specific flag set.
+IFX_ENDSEQ    = 1<<30       # Indicates the end of a sequence of instructions.  
+IFX_ENDSEQ_BD = 1<<31       # Indicates the end of a sequence of instructions.  Next instruction is still executed on the way (the branch delay slot).
+
+
+## Operand type table columns.
+# Syntax:
 EAMI_LABEL = 0
 # Formatting:           Where the arguments are injected to make the operand source code.
 EAMI_FORMAT = 1
@@ -37,7 +43,12 @@ EAMI_DATA_FIELDS = 3
 # Description:          Text description.
 EAMI_DESCRIPTION = 4
 
+
 def make_operand_mask(mask_string):
+    """
+    Convert a binary mask string with variable characters and bits to an '&', and '==' mask. 
+    This is used to be able to match an instruction word to the instruction table entry.
+    """
     and_mask = cmp_mask = 0
     for c in mask_string:
         and_mask <<= 1
@@ -79,8 +90,15 @@ class Specification(object):
 
 @memoize
 def _make_specification(format):
+    """
+    Parse a token into a key, substitutions to be made into the key and filters on which operand variants are legal.
+    """
     @memoize
     def get_substitution_vars(s):
+        """
+        Take a string of variable substitutions and convert it into the equivalent dictionary form.
+        e.g. "a=b&c=d&e=f" -> { "a": "b", "c": "d", "e": "f" }
+        """
         d = {}
         for candidate_string in s[1:-1].split("&"):
             k, v = [ t.strip() for t in candidate_string.split("=") ]
@@ -115,6 +133,11 @@ def _make_specification(format):
 
 
 def process_instruction_list(_A, _list):
+    """
+    An 'instruction list' is the hand editable representation of an architecture.
+    This converts it into a tokenised form which can be used to disassemble an opcode stream.
+    """
+    
     # Pass 1: Each instruction entry with a ".z" size wildcard are expanded to specific entries.
     #         e.g. INSTR.z OP, OP -> INSTR.w OP, OP / INSTR.l OP, OP / ...
     _list_old = _list[:]
@@ -267,6 +290,7 @@ class ArchInterface(object):
     """ Variable: The implicit (or user selected) endian type. """
     variable_endian_type = None
 
+    # API: External use.
     """ Function: Identify if the given instruction alters the program counter. """
     function_is_final_instruction = _unimplemented_function
     """ Function: . """
@@ -282,15 +306,7 @@ class ArchInterface(object):
     """ Function: . """
     function_get_default_symbol_name = _unimplemented_function
 
-    def process_instruction_definitions(self, _list):
-        pass
-        
-    def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
-        pass
-
-    def get_extra_words_for_size_char(self, size_char):
-        raise NotImplementedError("arch-function-undefined")
-        
+    # API: Internal use.        
     def set_instruction_table(self, table_data):
         self.table_instructions = process_instruction_list(self, table_data)
 
@@ -307,6 +323,13 @@ class ArchInterface(object):
         self.dict_operand_label_to_index = labelToId
         self.dict_operand_index_to_label = idToLabel
 
+    def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
+        """ This expands instructions with parameterised sizes into the individual sized variants. """
+        raise NotImplementedError("arch-function-undefined")
+
+    def get_extra_words_for_size_char(self, size_char):
+        raise NotImplementedError("arch-function-undefined")
+        
     # ...
     
     def _get_word(self, data, data_idx):
@@ -334,6 +357,7 @@ class ArchInterface(object):
         """ Read one word from the stream, and return matching instructions by order of decreasing confidence. """
         @memoize
         def get_instruction_format_parts(instr_format):
+            """ Split "INSTR OP1, OP2, ..." into [ "INSTR", "OP1, "OP2", ... ]. """
             opcode_sidx = instr_format.find(" ")
             if opcode_sidx == -1:
                 return [ instr_format ]
@@ -376,8 +400,10 @@ class ArchInterface(object):
                 matches.append(M)
 
         return matches, data_idx
-        
+
+
 def binary2number(s):
+    """ Convert a string of 1 and 0 to the equivalent integer value. """
     v = 0
     while len(s):
         v <<= 1
@@ -385,9 +411,11 @@ def binary2number(s):
             v |= 1
         s = s[1:]
     return v
+""" Shorter alias for binary2number. """
 _b2n = binary2number
 
 def number2binary(v, dynamic_padding=False, padded_length=None):
+    """ Convert an integer value to the equivalent string of 1 and 0 characters. """
     s = ""
     while v:
         s = [ "0", "1" ][v & 1] + s
@@ -399,21 +427,77 @@ def number2binary(v, dynamic_padding=False, padded_length=None):
     else:
         w = len(s) if padded_length is None else padded_length
     return "0"*(w-len(s)) + s
+""" Shorter alias for number2binary. """
 _n2b = number2binary
 
 def signed_hex_string(_arch, v):
+    """ For a given integer value, return the architecture specific hexadecimal representation. """
     sign_char = ""
     if v < 0:
         sign_char = "-"
         v = -v
     return sign_char + _arch.constant_hexadecimal_prefix + ("%x" % v) + _arch.constant_hexadecimal_suffix
 
+# ----------------------------------------------------------------------------
 
+@memoize
+def _extract_mask_bits(mask_string, s):
+    """
+    A mask string is composed of instruction bits and data.  The bits for a given
+    piece of data, are indicated by the same variable character repeated.
+    
+    e.g. mask_string = "010101010fffffvvvvvggggg01010"
+    
+    This function takes the mask string, and a character 's', and returns the
+    bit mask and shift amount to produce the value for that character variable.
+    
+    e.g. s = "f"
+         instruction_word = 0xF0F0
+         -> instruction_word = %1111 1111 0000 0000 1111 1111 0000 0000
+         -> mask             = %0000 0000 0000 1111 1000 0000 0000 0000
+         -> shift            = 15
+         f = (instruction_word & mask) >> shift
+         f = %0000 0000 0000 0000 1000 0000 0000 0000 >> 15
+         f = 1
+    """
+    mask = 0
+    for i in range(len(mask_string)):
+        mask <<= 1
+        if mask_string[i] == s:
+            mask |= 1
+    shift = 0
+    if mask:
+        mask_copy = mask
+        while mask_copy & 1 == 0:
+            mask_copy >>= 1
+            shift += 1
+    return mask, shift
+
+def _extract_masked_value(data_word, mask_string, mask_char):
+    """ Extract the value of the mask char in the data word. """
+    mask, shift = _extract_mask_bits(mask_string, mask_char)
+    return (data_word & mask) >> shift
+    
+def _get_var_values(chars, data_word1, mask_string):
+    var_values = {}
+    if chars:
+        for mask_char in chars:
+            if mask_char in mask_string:
+                var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
+    return var_values
+    
+# ----------------------------------------------------------------------------
+    
 def generate_all():
-    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string" ]
+    """
+    Return the names of the objects in this file which are imported by the wildcard.
+    This is done in this function, so as not to introduce entries into the global dictionary.
+    """
+    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "_extract_masked_value", "_get_var_values", "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string" ]
     for k in globals().keys():
-        if k.startswith("II_") or k.startswith("EAMI"):
+        if k.startswith("II_") or k.startswith("EAMI") or k.startswith("IFX_"):
             l.append(k)
     return l
-__all__ = generate_all()
 
+# The wildcard import specification.
+__all__ = generate_all()
