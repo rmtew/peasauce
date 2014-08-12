@@ -532,6 +532,7 @@ class MainWindow(QtGui.QMainWindow):
                 self.list_table.setFont(font)
                 self.uncertain_code_references_table.setFont(font)
                 self.uncertain_data_references_table.setFont(font)
+                self.orphaned_blocks_table.setFont(font)
                 self.symbols_table.setFont(font)
 
         # Restore the layout of the main window and the dock windows.
@@ -812,6 +813,7 @@ class MainWindow(QtGui.QMainWindow):
             self.list_table.setFont(font)
             self.uncertain_code_references_table.setFont(font)
             self.uncertain_data_references_table.setFont(font)
+            self.orphaned_blocks_table.setFont(font)
             self._set_setting("font-info", font.toString())
 
     ## INTERACTION FUNCTIONS
