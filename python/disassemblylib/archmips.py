@@ -4,20 +4,13 @@
     Licensed using the MIT license.
 """
 
-# TODO: Implement create_duplicated_instruction_entries(entry)
-# - p322-323.  
+# TODO: Support MIPS16
 
 import logging
 
 from .util import *
 
 logger = logging.getLogger("disassembler-mips")
-
-# Abstraction ideas:
-## There are instruction flags for different subarchitectures, but there's always a core architecture.
-### IF_MIPS32R2/IF_MIPS64/... -> IF_MIPS32
-### IF_010/IF_020/... -> IF_000
-## All subarchitectures implicitly get the core architecture instructions.
 
 # Flags to indicate which architecture variant the instruction belongs to.
 IF_MIPS32     = 1<<0
