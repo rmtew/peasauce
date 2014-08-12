@@ -493,12 +493,12 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         elif column_idx == LI_OPERANDS:
             if line_type_id == disassembly_data.SLD_INSTRUCTION:
                 lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(program_data, address, absolute_info)
-                opcode_string = ""
-                if len(line_match.opcodes) >= 1:
-                    opcode_string += program_data.dis_get_operand_string_func(line_match, line_match.opcodes[0], line_match.opcodes[0].vars, lookup_symbol=lookup_symbol)
-                if len(line_match.opcodes) == 2:
-                    opcode_string += ", "+ program_data.dis_get_operand_string_func(line_match, line_match.opcodes[1], line_match.opcodes[1].vars, lookup_symbol=lookup_symbol)
-                return opcode_string
+                operand_string = ""
+                for i, operand in enumerate(line_match.opcodes):
+                    if i > 0:
+                        operand_string += ", "
+                    operand_string += program_data.dis_get_operand_string_func(line_match, operand, operand.vars, lookup_symbol=lookup_symbol)
+                return operand_string
             elif line_type_id == disassembly_data.SLD_EQU_LOCATION_RELATIVE:
                 return "*-%d" % line_num_bytes
             return ""
