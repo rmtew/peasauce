@@ -286,6 +286,11 @@ class ArchInterface(object):
     constant_word_size = None
     """ Constant: How far from the start of the current instruction PC is offset while it is executing. """
     constant_pc_offset = 0
+    
+    constant_operand_var_constant_substitutions = None
+    constant_table_condition_code_names = None
+    constant_table_size_names = None
+    constant_table_direction_names = None
 
     """ Variable: The implicit (or user selected) endian type. """
     variable_endian_type = None

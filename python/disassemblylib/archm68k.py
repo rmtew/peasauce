@@ -73,7 +73,7 @@ class ArchM68k(ArchInterface):
         [ 32, 'L' ],
     ]
 
-    constant_table_condition_codes = [
+    constant_table_condition_code_names = [
         "T",  # %0000
         "F",  # %0001
         "HI", # %0010
@@ -97,6 +97,9 @@ class ArchM68k(ArchInterface):
         "01": 1,
         "10": 2,
     }
+    
+    constant_table_size_names = [ "B", "W", "L" ]
+    constant_table_direction_names = [ "R", "L" ]
     
     variable_endian_type = ">"
     
@@ -280,11 +283,11 @@ class ArchM68k(ArchInterface):
                         if var_value is None:
                             var_value = char_vars[char_string]
                         if var_name == "cc":
-                            var_value = self.constant_table_condition_codes[var_value]
+                            var_value = self.constant_table_condition_code_names[var_value]
                         elif var_name == "z":
-                            var_value = ["B","W","L"][var_value]
+                            var_value = self.constant_table_size_names[var_value]
                         elif var_name == "d":
-                            var_value = ["R","L"][var_value]
+                            var_value = self.constant_table_direction_names[var_value]
                     d[var_name] = var_value
                 return d
 

@@ -51,10 +51,9 @@ class ArchMIPS(ArchInterface):
         [ 2 * 32, 'PS' ], # Floating point
     ]
 
-    constant_operand_var_constant_substitutions = {
-    }
+    constant_operand_var_constant_substitutions = {}
     
-    constant_table_condition_codes = {
+    constant_table_condition_code_names = {
         _b2n("00000"): "F",
         _b2n("00001"): "UN",
         _b2n("00010"): "EQ",
@@ -72,6 +71,9 @@ class ArchMIPS(ArchInterface):
         _b2n("10110"): "LE",
         _b2n("10111"): "NGT",
     }
+    
+    constant_table_size_names = []
+    constant_table_direction_names = []
 
     variable_endian_type = ">"
 
@@ -84,6 +86,7 @@ class ArchMIPS(ArchInterface):
             return True
         # - If the preceding instruction is an end of sequence, and the current instruction is the branch delay slot.
         # - Cases where the PC register is altered directly?
+        return False
 
     def function_get_match_addresses(self, match):
         for i, opcode in enumerate(match.opcodes):
@@ -266,7 +269,7 @@ operand_type_table = [
     [ "PCRelative",   "xxx",          [ ],    [           ],  "Offset relative to the address of the next instruction", ],
     [ "GPRRelative",  "xxx(Rn)",      [ ],    [           ],  "Offset is combined with the register", ],
     [ "CC",           "xxx",          [ ],    [           ],  "Condition", ],
-    [ "GPRMem",       "xxx(Rn)",      [ ],    [           ],  "Condition", ],
+    [ "GPRMEM",       "xxx(Rn)",      [ ],    [           ],  "Condition", ],
 ]
 
 instruction_table = [
