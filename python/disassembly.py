@@ -306,8 +306,17 @@ def get_data_type_sizes(block):
         unconsumed_byte_count -= size_count * num_bytes
     return sizes
 
+def find_previous_entry(line_data, idx, entry_type):
+    while idx > 0:
+        idx -= 1
+        if line_data[idx][0] == entry_type:
+            entry = line_data[idx][1]
+            if type(entry) is int:
+                entry = realise_instruction_entry(program_data, block, entry)
+            return entry
+
 def get_block_footer_line_count(program_data, block, block_idx):
-    """ We may be working with a temporary block copy, so the block inde
+    """ We may be working with a temporary block copy, so the block index
         should only be used for the purpose of comparing neighbouring
         blocks. """
     line_count = 0
@@ -320,8 +329,10 @@ def get_block_footer_line_count(program_data, block, block_idx):
         if entry_type_id == disassembly_data.SLD_INSTRUCTION:
             if type(entry) is int:
                 entry = realise_instruction_entry(program_data, block, entry)
-            if display_configuration.trailing_line_exit and program_data.dis_is_final_instruction_func(entry):
-                line_count += 1
+            if display_configuration.trailing_line_exit:
+                preceding_entry = find_previous_entry(block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
+                if program_data.dis_is_final_instruction_func(entry, preceding_entry):
+                    line_count += 1
 
         if False:
             # Separating line between code block and following non-code block (only if not final instruction).
@@ -1198,6 +1209,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                 logger.error("unable to disassemble due to a block length overrun at %X (started at %X)", match_address, address)
                 break
             line_data.append((disassembly_data.SLD_INSTRUCTION, match))
+            current_idx = len(line_data)-1
             for label_offset in range(1, bytes_matched):
                 label_address = match_address + label_offset
                 label = program_data.symbols_by_address.get(label_address)
@@ -1205,7 +1217,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                     line_data.append((disassembly_data.SLD_EQU_LOCATION_RELATIVE, label_address - address))
                     #logger.debug("%06X: mid-instruction label = '%s' %d", match_address, label, label_address-match_address)
             bytes_consumed += bytes_matched
-            found_terminating_instruction = program_data.dis_is_final_instruction_func(match)
+            preceding_match = find_previous_entry(line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
+            found_terminating_instruction = program_data.dis_is_final_instruction_func(match, preceding_match)
             if found_terminating_instruction:
                 break
 

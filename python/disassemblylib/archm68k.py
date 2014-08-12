@@ -103,7 +103,7 @@ class ArchM68k(ArchInterface):
     
     variable_endian_type = ">"
     
-    def function_is_final_instruction(self, match):
+    def function_is_final_instruction(self, match, preceding_match=None):
         return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
 
     def function_get_match_addresses(self, match):
