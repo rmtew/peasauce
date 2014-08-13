@@ -434,10 +434,13 @@ class ArchInterface(object):
         char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
         # In case anything wants to copy it, and it is explicitly specified.
         # TODO: This is M68K specific.  MIPS can be .z1.z2.  So it won't work at all.
-        idx = I.specification.key.rfind(".")
-        if idx != -1:
-            if I.specification.key[idx+1] in self.constant_table_size_names:
-                char_vars["z"] = get_size_value(I.specification.key[idx+1])
+        idx0 = I.specification.key.rfind(".")
+        if idx0 != -1:
+            idxN = I.specification.key.find(".", idx0+1)
+            if idxN == -1: idxN = len(I.specification.key)
+            text = I.specification.key[idx0+1:idxN]
+            if text in self.constant_table_size_names:
+                char_vars["z"] = get_size_value(text)
         I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
         for O in I.opcodes:
             O.vars = copy_values(O.specification.mask_char_vars, char_vars)
