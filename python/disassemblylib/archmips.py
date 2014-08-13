@@ -5,6 +5,7 @@
 """
 
 # TODO: Support MIPS16
+# TODO: is_final_instruction() - Work out if there are any instructions other than branches and jumps, where PC or LR or whatever is changed directly.  ra?
 
 import logging
 
@@ -70,7 +71,6 @@ class ArchMIPS(ArchInterface):
 
     variable_endian_type = ">"
 
-    # TODO: Pass in 
     def function_is_final_instruction(self, match, preceding_match=None):
         """ Indicate if the current instruction is the last in a sequence. """
         # MIPS cases which need to work:
@@ -103,26 +103,6 @@ class ArchMIPS(ArchInterface):
         return mode_format
        
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
-        def _disassemble_vars_pass(I):
-            def copy_values(mask_char_vars, char_vars):
-                d = {}
-                for var_name, char_string in mask_char_vars.iteritems():
-                    if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
-                        var_value = char_string
-                    else:
-                        var_value = NumericSizeValues.get(char_string, None)
-                        if var_value is None:
-                            var_value = char_vars[char_string]
-                        if var_name == "cc":
-                            var_value = ConditionCodes[var_value]
-                        elif var_name == "z":
-                            var_value = ["B","W","L"][var_value]
-                        elif var_name == "d":
-                            var_value = ["R","L"][var_value]
-                    d[var_name] = var_value
-                return d
-            pass
-
         def _decode_operand(data, data_idx, operand_idx, M, T):
             """ ... """
             operand_key = T.specification.key
@@ -131,7 +111,7 @@ class ArchMIPS(ArchInterface):
             #if mode_format == "
             #instruction_key = M.specification.key
             #operand_key = T.specification.key
-            print T.specification.__dict__
+            #print T.specification.__dict__
             T.vars = {}
             return data_idx
 
@@ -141,7 +121,7 @@ class ArchMIPS(ArchInterface):
             return None, idx0
 
         M = matches[0]
-        _disassemble_vars_pass(M)
+        self._disassemble_vars_pass(M)
         for operand_idx, O in enumerate(M.opcodes):
             data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
             if data_idx is None: # Disassembly failure.

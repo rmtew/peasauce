@@ -406,6 +406,42 @@ class ArchInterface(object):
 
         return matches, data_idx
 
+    def _disassemble_vars_pass(self, I):
+        def copy_values(mask_char_vars, char_vars):
+            d = {}
+            for var_name, char_string in mask_char_vars.iteritems():
+                if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
+                    var_value = char_string
+                else:
+                    var_value = self.constant_operand_var_constant_substitutions.get(char_string, None)
+                    if var_value is None:
+                        var_value = char_vars[char_string]
+                    if var_name == "cc":
+                        var_value = self.constant_table_condition_code_names[var_value]
+                    elif var_name == "z":
+                        var_value = self.constant_table_size_names[var_value]
+                    elif var_name == "d":
+                        var_value = self.constant_table_direction_names[var_value]
+                d[var_name] = var_value
+            return d
+
+        chars = I.specification.mask_char_vars.values()
+        for O in I.opcodes:
+            for mask_char in O.specification.mask_char_vars.itervalues():
+                # Chars are the variable names, not the constants.
+                if mask_char not in chars and mask_char not in self.constant_operand_var_constant_substitutions:
+                    chars.append(mask_char)
+        char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
+        # In case anything wants to copy it, and it is explicitly specified.
+        # TODO: This is M68K specific.  MIPS can be .z1.z2.  So it won't work at all.
+        idx = I.specification.key.rfind(".")
+        if idx != -1:
+            if I.specification.key[idx+1] in self.constant_table_size_names:
+                char_vars["z"] = get_size_value(I.specification.key[idx+1])
+        I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
+        for O in I.opcodes:
+            O.vars = copy_values(O.specification.mask_char_vars, char_vars)
+
 
 def binary2number(s):
     """ Convert a string of 1 and 0 to the equivalent integer value. """
@@ -490,7 +526,7 @@ def _get_var_values(chars, data_word1, mask_string):
             if mask_char in mask_string:
                 var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
     return var_values
-    
+
 # ----------------------------------------------------------------------------
     
 def generate_all():

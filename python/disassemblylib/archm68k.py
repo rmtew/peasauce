@@ -271,39 +271,6 @@ class ArchM68k(ArchInterface):
        
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
         """ Tokenise one disassembled instruction with its operands. """
-        
-        def _disassemble_vars_pass(I):
-            def copy_values(mask_char_vars, char_vars):
-                d = {}
-                for var_name, char_string in mask_char_vars.iteritems():
-                    if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode 
-                        var_value = char_string
-                    else:
-                        var_value = self.constant_operand_var_constant_substitutions.get(char_string, None)
-                        if var_value is None:
-                            var_value = char_vars[char_string]
-                        if var_name == "cc":
-                            var_value = self.constant_table_condition_code_names[var_value]
-                        elif var_name == "z":
-                            var_value = self.constant_table_size_names[var_value]
-                        elif var_name == "d":
-                            var_value = self.constant_table_direction_names[var_value]
-                    d[var_name] = var_value
-                return d
-
-            chars = I.specification.mask_char_vars.values()
-            for O in I.opcodes:
-                for mask_char in O.specification.mask_char_vars.itervalues():
-                    # Chars are the variable names, not the constants.
-                    if mask_char not in chars and mask_char not in self.constant_operand_var_constant_substitutions:
-                        chars.append(mask_char)
-            char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
-            # In case anything wants to copy it, and it is explicitly specified.
-            if I.specification.key[-2] == "." and I.specification.key[-1] in ("B", "W", "L"):
-                char_vars["z"] = get_size_value(I.specification.key[-1])
-            I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
-            for O in I.opcodes:
-                O.vars = copy_values(O.specification.mask_char_vars, char_vars)
 
         def _decode_operand(data, data_idx, operand_idx, M, T):
             def _data_word_lookup(data_words, text):
@@ -486,7 +453,7 @@ class ArchM68k(ArchInterface):
             data_word, data_idx = self._get_word(data, data_idx)
             M.data_words.append(data_word)
 
-        _disassemble_vars_pass(M)
+        self._disassemble_vars_pass(M)
         for operand_idx, O in enumerate(M.opcodes):
             data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
             if data_idx is None: # Disassembly failure.
