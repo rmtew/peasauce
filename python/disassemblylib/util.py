@@ -425,25 +425,26 @@ class ArchInterface(object):
                 d[var_name] = var_value
             return d
 
-        chars = I.specification.mask_char_vars.values()
+        var_names = I.specification.mask_char_vars.values()
         for O in I.opcodes:
-            for mask_char in O.specification.mask_char_vars.itervalues():
-                # Chars are the variable names, not the constants.
-                if mask_char not in chars and mask_char not in self.constant_operand_var_constant_substitutions:
-                    chars.append(mask_char)
-        char_vars = _get_var_values(chars, I.data_words[0], I.table_mask)
-        # In case anything wants to copy it, and it is explicitly specified.
-        # TODO: This is M68K specific.  MIPS can be .z1.z2.  So it won't work at all.
+            for mask_var_name in O.specification.mask_char_vars.itervalues():
+                if mask_var_name not in var_names and mask_var_name not in self.constant_operand_var_constant_substitutions:
+                    var_names.append(mask_var_name)
+        # Extract the value for each variable from the instruction opcode.
+        var_values = _get_var_values(var_names, I.data_words[0], I.table_mask)
+        # The instruction size may be required by some operands.  Retrieve it and make it available to the gathering below.
+        # TODO: This is currently only really useful for M68K arch.  MIPS gets more complicated with .Y.Z or .f.Y
         idx0 = I.specification.key.rfind(".")
         if idx0 != -1:
             idxN = I.specification.key.find(".", idx0+1)
             if idxN == -1: idxN = len(I.specification.key)
             text = I.specification.key[idx0+1:idxN]
             if text in self.constant_table_size_names:
-                char_vars["z"] = get_size_value(text)
-        I.vars = copy_values(I.specification.mask_char_vars, char_vars) 
+                var_values["z"] = get_size_value(text)
+        # For each element, gather the evaluated values for all of it's variables.
+        I.vars = copy_values(I.specification.mask_char_vars, var_values) 
         for O in I.opcodes:
-            O.vars = copy_values(O.specification.mask_char_vars, char_vars)
+            O.vars = copy_values(O.specification.mask_char_vars, var_values)
 
 
 def binary2number(s):
@@ -523,6 +524,7 @@ def _extract_masked_value(data_word, mask_string, mask_char):
     return (data_word & mask) >> shift
     
 def _get_var_values(chars, data_word1, mask_string):
+    """ Variables generally come from the decoded instruction opcode.  Map their decoded value to their name. """
     var_values = {}
     if chars:
         for mask_char in chars:
