@@ -506,9 +506,9 @@ def _extract_mask_bits(mask_string, s):
          f = 1
     """
     mask = 0
-    for i in range(len(mask_string)):
+    for i, c in enumerate(mask_string):
         mask <<= 1
-        if mask_string[i] == s:
+        if c == s:
             mask |= 1
     shift = 0
     if mask:
