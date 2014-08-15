@@ -1,8 +1,8 @@
 # This needs to lie outside the disassemblylib directory because of Python's arbitrary
 # decision to limit relative importing to "packages".
 
+import logging
 import struct
-
 import unittest
 
 from disassemblylib import archmips, archm68k, util
@@ -89,5 +89,15 @@ class binaryConversionTestCase(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    DISPLAY_LOGGING = True
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    if DISPLAY_LOGGING:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch = logging.NullHandler()
+    logger.addHandler(ch)
     unittest.main()
 

@@ -1,6 +1,7 @@
+import logging
 import struct
 
-#
+logger = logging.getLogger("disassembler-util")
 
 # IDEA: Sizes should be specified for architectures in bits.  The size label should be an affectation.
 
@@ -238,13 +239,26 @@ def process_instruction_list(_A, _list):
         if len(name_bits) > 1:
             for i, operand_string in enumerate(name_bits[1].split(",")):
                 spec = _make_specification(operand_string)
-                #print operand_string, spec.mask_char_vars
-                #raise RuntimeError("ddd")
+                # Verify that the operand substitutions are present in the operand type.
+                for dest_var_name in spec.mask_char_vars:
+                    if _A.constant_operand_type_general_label is not None:
+                        if spec.key == _A.constant_operand_type_general_label:
+                            # TBD: Validation of this more arbitrarily applicable case.
+                            continue
+                    ot_idx = _A.dict_operand_label_to_index.get(spec.key, None)
+                    if ot_idx is not None:
+                        format_string = _A.table_operand_types[ot_idx][EAMI_FORMAT]
+                        for var_name in spec.mask_char_vars:
+                            if var_name not in format_string:
+                                print format_string, var_name
+                    else:
+                        logger.info("process_instruction_list: unknown operand type %s %s %s", _A.__class__.__name__[4:], name_bits[0], spec.key)
     
 # TODO: Verification.
 # - Check that all variable bits in the mask are used by the name column.
 # - Check that operand types used in the name column exist.
 # - Check that name column operand type variable names all exist in the operand type spec.    
+# - Check contiguity of bits for given character.  e.g.  GOOD = "000vvvv000" BAD = "vvv000vvv"
  
     return _list
 
@@ -286,7 +300,9 @@ class ArchInterface(object):
     constant_word_size = None
     """ Constant: How far from the start of the current instruction PC is offset while it is executing. """
     constant_pc_offset = 0
-    
+    """ Constant: Method of filtered selection of multiple valid operand types. """
+    constant_operand_type_general_label = None
+
     constant_operand_var_constant_substitutions = None
     constant_table_condition_code_names = None
     constant_table_size_names = None
@@ -304,8 +320,30 @@ class ArchInterface(object):
     function_get_instruction_string = _unimplemented_function
     """ Function: . """
     function_get_operand_string = _unimplemented_function
+    
     """ Function: . """
-    function_disassemble_one_line = _unimplemented_function
+    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        """ Tokenise one disassembled instruction with its operands. """
+
+        idx0 = data_idx
+        matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
+        if not len(matches):
+            return None, idx0
+
+        M = matches[0]
+        # An instruction may have multiple words to it, before operand data..  e.g. MOVEM
+        for i in range(M.table_extra_words):
+            data_word, data_idx = self._get_word(data, data_idx)
+            M.data_words.append(data_word)
+
+        self._disassemble_vars_pass(M)
+        for operand_idx, O in enumerate(M.opcodes):
+            data_idx = self._decode_operand(data, data_idx, operand_idx, M, O)
+            if data_idx is None: # Disassembly failure.
+                return None, idx0
+        M.num_bytes = data_idx - idx0
+        return M, data_idx
+    
     """ Function: . """
     function_disassemble_as_data = _unimplemented_function
     """ Function: . """

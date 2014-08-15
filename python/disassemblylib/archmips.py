@@ -101,33 +101,6 @@ class ArchMIPS(ArchInterface):
         for k, v in vars.iteritems():
             mode_format = mode_format.replace(k, str(v))
         return mode_format
-       
-    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
-        def _decode_operand(data, data_idx, operand_idx, M, T):
-            """ ... """
-            operand_key = T.specification.key
-            operand_idx = self.dict_operand_label_to_index[operand_key]
-            mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
-            #if mode_format == "
-            #instruction_key = M.specification.key
-            #operand_key = T.specification.key
-            #print T.specification.__dict__
-            T.vars = {}
-            return data_idx
-
-        idx0 = data_idx
-        matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
-        if not len(matches):
-            return None, idx0
-
-        M = matches[0]
-        self._disassemble_vars_pass(M)
-        for operand_idx, O in enumerate(M.opcodes):
-            data_idx = _decode_operand(data, data_idx, operand_idx, M, O)
-            if data_idx is None: # Disassembly failure.
-                return None, idx0
-        M.num_bytes = data_idx - idx0
-        return M, data_idx
         
     def function_disassemble_as_data(self, data, data_idx):
         """ If a non-zero value is returned, it is the number of bytes to disassemble as data. """
@@ -157,6 +130,17 @@ class ArchMIPS(ArchInterface):
             new_entries.append(new_entry)
         return new_entries
         
+    def _decode_operand(self, data, data_idx, operand_idx, M, T):
+        """ ... """
+        operand_key = T.specification.key
+        operand_idx = self.dict_operand_label_to_index[operand_key]
+        mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
+        #if mode_format == "
+        #instruction_key = M.specification.key
+        #operand_key = T.specification.key
+        #print T.specification.__dict__
+        T.vars = {}
+        return data_idx
     
 
 # TODO: The m68k instruction list does some sort of ordering and ambiguity detection, can this be generalised?
@@ -244,8 +228,8 @@ operand_type_table = [
     [ "PCRegion",     "xxx",          [ ],    [           ],  "Offset is combined with the high bits of the address of the current instruction", ],
     [ "PCRelative",   "xxx",          [ ],    [           ],  "Offset relative to the address of the next instruction", ],
     [ "GPRRelative",  "xxx(Rn)",      [ ],    [           ],  "Offset is combined with the register", ],
-    [ "CC",           "xxx",          [ ],    [           ],  "Condition", ],
-    [ "GPRMEM",       "xxx(Rn)",      [ ],    [           ],  "Condition", ],
+    [ "CC",           "v",            [ ],    [           ],  "Condition", ],
+    [ "GPRMEM",       "xxx(Rn)",      [ ],    [           ],  "TBD", ],
 ]
 
 instruction_table = [
@@ -256,12 +240,12 @@ instruction_table = [
     [ "01000110000tttttsssssddddd000000", "ADD.S            FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32, "Floating Point Add" ],
     [ "01000110001tttttsssssddddd000000", "ADD.D            FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32, "Floating Point Add" ],
     [ "01000110110tttttsssssddddd000000", "ADD.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Floating Point Add" ],
-    [ "001000ssssstttttvvvvvvvvvvvvvvvv", "ADDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Add Immediate Word" ],
-    [ "001001ssssstttttvvvvvvvvvvvvvvvv", "ADDIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Add Immediate Unsigned Word" ],
+    [ "001000ssssstttttvvvvvvvvvvvvvvvv", "ADDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Add Immediate Word" ],
+    [ "001001ssssstttttvvvvvvvvvvvvvvvv", "ADDIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Add Immediate Unsigned Word" ],
     [ "000000ssssstttttddddd00000100001", "ADDU             GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Add Unsigned Word" ],
     [ "010011rrrrrtttttsssssddddd000001", "ALNV.PS          FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t), GPR:(Rn=s)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Align Variable" ],
     [ "000000ssssstttttddddd00000100100", "AND              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "And" ],
-    [ "001100ssssstttttvvvvvvvvvvvvvvvv", "ANDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "And Immediate Word" ],
+    [ "001100ssssstttttvvvvvvvvvvvvvvvv", "ANDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "And Immediate Word" ],
     [ "0001000000000000vvvvvvvvvvvvvvvv", "B                PCRelative:(xxx=v)",                                IF_MIPS32|IFX_ENDSEQ_BD, "Unconditional Branch" ],
     [ "0000010000010001vvvvvvvvvvvvvvvv", "BAL              PCRelative:(xxx=v)",                                IF_MIPS32, "Branch And Link" ],
     [ "01000101000ccc00vvvvvvvvvvvvvvvv", "BC1F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP False" ],
@@ -295,7 +279,7 @@ instruction_table = [
     [ "01000110000tttttsssssccc0011ffff", "C.f.S:(f=f)      CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32, "Floating Point Compare" ],
     [ "01000110001tttttsssssccc0011ffff", "C.f.D:(f=f)      CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32, "Floating Point Compare" ],
     [ "01000110110tttttsssssccc0011ffff", "C.f.PS:(f=f)     CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32R2|IF_MIPS64, "Floating Point Compare" ],
-    [ "101111bbbbbooooovvvvvvvvvvvvvvvv", "CACHE            Imm:(v=o), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32, "Perform Cache Operation" ],
+    [ "101111bbbbbooooovvvvvvvvvvvvvvvv", "CACHE            Imm:(xxx=o), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32, "Perform Cache Operation" ],
     [ "0100011000000000sssssddddd001010", "CEIL.L.S         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Ceiling Convert to Long Fixed Point" ],
     [ "0100011000100000sssssddddd001010", "CEIL.L.D         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Ceiling Convert to Long Fixed Point" ],
     [ "0100011000000000sssssddddd001110", "CEIL.W.S         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Ceiling Convert to Word Fixed Point" ],
@@ -304,7 +288,7 @@ instruction_table = [
     [ "01001000010tttttdddddddddddddddd", "CFC2             GPR:(Rn=t), GPR:(Rn=d)",                            IF_MIPS32, "Move Control Word From Coprocessor 2" ],
     [ "011100ssssstttttddddd00000100001", "CLO              GPR:(Rn=t), GPR:(Rn=s)",                            IF_MIPS32, "Count Leading Ones In Word" ],
     [ "011100ssssstttttddddd00000100000", "CLZ              GPR:(Rn=d), GPR:(Rn=s)",                            IF_MIPS32, "Count Leading Zeroes In Word" ],
-    [ "0100101vvvvvvvvvvvvvvvvvvvvvvvvv", "COP2             Imm:(v=v)",                                         IF_MIPS32, "Coprocessor Operation To Coprocessor 2" ],
+    [ "0100101vvvvvvvvvvvvvvvvvvvvvvvvv", "COP2             Imm:(xxx=v)",                                         IF_MIPS32, "Coprocessor Operation To Coprocessor 2" ],
     [ "01000100110tttttsssss00000000000", "CTC1             GPR:(Rn=t), FPR:(Rn=s)",                            IF_MIPS32, "Move Control Word To Floating Point" ],
     [ "01001000110tttttdddddddddddddddd", "CTC2             GPR:(Rn=t), GPR:(Rn=d)",                            IF_MIPS32, "Move Control Word To Coprocessor 2" ],
     [ "0100011000000000sssssddddd100001", "CVT.D.S          FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Convert to Double Floating Point" ],
@@ -329,18 +313,18 @@ instruction_table = [
     [ "00000000000000000000000011000000", "EHB",                                                                IF_MIPS32R2, "Execution Hazard Barrier" ],
     [ "01000001011ttttt0110000000100000", "EI               GPR:(Rn=t)",                                        IF_MIPS32R2, "Enable Interrupts" ],
     [ "01000010000000000000000000011000", "ERET",                                                               IF_MIPS32|IFX_ENDSEQ, "Exception Return" ],
-    [ "011111ssssstttttmmmmmbbbbb011010", "EXT              GPR:(Rn=t), GPR:(Rn=s), Imm:(v=b), Imm:(v=m-1)",    IF_MIPS32R2, "Extract Bit Field" ],
+    [ "011111ssssstttttmmmmmbbbbb011010", "EXT              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=b), Imm:(xxx=m-1)",    IF_MIPS32R2, "Extract Bit Field" ],
     [ "010001zzzzz00000sssssddddd001011", "FLOOR.L.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Floor Convert to Long Fixed Point" ],
     [ "010001zzzzz00000sssssddddd001111", "FLOOR.W.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Floor Convert to Word Fixed Point" ],
-    [ "011111ssssstttttmmmmmbbbbb000100", "INS              GPR:(Rn=t), GPR:(Rn=s), Imm:(v=b), Imm:(v=b+m-1)",  IF_MIPS32R2, "Insert Bit Field" ],
+    [ "011111ssssstttttmmmmmbbbbb000100", "INS              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=b), Imm:(xxx=b+m-1)",  IF_MIPS32R2, "Insert Bit Field" ],
     [ "000010vvvvvvvvvvvvvvvvvvvvvvvvvv", "J                PCRegion:(xxx=v)",                                  IF_MIPS32|IFX_ENDSEQ_BD, "Jump" ],
     [ "000011vvvvvvvvvvvvvvvvvvvvvvvvvv", "JAL              PCRegion:(xxx=v)",                                  IF_MIPS32, "Jump And Link" ],
     [ "000000sssss000001111100000001001", "JALR             GPR:(Rn=s)",                                        IF_MIPS32, "Jump And Link Register" ],
     [ "000000sssss00000ddddd00000001001", "JALR             GPR:(Rn=d), GPR:(Rn=s)",                            IF_MIPS32, "Jump And Link Register" ],
-    [ "000000sssss00000111111hhhh001001", "JALR.HB          GPR:(Rn=s), Imm:(v=h)",                             IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
-    [ "000000sssss00000ddddd1hhhh001001", "JALR.HB          GPR:(Rn=d), GPR:(Rn=s), Imm:(v=h)",                 IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
+    [ "000000sssss00000111111hhhh001001", "JALR.HB          GPR:(Rn=s), Imm:(xxx=h)",                             IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
+    [ "000000sssss00000ddddd1hhhh001001", "JALR.HB          GPR:(Rn=d), GPR:(Rn=s), Imm:(xxx=h)",                 IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
     [ "000000sssss000000000000000001000", "JR               GPR:(Rn=s)",                                        IF_MIPS32|IFX_ENDSEQ_BD, "Jump Register" ],
-    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(v=h)",                             IF_MIPS32R2|IFX_ENDSEQ_BD, "Jump Register With Hazard Barrier" ],
+    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(xxx=h)",                             IF_MIPS32R2|IFX_ENDSEQ_BD, "Jump Register With Hazard Barrier" ],
     [ "100000bbbbbtttttvvvvvvvvvvvvvvvv", "LB               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte" ],
     [ "100100bbbbbtttttvvvvvvvvvvvvvvvv", "LBU              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte Unsigned" ],
     [ "110101bbbbbtttttvvvvvvvvvvvvvvvv", "LDC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Double Word to Floating Point" ],
@@ -349,7 +333,7 @@ instruction_table = [
     [ "100001bbbbbtttttvvvvvvvvvvvvvvvv", "LH               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Halfword" ],
     [ "100101bbbbbtttttvvvvvvvvvvvvvvvv", "LHU              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Halfword Unsigned" ],
     [ "110000bbbbbtttttvvvvvvvvvvvvvvvv", "LL               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Linked Word" ],
-    [ "00111100000tttttvvvvvvvvvvvvvvvv", "LUI              GPR:(Rn=t), Imm:(v=v)",                             IF_MIPS32, "Load Upper Immediate" ],
+    [ "00111100000tttttvvvvvvvvvvvvvvvv", "LUI              GPR:(Rn=t), Imm:(xxx=v)",                             IF_MIPS32, "Load Upper Immediate" ],
     [ "010011bbbbbiiiii00000ddddd000101", "LUXC1            FPR:(Rn=d), GPRMEM:(xxx=i&Rn=b)",                   IF_MIPS32R2|IF_MIPS64, "Load Double Word Indexed Unaligned to Floating Point" ],
     [ "100011bbbbbtttttvvvvvvvvvvvvvvvv", "LW               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Word" ],
     [ "110001bbbbbtttttvvvvvvvvvvvvvvvv", "LWC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Word to Floating Point" ],
@@ -362,13 +346,13 @@ instruction_table = [
     [ "010011rrrrrtttttsssssddddd100001", "MADD.D           FPR:(Rn=d), FPR:(Rn=r), FPR:(Rn=s), FPR:(Rn=t)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Multiply Add" ],
     [ "010011rrrrrtttttsssssddddd100110", "MADD.PS          FPR:(Rn=d), FPR:(Rn=r), FPR:(Rn=s), FPR:(Rn=t)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Multiply Add" ],
     [ "011100sssssttttt0000000000000001", "MADDU            GPR:(Rn=s), GPR:(Rn=t)",                            IF_MIPS32, "Multiply and Add Unsigned Word to Hi,Lo" ],
-    [ "01000000000tttttddddd00000000vvv", "MFC0             GPR:(Rn=t), GPR:(Rn=d), Imm:(v=v)",                 IF_MIPS32, "Move from Coprocessor 0" ],
+    [ "01000000000tttttddddd00000000vvv", "MFC0             GPR:(Rn=t), GPR:(Rn=d), Imm:(xxx=v)",                 IF_MIPS32, "Move from Coprocessor 0" ],
     [ "01000100000tttttsssss00000000000", "MFC1             GPR:(Rn=t), FPR:(Rn=s)",                            IF_MIPS32, "Move Word from Floating Point" ],
     # TODO: coprocessor custom sel/Rd from v.
-    # [ "01001000000tttttvvvvvvvvvvvvvvvv", "MFC2             GPR:(Rn=t), GPR:(Rn=v), Imm:(v=v)",                 IF_MIPS32, "Move Word from Coprocessor 2" ],
+    # [ "01001000000tttttvvvvvvvvvvvvvvvv", "MFC2             GPR:(Rn=t), GPR:(Rn=v), Imm:(xxx=v)",                 IF_MIPS32, "Move Word from Coprocessor 2" ],
     [ "01000100011tttttsssss00000000000", "MFHC1            GPR:(Rn=t), FPR:(Rn=s)",                            IF_MIPS32R2, "Move Word from High Half of Floating Point Register" ],
     # TODO: coprocessor custom sel/Rd from v.
-    # [ "01001000011tttttvvvvvvvvvvvvvvvv", "MFHC2            GPR:(Rn=t), FPR:(Rn=v), Imm:(v=v)",                 IF_MIPS32R2, "Move Word from High Half of Coprocessor 2 Register" ],
+    # [ "01001000011tttttvvvvvvvvvvvvvvvv", "MFHC2            GPR:(Rn=t), FPR:(Rn=v), Imm:(xxx=v)",                 IF_MIPS32R2, "Move Word from High Half of Coprocessor 2 Register" ],
     [ "0000000000000000ddddd00000010000", "MFHI             GPR:(Rn=d)",                                        IF_MIPS32, "Move from HI Register" ],
     [ "0000000000000000ddddd00000010010", "MFLO             GPR:(Rn=d)",                                        IF_MIPS32, "Move from LO Register" ],
     [ "0100011000000000sssssddddd000110", "MOV.S            FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Move" ],
@@ -395,13 +379,13 @@ instruction_table = [
     [ "010011rrrrrtttttsssssddddd101001", "MSUB.D           FPR:(Rn=d), FPR:(Rn=r), FPR:(Rn=s), FPR:(Rn=t)",    IF_MIPS64, "Floating Point Multiply Subtract" ],
     [ "010011rrrrrtttttsssssddddd101110", "MSUB.PS          FPR:(Rn=d), FPR:(Rn=r), FPR:(Rn=s), FPR:(Rn=t)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Multiply Subtract" ],
     [ "011100sssssttttt0000000000000101", "MSUBU            GPR:(Rn=s), GPR:(Rn=t)",                            IF_MIPS32, "Multiply and Subtract Word to Hi,Lo" ],
-    [ "01000000100tttttddddd00000000vvv", "MTC0             GPR:(Rn=t), GPR:(Rn=d), Imm:(v=v)",                 IF_MIPS32, "Move to Coprocessor 0" ],
+    [ "01000000100tttttddddd00000000vvv", "MTC0             GPR:(Rn=t), GPR:(Rn=d), Imm:(xxx=v)",                 IF_MIPS32, "Move to Coprocessor 0" ],
     [ "01000100100tttttsssss00000000000", "MTC1             GPR:(Rn=t), FPR:(Rn=s)",                            IF_MIPS32, "Move Word to Floating Point" ],
     # TODO: coprocessor custom sel/Rd from v.
-    # [ "01001000100tttttvvvvvvvvvvvvvvvv", "MTC2             GPR:(Rn=r), GPR:(Rn=d), Imm:(v=v)",                 IF_MIPS32, "Move Word to Coprocessor 2" ],
+    # [ "01001000100tttttvvvvvvvvvvvvvvvv", "MTC2             GPR:(Rn=r), GPR:(Rn=d), Imm:(xxx=v)",                 IF_MIPS32, "Move Word to Coprocessor 2" ],
     [ "01000100111tttttsssss00000000000", "MTHC1            GPR:(Rn=t), FPR:(Rn=s)",                            IF_MIPS32R2, "Move Word to High Half of Floating Point Register" ],
     # TODO: coprocessor custom sel/Rd from v.
-    # [ "01001000111tttttvvvvvvvvvvvvvvvv", "MTHC2            GPR:(Rn=t), FPR:(Rn=s),  Imm:(v=v)",                IF_MIPS32R2, "Move Word to High Half of Floating Point Register" ],
+    # [ "01001000111tttttvvvvvvvvvvvvvvvv", "MTHC2            GPR:(Rn=t), FPR:(Rn=s),  Imm:(xxx=v)",                IF_MIPS32R2, "Move Word to High Half of Floating Point Register" ],
     [ "000000sssss000000000000000010001", "MTHI             GPR:(Rn=s)",                                        IF_MIPS32, "Move to HI Register" ],
     [ "000000sssss000000000000000010011", "MTLI             GPR:(Rn=s)",                                        IF_MIPS32, "Move to LO Register" ],
     [ "011100ssssstttttddddd00000000010", "MUL              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Multiply Word to GPR" ],
@@ -422,19 +406,19 @@ instruction_table = [
     [ "00000000000000000000000000000000", "NOP",                                                                IF_MIPS32, "No Operation" ], # Idiom: alias for SLL r0, r0, 0
     [ "000000ssssstttttddddd00000100111", "NOR              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Not Or" ],
     [ "000000ssssstttttddddd00000100101", "OR               GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Or" ],
-    [ "001101ssssstttttvvvvvvvvvvvvvvvv", "ORI              GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Or Immediate" ],
+    [ "001101ssssstttttvvvvvvvvvvvvvvvv", "ORI              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Or Immediate" ],
     [ "01000110110tttttsssssddddd101100", "PLL.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Pair Lower Lower" ],
     [ "01000110110tttttsssssddddd101101", "PLU.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Pair Lower Upper" ],
     # TODO: h for PREF & PREFX has named values in a table (p223)
-    [ "110011bbbbbhhhhhvvvvvvvvvvvvvvvv", "PREF             Imm:(v=h), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32, "Prefetch" ],
-    [ "010011bbbbbvvvvvhhhhh00000001111", "PREFX            Imm:(v=h), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32R2|IF_MIPS64, "Prefetch Indexed" ],
+    [ "110011bbbbbhhhhhvvvvvvvvvvvvvvvv", "PREF             Imm:(xxx=h), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32, "Prefetch" ],
+    [ "010011bbbbbvvvvvhhhhh00000001111", "PREFX            Imm:(xxx=h), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32R2|IF_MIPS64, "Prefetch Indexed" ],
     [ "01000110110tttttsssssddddd101110", "PUL.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Pair Upper Lower" ],
     [ "01000110110tttttsssssddddd101111", "PUU.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Pair Upper Upper" ],
     [ "01111100000tttttddddd00000111011", "RDHWR            GPR:(Rn=t), GPR:(Rn=d)",                            IF_MIPS32R2, "Read Hardware Register" ],
     [ "01000001010tttttddddd00000000000", "RDPGRR           GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2, "Read GPR from Previous Shadow Set" ],
     [ "0100011000000000sssssddddd010101", "RECIP.S          GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2|IF_MIPS64, "Reciprocal Approximation" ],
     [ "0100011000100000sssssddddd010101", "RECIP.D          GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2|IF_MIPS64, "Reciprocal Approximation" ],
-    [ "00000000001tttttdddddvvvvv000010", "ROTR             GPR:(Rn=d), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32R2|IF_SMARTMIPS, "Rotate Word Right" ],
+    [ "00000000001tttttdddddvvvvv000010", "ROTR             GPR:(Rn=d), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32R2|IF_SMARTMIPS, "Rotate Word Right" ],
     [ "000000ssssstttttddddd00001000110", "ROTRV            GPR:(Rn=d), GPR:(Rn=t), GPR:(Rn=s)",                IF_MIPS32R2|IF_SMARTMIPS, "Rotate Word Right Variable" ],
     [ "0100011000000000sssssddddd001000", "ROUND.L.S        FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Round to Long Fixed Point" ],
     [ "0100011000100000sssssddddd001000", "ROUND.L.D        FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Round to Long Fixed Point" ],
@@ -444,24 +428,24 @@ instruction_table = [
     [ "0100011000100000sssssddddd010110", "RSQRT.D          FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Reciprocal Square Root Approximation" ],
     [ "101000bbbbbtttttvvvvvvvvvvvvvvvv", "SB               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Byte" ],
     [ "111000bbbbbtttttvvvvvvvvvvvvvvvv", "SC               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Conditional Word" ],
-    [ "011100vvvvvvvvvvvvvvvvvvvv111111", "SDBBP            Imm:(v=v)",                                         IF_EJTAG, "Software Debug Breakpoint" ],
+    [ "011100vvvvvvvvvvvvvvvvvvvv111111", "SDBBP            Imm:(xxx=v)",                                         IF_EJTAG, "Software Debug Breakpoint" ],
     [ "111101bbbbbtttttvvvvvvvvvvvvvvvv", "SDC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Doubleword from Floating Point" ],
     [ "111110bbbbbtttttvvvvvvvvvvvvvvvv", "SDC2             GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Doubleword from Coprocessor 2" ],
     [ "010011bbbbbvvvvvsssss00000001001", "SDXC1            FPR:(Rn=s), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32R2|IF_MIPS64, "Store Doubleword Indexed from Floating Point" ],
     [ "01111100000tttttddddd10000100000", "SEB              GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2, "Sign-Extend Byte" ],
     [ "01111100000tttttddddd11000100000", "SEH              GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2, "Sign-Extend Halfword" ],
     [ "101001bbbbbtttttvvvvvvvvvvvvvvvv", "SH               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Conditional Halfword" ],
-    [ "00000000000tttttdddddvvvvv000000", "SLL              GPR:(Rn=d), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Shift Word Left Logical" ],
+    [ "00000000000tttttdddddvvvvv000000", "SLL              GPR:(Rn=d), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Shift Word Left Logical" ],
     [ "000000ssssstttttddddd00000000100", "SLLV             GPR:(Rn=d), GPR:(Rn=t), GPR:(Rn=s)",                IF_MIPS32, "Shift Word Left Logical Variable" ],
     [ "000000ssssstttttddddd00000101010", "SLT              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Set on Less Than" ],
-    [ "001010ssssstttttvvvvvvvvvvvvvvvv", "SLTI             GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Set on Less Than Immediate" ],
-    [ "001011ssssstttttvvvvvvvvvvvvvvvv", "SLTIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Set on Less Than Immediate Unsigned" ],
-    [ "000000ssssstttttddddd00000101011", "SLTU             GPR:(Rn=t), GPR:(Rn=s), Imm:(v=v)",                 IF_MIPS32, "Set on Less Than Unsigned" ],
+    [ "001010ssssstttttvvvvvvvvvvvvvvvv", "SLTI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Set on Less Than Immediate" ],
+    [ "001011ssssstttttvvvvvvvvvvvvvvvv", "SLTIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Set on Less Than Immediate Unsigned" ],
+    [ "000000ssssstttttddddd00000101011", "SLTU             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Set on Less Than Unsigned" ],
     [ "0100011000000000sssssddddd000100", "SQRT.S           FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Square Root" ],
     [ "0100011000100000sssssddddd000100", "SQRT.D           FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Square Root" ],
-    [ "00000000000tttttdddddvvvvv000011", "SRA              GPR:(Rn=d), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Shift Word Right Arithmetic" ],
+    [ "00000000000tttttdddddvvvvv000011", "SRA              GPR:(Rn=d), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Shift Word Right Arithmetic" ],
     [ "000000ssssstttttdddddvvvvv000111", "SRAV             GPR:(Rn=d), GPR:(Rn=t), GPR:(Rn=s)",                IF_MIPS32, "Shift Word Right Arithmetic Variable" ],
-    [ "00000000000tttttdddddvvvvv000010", "SRL              GPR:(Rn=d), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Shift Word Right Logical" ],
+    [ "00000000000tttttdddddvvvvv000010", "SRL              GPR:(Rn=d), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Shift Word Right Logical" ],
     [ "000000ssssstttttddddd00000000110", "SRLV             GPR:(Rn=d), GPR:(Rn=t), GPR:(Rn=s)",                IF_MIPS32, "Shift Word Right Logical Variable" ],
     [ "00000000000000000000000001000000", "SSNOP",                                                              IF_MIPS32, "Superscalar No Operation" ], # Idiom: alias for SLL r0, r0, 1
     [ "000000ssssstttttddddd00000100010", "SUB              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Subtract Word" ],
@@ -476,25 +460,25 @@ instruction_table = [
     [ "101010bbbbbtttttvvvvvvvvvvvvvvvv", "SWL              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Word Left" ],
     [ "101110bbbbbtttttvvvvvvvvvvvvvvvv", "SWR              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Store Word Right" ],
     [ "010011bbbbbvvvvvsssss00000001000", "SWXC1            FPR:(Rn=s), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32R2|IF_MIPS64, "Store Word Indexed from Floating Point" ],
-    [ "000000000000000000000vvvvv001111", "SYNC             Imm:(v=v)",                                         IF_MIPS32, "Synchronise Shared Memory" ],
+    [ "000000000000000000000vvvvv001111", "SYNC             Imm:(xxx=v)",                                         IF_MIPS32, "Synchronise Shared Memory" ],
     [ "000001bbbbb11111vvvvvvvvvvvvvvvv", "SYNCI            GPRMEM:(xxx=v&Rn=b)",                               IF_MIPS32R2, "Synchronise Caches to Make Instruction Writes Effective" ],
-    [ "000000vvvvvvvvvvvvvvvvvvvv001100", "SYSCALL          Imm:(v=v)",                                         IF_MIPS32, "System Call" ],
-    [ "000000ssssstttttvvvvvvvvvv110100", "TEQ              GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Equal" ],
-    [ "000001sssss01100vvvvvvvvvvvvvvvv", "TEQI             GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Equal Immediate" ],
-    [ "000000ssssstttttvvvvvvvvvv110000", "TGE              GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Greater or Equal" ],
-    [ "000001sssss01000vvvvvvvvvvvvvvvv", "TGEI             GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Greater or Equal Immediate" ],
-    [ "000001sssss01001vvvvvvvvvvvvvvvv", "TGEIU            GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Greater or Equal Immediate Unsigned" ],
-    [ "000000ssssstttttvvvvvvvvvv110001", "TGEI             GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Greater or Equal Unsigned" ],
+    [ "000000vvvvvvvvvvvvvvvvvvvv001100", "SYSCALL          Imm:(xxx=v)",                                         IF_MIPS32, "System Call" ],
+    [ "000000ssssstttttvvvvvvvvvv110100", "TEQ              GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Equal" ],
+    [ "000001sssss01100vvvvvvvvvvvvvvvv", "TEQI             GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Equal Immediate" ],
+    [ "000000ssssstttttvvvvvvvvvv110000", "TGE              GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Greater or Equal" ],
+    [ "000001sssss01000vvvvvvvvvvvvvvvv", "TGEI             GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Greater or Equal Immediate" ],
+    [ "000001sssss01001vvvvvvvvvvvvvvvv", "TGEIU            GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Greater or Equal Immediate Unsigned" ],
+    [ "000000ssssstttttvvvvvvvvvv110001", "TGEI             GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Greater or Equal Unsigned" ],
     [ "01000010000000000000000000001000", "TLBP",                                                               IF_MIPS32, "Probe TLB for Matching Entry" ],
     [ "01000010000000000000000000000001", "TLBR",                                                               IF_MIPS32, "Read Indexed TLB Entry" ],
     [ "01000010000000000000000000000010", "TLBWI",                                                              IF_MIPS32, "Write Indexed TLB Entry" ],
     [ "01000010000000000000000000000110", "TLBWR",                                                              IF_MIPS32, "Write Random TLB Entry" ],
-    [ "000000ssssstttttvvvvvvvvvv110010", "TLT              GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Less Than" ],
-    [ "000001sssss01010vvvvvvvvvvvvvvvv", "TLTI             GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Less Than Immediate" ],
-    [ "000001sssss01011vvvvvvvvvvvvvvvv", "TLTIU            GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Less Than Immediate Unsigned" ],
-    [ "000000ssssstttttvvvvvvvvvv110011", "TLTU             GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Less Than Unsigned" ],
-    [ "000000ssssstttttvvvvvvvvvv110110", "TNE              GPR:(Rn=s), GPR:(Rn=t), Imm:(v=v)",                 IF_MIPS32, "Trap If Not Equal" ],
-    [ "000001sssss01110vvvvvvvvvvvvvvvv", "TNEI             GPR:(Rn=s), IMM:(v=v)",                             IF_MIPS32, "Trap If Not Equal Immediate" ],
+    [ "000000ssssstttttvvvvvvvvvv110010", "TLT              GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Less Than" ],
+    [ "000001sssss01010vvvvvvvvvvvvvvvv", "TLTI             GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Less Than Immediate" ],
+    [ "000001sssss01011vvvvvvvvvvvvvvvv", "TLTIU            GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Less Than Immediate Unsigned" ],
+    [ "000000ssssstttttvvvvvvvvvv110011", "TLTU             GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Less Than Unsigned" ],
+    [ "000000ssssstttttvvvvvvvvvv110110", "TNE              GPR:(Rn=s), GPR:(Rn=t), Imm:(xxx=v)",                 IF_MIPS32, "Trap If Not Equal" ],
+    [ "000001sssss01110vvvvvvvvvvvvvvvv", "TNEI             GPR:(Rn=s), Imm:(xxx=v)",                             IF_MIPS32, "Trap If Not Equal Immediate" ],
     [ "0100011000000000sssssddddd001001", "TRUNC.L.S        FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Truncate to Long Fixed Point" ],
     [ "0100011000100000sssssddddd001001", "TRUNC.L.D        FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Truncate to Long Fixed Point" ],
     [ "0100011000000000sssssddddd001101", "TRUNC.W.S        FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Truncate to Word Fixed Point" ],
@@ -503,5 +487,5 @@ instruction_table = [
     [ "01000001110tttttddddd00000000000", "WRPGPR           GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2, "Write to GPR in Previous Shadow Set" ],
     [ "01111100000tttttddddd00010100000", "WSBH             GPR:(Rn=d), GPR:(Rn=t)",                            IF_MIPS32R2, "Word Swap Bytes Within Halfwords" ],
     [ "000000ssssstttttddddd00000100110", "XOR              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Exclusive OR" ],
-    [ "001110ssssstttttvvvvvvvvvvvvvvvv", "XORI             GPR:(Rn=t), GPR:(Rn=s), IMM:(v=v)",                 IF_MIPS32, "Exclusive OR Immediate" ],
+    [ "001110ssssstttttvvvvvvvvvvvvvvvv", "XORI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Exclusive OR Immediate" ],
 ]

@@ -121,6 +121,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Functionality
 
+* Disassembly: Support 6502 instructions.
 * Disassembly: Support ARM instructions.
 * Disassembly: Support PowerPC instructions.
 * Disassembly: Support x86 instructions.
@@ -130,6 +131,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 * File loading: Support Mac OS X Mach-O executable loading.
 * File loading: Support Macintosh m68k PEF loading.
 * File loading: Support Windows PE loading.
+* File loading: Support ZX Spectrum SNA loading.
 
 #### Pie In The Sky
 
