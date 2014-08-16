@@ -84,10 +84,18 @@ class ArchMIPS(ArchInterface):
         # - Cases where the PC register is altered directly?
         return False
 
-    def function_get_match_addresses(self, match):
-        for i, opcode in enumerate(match.opcodes):
-            pass
-        return {}
+    def function_get_match_addresses(self, M):
+        ret = {}
+        for i, O in enumerate(M.opcodes):
+            operand_key = O.specification.key
+            for k, v in O.vars.items():
+                flags = MAF_CERTAIN
+                if operand_key == "PCRegion" or operand_key == "PCRelative":
+                    if k == "xxx":
+                        if (M.table_iflags & IFX_BRANCH) == IFX_BRANCH:
+                            flags |= MAF_CODE
+                        ret[v] = i, flags 
+        return ret
 
     def function_get_instruction_string(self, instruction, vars):
         return instruction.specification.key
@@ -98,9 +106,20 @@ class ArchMIPS(ArchInterface):
             key = operand.specification.key
         operand_idx = self.dict_operand_label_to_index[key]
         mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
-        for k, v in vars.iteritems():
-            mode_format = mode_format.replace(k, str(v))
+        for subst_name, subst_value in vars.iteritems():
+            if subst_name == "Rn":
+                s = self.constant_register_prefix + str(subst_value)
+            else:
+                s = None
+                if lookup_symbol is not None and key in ("PCRegion", "PCRelative") and subst_name == "xxx":
+                    s = lookup_symbol(subst_value)
+                if s is None:
+                    s = self.constant_hexadecimal_prefix + ("%X" % subst_value) + self.constant_hexadecimal_suffix
+            mode_format = mode_format.replace(subst_name, s)
         return mode_format
+        
+    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        return super(self.__class__, self).function_disassemble_one_line(data, data_idx, data_abs_idx)
         
     def function_disassemble_as_data(self, data, data_idx):
         """ If a non-zero value is returned, it is the number of bytes to disassemble as data. """
@@ -108,7 +127,7 @@ class ArchMIPS(ArchInterface):
         
     def function_get_default_symbol_name(self, address, metadata):
         char = "X"
-        return "lb%s%06X" % (char, address)
+        return "lb%s%08X" % (char, address)
 
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
         """ This expands instructions with parameterised sizes into the individual sized variants. """
@@ -133,13 +152,19 @@ class ArchMIPS(ArchInterface):
     def _decode_operand(self, data, data_idx, operand_idx, M, T):
         """ ... """
         operand_key = T.specification.key
-        operand_idx = self.dict_operand_label_to_index[operand_key]
-        mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
-        #if mode_format == "
-        #instruction_key = M.specification.key
-        #operand_key = T.specification.key
-        #print T.specification.__dict__
-        T.vars = {}
+        #operand_idx = self.dict_operand_label_to_index[operand_key]
+        #mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
+        bytes_per_word = self.constant_word_size / 8
+        for k, v in T.vars.items():
+            if operand_key == "PCRegion":
+                if k == "xxx":
+                    # High 28 bits from branch delay slot.
+                    T.vars[k] = ((M.pc + bytes_per_word) & (~0x0FFFFFFF)) + (v << 2)
+                    #print operand_key, k, (hex(v), hex(v<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
+            elif operand_key == "PCRelative":
+                if k == "xxx":
+                    T.vars[k] = (M.pc + bytes_per_word) + (v << 2)
+                    #print operand_key, k, (hex(v), hex(v<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
         return data_idx
     
 
@@ -240,38 +265,38 @@ instruction_table = [
     [ "01000110000tttttsssssddddd000000", "ADD.S            FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32, "Floating Point Add" ],
     [ "01000110001tttttsssssddddd000000", "ADD.D            FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32, "Floating Point Add" ],
     [ "01000110110tttttsssssddddd000000", "ADD.PS           FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t)",                IF_MIPS32R2|IF_MIPS64, "Floating Point Add" ],
-    [ "001000ssssstttttvvvvvvvvvvvvvvvv", "ADDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Add Immediate Word" ],
-    [ "001001ssssstttttvvvvvvvvvvvvvvvv", "ADDIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "Add Immediate Unsigned Word" ],
+    [ "001000ssssstttttvvvvvvvvvvvvvvvv", "ADDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",               IF_MIPS32, "Add Immediate Word" ],
+    [ "001001ssssstttttvvvvvvvvvvvvvvvv", "ADDIU            GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",               IF_MIPS32, "Add Immediate Unsigned Word" ],
     [ "000000ssssstttttddddd00000100001", "ADDU             GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "Add Unsigned Word" ],
     [ "010011rrrrrtttttsssssddddd000001", "ALNV.PS          FPR:(Rn=d), FPR:(Rn=s), FPR:(Rn=t), GPR:(Rn=s)",    IF_MIPS32R2|IF_MIPS64, "Floating Point Align Variable" ],
     [ "000000ssssstttttddddd00000100100", "AND              GPR:(Rn=d), GPR:(Rn=s), GPR:(Rn=t)",                IF_MIPS32, "And" ],
-    [ "001100ssssstttttvvvvvvvvvvvvvvvv", "ANDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",                 IF_MIPS32, "And Immediate Word" ],
-    [ "0001000000000000vvvvvvvvvvvvvvvv", "B                PCRelative:(xxx=v)",                                IF_MIPS32|IFX_ENDSEQ_BD, "Unconditional Branch" ],
-    [ "0000010000010001vvvvvvvvvvvvvvvv", "BAL              PCRelative:(xxx=v)",                                IF_MIPS32, "Branch And Link" ],
-    [ "01000101000ccc00vvvvvvvvvvvvvvvv", "BC1F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP False" ],
-    [ "01000101000ccc10vvvvvvvvvvvvvvvv", "BC1FL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP False Likely" ],
-    [ "01000101000ccc01vvvvvvvvvvvvvvvv", "BC1T             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP True" ],
-    [ "01000101000ccc11vvvvvvvvvvvvvvvv", "BC1TL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on FP True Likely" ],
-    [ "01001001000ccc00vvvvvvvvvvvvvvvv", "BC2F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on COP2 False" ],
-    [ "01001001000ccc10vvvvvvvvvvvvvvvv", "BC2FL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on COP2 False Likely" ],
-    [ "01001001000ccc01vvvvvvvvvvvvvvvv", "BC2T             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on COP2 True" ],
-    [ "01001001000ccc11vvvvvvvvvvvvvvvv", "BC2TL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32, "Branch on COP2 True Likely" ],
-    [ "000100ssssstttttvvvvvvvvvvvvvvvv", "BEQ              GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32, "Branch on Equal" ],
-    [ "010100ssssstttttvvvvvvvvvvvvvvvv", "BEQL             GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32, "Branch on Equal Likely" ],
-    [ "000001sssss00001vvvvvvvvvvvvvvvv", "BGEZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than or Equal to Zero" ],
-    [ "000001sssss00011vvvvvvvvvvvvvvvv", "BGEZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than or Equal to Zero Likely" ],
-    [ "000001sssss10001vvvvvvvvvvvvvvvv", "BGEZAL           GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than or Equal to Zero and Link" ],
-    [ "000001sssss10011vvvvvvvvvvvvvvvv", "BGEZALL          GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than or Equal to Zero and Link Likely" ],
-    [ "000111sssss00000vvvvvvvvvvvvvvvv", "BGTZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than Zero" ],
-    [ "010111sssss00000vvvvvvvvvvvvvvvv", "BGTZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Greater Than Zero Likely" ],
-    [ "000110sssss00000vvvvvvvvvvvvvvvv", "BLEZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than or Equal to Zero" ],
-    [ "010110sssss00000vvvvvvvvvvvvvvvv", "BLEZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than or Equal to Zero Likely" ],
-    [ "000001sssss00000vvvvvvvvvvvvvvvv", "BLTZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than Zero" ],
-    [ "000001sssss00010vvvvvvvvvvvvvvvv", "BLTZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than Zero Likely" ],
-    [ "000001sssss10000vvvvvvvvvvvvvvvv", "BLTZAL           GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than Zero and Link" ],
-    [ "000001sssss10010vvvvvvvvvvvvvvvv", "BLTZALL          GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32, "Branch on Less Than Zero and Link Likely" ],
-    [ "000101ssssstttttvvvvvvvvvvvvvvvv", "BNE              GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32, "Branch on Not Equal" ],
-    [ "010101ssssstttttvvvvvvvvvvvvvvvv", "BNEL             GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32, "Branch on Not Equal Likely" ],
+    [ "001100ssssstttttvvvvvvvvvvvvvvvv", "ANDI             GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=v)",               IF_MIPS32, "And Immediate Word" ],
+    [ "0001000000000000vvvvvvvvvvvvvvvv", "B                PCRelative:(xxx=v)",                                IF_MIPS32|IFX_ENDSEQ_BD|IFX_BRANCH, "Unconditional Branch" ],
+    [ "0000010000010001vvvvvvvvvvvvvvvv", "BAL              PCRelative:(xxx=v)",                                IF_MIPS32|IFX_BRANCH, "Branch And Link" ],
+    [ "01000101000ccc00vvvvvvvvvvvvvvvv", "BC1F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on FP False" ],
+    [ "01000101000ccc10vvvvvvvvvvvvvvvv", "BC1FL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on FP False Likely" ],
+    [ "01000101000ccc01vvvvvvvvvvvvvvvv", "BC1T             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on FP True" ],
+    [ "01000101000ccc11vvvvvvvvvvvvvvvv", "BC1TL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on FP True Likely" ],
+    [ "01001001000ccc00vvvvvvvvvvvvvvvv", "BC2F             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on COP2 False" ],
+    [ "01001001000ccc10vvvvvvvvvvvvvvvv", "BC2FL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on COP2 False Likely" ],
+    [ "01001001000ccc01vvvvvvvvvvvvvvvv", "BC2T             CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on COP2 True" ],
+    [ "01001001000ccc11vvvvvvvvvvvvvvvv", "BC2TL            CC:(v=c), PCRelative:(xxx=v)",                      IF_MIPS32|IFX_BRANCH, "Branch on COP2 True Likely" ],
+    [ "000100ssssstttttvvvvvvvvvvvvvvvv", "BEQ              GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32|IFX_BRANCH, "Branch on Equal" ],
+    [ "010100ssssstttttvvvvvvvvvvvvvvvv", "BEQL             GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32|IFX_BRANCH, "Branch on Equal Likely" ],
+    [ "000001sssss00001vvvvvvvvvvvvvvvv", "BGEZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than or Equal to Zero" ],
+    [ "000001sssss00011vvvvvvvvvvvvvvvv", "BGEZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than or Equal to Zero Likely" ],
+    [ "000001sssss10001vvvvvvvvvvvvvvvv", "BGEZAL           GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than or Equal to Zero and Link" ],
+    [ "000001sssss10011vvvvvvvvvvvvvvvv", "BGEZALL          GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than or Equal to Zero and Link Likely" ],
+    [ "000111sssss00000vvvvvvvvvvvvvvvv", "BGTZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than Zero" ],
+    [ "010111sssss00000vvvvvvvvvvvvvvvv", "BGTZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Greater Than Zero Likely" ],
+    [ "000110sssss00000vvvvvvvvvvvvvvvv", "BLEZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than or Equal to Zero" ],
+    [ "010110sssss00000vvvvvvvvvvvvvvvv", "BLEZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than or Equal to Zero Likely" ],
+    [ "000001sssss00000vvvvvvvvvvvvvvvv", "BLTZ             GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than Zero" ],
+    [ "000001sssss00010vvvvvvvvvvvvvvvv", "BLTZL            GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than Zero Likely" ],
+    [ "000001sssss10000vvvvvvvvvvvvvvvv", "BLTZAL           GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than Zero and Link" ],
+    [ "000001sssss10010vvvvvvvvvvvvvvvv", "BLTZALL          GPR:(Rn=s), PCRelative:(xxx=v)",                    IF_MIPS32|IFX_BRANCH, "Branch on Less Than Zero and Link Likely" ],
+    [ "000101ssssstttttvvvvvvvvvvvvvvvv", "BNE              GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32|IFX_BRANCH, "Branch on Not Equal" ],
+    [ "010101ssssstttttvvvvvvvvvvvvvvvv", "BNEL             GPR:(Rn=s), GPR:(Rn=t), PCRelative:(xxx=v)",        IF_MIPS32|IFX_BRANCH, "Branch on Not Equal Likely" ],
     [ "000000vvvvvvvvvvvvvvvvvvvv001101", "BREAK",                                                              IF_MIPS32, "Branch on Not Equal Likely" ],
     [ "01000110000tttttsssss0000011ffff", "C.f.S:(f=f)      FPR:(Rn=s), FPR:(Rn=t)",                            IF_MIPS32, "Floating Point Compare" ],
     [ "01000110001tttttsssss0000011ffff", "C.f.D:(f=f)      FPR:(Rn=s), FPR:(Rn=t)",                            IF_MIPS32, "Floating Point Compare" ],
@@ -279,7 +304,7 @@ instruction_table = [
     [ "01000110000tttttsssssccc0011ffff", "C.f.S:(f=f)      CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32, "Floating Point Compare" ],
     [ "01000110001tttttsssssccc0011ffff", "C.f.D:(f=f)      CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32, "Floating Point Compare" ],
     [ "01000110110tttttsssssccc0011ffff", "C.f.PS:(f=f)     CC:(v=c), FPR:(Rn=s), FPR:(Rn=t)",                  IF_MIPS32R2|IF_MIPS64, "Floating Point Compare" ],
-    [ "101111bbbbbooooovvvvvvvvvvvvvvvv", "CACHE            Imm:(xxx=o), GPRMEM:(xxx=v&Rn=b)",                    IF_MIPS32, "Perform Cache Operation" ],
+    [ "101111bbbbbooooovvvvvvvvvvvvvvvv", "CACHE            Imm:(xxx=o), GPRMEM:(xxx=v&Rn=b)",                  IF_MIPS32, "Perform Cache Operation" ],
     [ "0100011000000000sssssddddd001010", "CEIL.L.S         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Ceiling Convert to Long Fixed Point" ],
     [ "0100011000100000sssssddddd001010", "CEIL.L.D         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Ceiling Convert to Long Fixed Point" ],
     [ "0100011000000000sssssddddd001110", "CEIL.W.S         FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Ceiling Convert to Word Fixed Point" ],
@@ -313,18 +338,18 @@ instruction_table = [
     [ "00000000000000000000000011000000", "EHB",                                                                IF_MIPS32R2, "Execution Hazard Barrier" ],
     [ "01000001011ttttt0110000000100000", "EI               GPR:(Rn=t)",                                        IF_MIPS32R2, "Enable Interrupts" ],
     [ "01000010000000000000000000011000", "ERET",                                                               IF_MIPS32|IFX_ENDSEQ, "Exception Return" ],
-    [ "011111ssssstttttmmmmmbbbbb011010", "EXT              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=b), Imm:(xxx=m-1)",    IF_MIPS32R2, "Extract Bit Field" ],
+    [ "011111ssssstttttmmmmmbbbbb011010", "EXT              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=b), Imm:(xxx=m-1)",IF_MIPS32R2, "Extract Bit Field" ],
     [ "010001zzzzz00000sssssddddd001011", "FLOOR.L.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32R2|IF_MIPS64, "Floating Point Floor Convert to Long Fixed Point" ],
     [ "010001zzzzz00000sssssddddd001111", "FLOOR.W.z:(z=z)  FPR:(Rn=d), FPR:(Rn=s)",                            IF_MIPS32, "Floating Point Floor Convert to Word Fixed Point" ],
     [ "011111ssssstttttmmmmmbbbbb000100", "INS              GPR:(Rn=t), GPR:(Rn=s), Imm:(xxx=b), Imm:(xxx=b+m-1)",  IF_MIPS32R2, "Insert Bit Field" ],
-    [ "000010vvvvvvvvvvvvvvvvvvvvvvvvvv", "J                PCRegion:(xxx=v)",                                  IF_MIPS32|IFX_ENDSEQ_BD, "Jump" ],
-    [ "000011vvvvvvvvvvvvvvvvvvvvvvvvvv", "JAL              PCRegion:(xxx=v)",                                  IF_MIPS32, "Jump And Link" ],
-    [ "000000sssss000001111100000001001", "JALR             GPR:(Rn=s)",                                        IF_MIPS32, "Jump And Link Register" ],
-    [ "000000sssss00000ddddd00000001001", "JALR             GPR:(Rn=d), GPR:(Rn=s)",                            IF_MIPS32, "Jump And Link Register" ],
-    [ "000000sssss00000111111hhhh001001", "JALR.HB          GPR:(Rn=s), Imm:(xxx=h)",                             IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
-    [ "000000sssss00000ddddd1hhhh001001", "JALR.HB          GPR:(Rn=d), GPR:(Rn=s), Imm:(xxx=h)",                 IF_MIPS32R2, "Jump And Link Register With Hazard Barrier" ],
-    [ "000000sssss000000000000000001000", "JR               GPR:(Rn=s)",                                        IF_MIPS32|IFX_ENDSEQ_BD, "Jump Register" ],
-    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(xxx=h)",                             IF_MIPS32R2|IFX_ENDSEQ_BD, "Jump Register With Hazard Barrier" ],
+    [ "000010vvvvvvvvvvvvvvvvvvvvvvvvvv", "J                PCRegion:(xxx=v)",                                  IF_MIPS32|IFX_ENDSEQ_BD|IFX_BRANCH, "Jump" ],
+    [ "000011vvvvvvvvvvvvvvvvvvvvvvvvvv", "JAL              PCRegion:(xxx=v)",                                  IF_MIPS32|IFX_BRANCH, "Jump And Link" ],
+    [ "000000sssss000001111100000001001", "JALR             GPR:(Rn=s)",                                        IF_MIPS32|IFX_BRANCH, "Jump And Link Register" ],
+    [ "000000sssss00000ddddd00000001001", "JALR             GPR:(Rn=d), GPR:(Rn=s)",                            IF_MIPS32|IFX_BRANCH, "Jump And Link Register" ],
+    [ "000000sssss00000111111hhhh001001", "JALR.HB          GPR:(Rn=s), Imm:(xxx=h)",                           IF_MIPS32R2|IFX_BRANCH, "Jump And Link Register With Hazard Barrier" ],
+    [ "000000sssss00000ddddd1hhhh001001", "JALR.HB          GPR:(Rn=d), GPR:(Rn=s), Imm:(xxx=h)",               IF_MIPS32R2|IFX_BRANCH, "Jump And Link Register With Hazard Barrier" ],
+    [ "000000sssss000000000000000001000", "JR               GPR:(Rn=s)",                                        IF_MIPS32|IFX_ENDSEQ_BD|IFX_BRANCH, "Jump Register" ],
+    [ "000000sssss00000000001hhhh001000", "JR.HB            GPR:(Rn=s), Imm:(xxx=h)",                           IF_MIPS32R2|IFX_ENDSEQ_BD|IFX_BRANCH, "Jump Register With Hazard Barrier" ],
     [ "100000bbbbbtttttvvvvvvvvvvvvvvvv", "LB               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte" ],
     [ "100100bbbbbtttttvvvvvvvvvvvvvvvv", "LBU              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Byte Unsigned" ],
     [ "110101bbbbbtttttvvvvvvvvvvvvvvvv", "LDC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Double Word to Floating Point" ],
@@ -333,7 +358,7 @@ instruction_table = [
     [ "100001bbbbbtttttvvvvvvvvvvvvvvvv", "LH               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Halfword" ],
     [ "100101bbbbbtttttvvvvvvvvvvvvvvvv", "LHU              GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Halfword Unsigned" ],
     [ "110000bbbbbtttttvvvvvvvvvvvvvvvv", "LL               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Linked Word" ],
-    [ "00111100000tttttvvvvvvvvvvvvvvvv", "LUI              GPR:(Rn=t), Imm:(xxx=v)",                             IF_MIPS32, "Load Upper Immediate" ],
+    [ "00111100000tttttvvvvvvvvvvvvvvvv", "LUI              GPR:(Rn=t), Imm:(xxx=v)",                           IF_MIPS32, "Load Upper Immediate" ],
     [ "010011bbbbbiiiii00000ddddd000101", "LUXC1            FPR:(Rn=d), GPRMEM:(xxx=i&Rn=b)",                   IF_MIPS32R2|IF_MIPS64, "Load Double Word Indexed Unaligned to Floating Point" ],
     [ "100011bbbbbtttttvvvvvvvvvvvvvvvv", "LW               GPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Word" ],
     [ "110001bbbbbtttttvvvvvvvvvvvvvvvv", "LWC1             FPR:(Rn=t), GPRMEM:(xxx=v&Rn=b)",                   IF_MIPS32, "Load Word to Floating Point" ],

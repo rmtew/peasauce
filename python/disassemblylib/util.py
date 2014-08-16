@@ -30,6 +30,7 @@ II_LENGTH = 8
 
 ## Instruction table II_FLAGS general bits.
 # Flags to indicate special attributes about the given instruction, these overlap the architecture specific flag set.
+IFX_BRANCH    = 1<<29       # Indicates points to code reference to follow when disassembling.  TODO: Better name?
 IFX_ENDSEQ    = 1<<30       # Indicates the end of a sequence of instructions.  
 IFX_ENDSEQ_BD = 1<<31       # Indicates the end of a sequence of instructions.  Next instruction is still executed on the way (the branch delay slot).
 
@@ -247,10 +248,11 @@ def process_instruction_list(_A, _list):
                             continue
                     ot_idx = _A.dict_operand_label_to_index.get(spec.key, None)
                     if ot_idx is not None:
-                        format_string = _A.table_operand_types[ot_idx][EAMI_FORMAT]
-                        for var_name in spec.mask_char_vars:
-                            if var_name not in format_string:
-                                print format_string, var_name
+                        if False:
+                            format_string = _A.table_operand_types[ot_idx][EAMI_FORMAT]
+                            for var_name in spec.mask_char_vars:
+                                if var_name not in format_string:
+                                    print format_string, var_name
                     else:
                         logger.info("process_instruction_list: unknown operand type %s %s %s", _A.__class__.__name__[4:], name_bits[0], spec.key)
     
@@ -478,7 +480,7 @@ class ArchInterface(object):
             if idxN == -1: idxN = len(I.specification.key)
             text = I.specification.key[idx0+1:idxN]
             if text in self.constant_table_size_names:
-                var_values["z"] = get_size_value(text)
+                var_values["z"] = self.constant_table_size_names.index(text)
         # For each element, gather the evaluated values for all of it's variables.
         I.vars = copy_values(I.specification.mask_char_vars, var_values) 
         for O in I.opcodes:
@@ -570,6 +572,12 @@ def _get_var_values(chars, data_word1, mask_string):
                 var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
     return var_values
 
+MAF_CODE = 1
+MAF_ABSOLUTE_ADDRESS = 2
+MAF_CONSTANT_VALUE = 4
+MAF_UNCERTAIN = 8
+MAF_CERTAIN = 16
+    
 # ----------------------------------------------------------------------------
     
 def generate_all():
@@ -579,7 +587,7 @@ def generate_all():
     """
     l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "_extract_masked_value", "_get_var_values", "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string" ]
     for k in globals().keys():
-        if k.startswith("II_") or k.startswith("EAMI") or k.startswith("IFX_"):
+        if k.startswith("II_") or k.startswith("EAMI") or k.startswith("IFX_") or k.startswith("MAF_"):
             l.append(k)
     return l
 

@@ -270,6 +270,9 @@ class ArchM68k(ArchInterface):
         else:
             return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
         
+    def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
+        return super(self.__class__, self).function_disassemble_one_line(data, data_idx, data_abs_idx)
+
     def function_disassemble_as_data(self, data, data_idx):
         # F-line instruction.
         if self._get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
@@ -592,16 +595,16 @@ instruction_table = [
     [ "1110vvvazz000DDD", "ASd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source immediate)", ],
     [ "1110SSSazz100DDD", "ASd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source register)", ],
     [ "1110000a11sssSSS", "ASd.W:(d=a) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Arithmetic Shift (memory rotate)", ],
-    [ "0110ccccvvvvvvvv", "Bcc:(cc=c) DISPLACEMENT:(xxx=v)",       IF_000, "Branch Conditionally", ],
+    [ "0110ccccvvvvvvvv", "Bcc:(cc=c) DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch Conditionally", ],
     [ "0000DDD101sssSSS", "BCHG DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Change (register bit number)", ],
     [ "0000100001sssSSS", "BCHG Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Change (static bit number)", ],
     [ "0000DDD110sssSSS", "BCLR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (register bit number)", ],
     [ "0000100010sssSSS", "BCLR Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (static bit number)", ],
     [ "0100100001001vvv", "BKPT Imm:(xxx=v)",  IF_010|IF_020|IF_030|IF_040, "Breakpoint", ],
-    [ "01100000vvvvvvvv", "BRA DISPLACEMENT:(xxx=v)",       IF_000, "Branch Always", ],
+    [ "01100000vvvvvvvv", "BRA DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch Always", ],
     [ "0000DDD111sssSSS", "BSET DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (register bit number)", ],
     [ "0000100011sssSSS", "BSET Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (static bit number)", ],
-    [ "01100001vvvvvvvv", "BSR DISPLACEMENT:(xxx=v)",       IF_000, "Branch to Subroutine", ],
+    [ "01100001vvvvvvvv", "BSR DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch to Subroutine", ],
     [ "0000DDD100sssSSS", "BTST DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}",      IF_000, "Test a Bit (register bit number)", ],
     [ "0000100000sssSSS", "BTST Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Test a Bit (static bit number)", ],
     [ "0100DDD110sssSSS", "CHK.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Check Register Against Bounds", ],
@@ -612,7 +615,7 @@ instruction_table = [
     [ "1011DDD111sssSSS", "CMPA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Compare Address", ],
     [ "00001100zzsssSSS", "CMPI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Compare Immediate", ],
     [ "1011DDD1zz001SSS", "CMPM.z:(z=z) ARiPost:(Rn=S), ARiPost:(Rn=D)",      IF_000, "Compare Memory", ],
-    [ "0101cccc11001DDD", "DBcc:(cc=c) DR:(Rn=D), DISPLACEMENT:(xxx=I1.W)",      IF_000, "Test Condition, Decrement, and Branch", ],
+    [ "0101cccc11001DDD", "DBcc:(cc=c) DR:(Rn=D), DISPLACEMENT:(xxx=I1.W)",      IF_000|IFX_BRANCH, "Test Condition, Decrement, and Branch", ],
     [ "1000DDD111sssSSS", "DIVS.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Signed Divide", ],
     [ "1000DDD011sssSSS", "DIVU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Divide", ],
     [ "1011DDDvvvsssSSS", "EOR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Exclusive-OR Logical", ],
@@ -706,10 +709,3 @@ instruction_table = [
     #1111___001sssSSS cpScc
     #1111___001111xxx cpTRAPcc
 ]
-
-
-MAF_CODE = 1
-MAF_ABSOLUTE_ADDRESS = 2
-MAF_CONSTANT_VALUE = 4
-MAF_UNCERTAIN = 8
-MAF_CERTAIN = 16
