@@ -86,15 +86,14 @@ class ArchMIPS(ArchInterface):
 
     def function_get_match_addresses(self, M):
         ret = {}
-        for i, O in enumerate(M.opcodes):
-            operand_key = O.specification.key
-            for k, v in O.vars.items():
+        for operand_idx, operand in enumerate(M.opcodes):
+            operand_key = operand.specification.key
+            for subst_name, subst_value in operand.vars.items():
                 flags = MAF_CERTAIN
-                if operand_key == "PCRegion" or operand_key == "PCRelative":
-                    if k == "xxx":
-                        if (M.table_iflags & IFX_BRANCH) == IFX_BRANCH:
-                            flags |= MAF_CODE
-                        ret[v] = i, flags 
+                if operand_key in ("PCRegion", "PCRelative") and subst_name == "xxx":
+                    if (M.table_iflags & IFX_BRANCH) == IFX_BRANCH:
+                        flags |= MAF_CODE
+                    ret[subst_value] = operand_idx, flags 
         return ret
 
     def function_get_instruction_string(self, instruction, vars):
@@ -108,14 +107,16 @@ class ArchMIPS(ArchInterface):
         mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
         for subst_name, subst_value in vars.iteritems():
             if subst_name == "Rn":
-                s = self.constant_register_prefix + str(subst_value)
+                value_string = self.constant_register_prefix + str(subst_value)
+            elif key == "CC" and subst_name == "v":
+                value_string = self.constant_table_condition_code_names[subst_value]
             else:
-                s = None
+                value_string = None
                 if lookup_symbol is not None and key in ("PCRegion", "PCRelative") and subst_name == "xxx":
-                    s = lookup_symbol(subst_value)
-                if s is None:
-                    s = self.constant_hexadecimal_prefix + ("%X" % subst_value) + self.constant_hexadecimal_suffix
-            mode_format = mode_format.replace(subst_name, s)
+                    value_string = lookup_symbol(subst_value)
+                if value_string is None:
+                    value_string = self.constant_hexadecimal_prefix + ("%X" % subst_value) + self.constant_hexadecimal_suffix
+            mode_format = mode_format.replace(subst_name, value_string)
         return mode_format
         
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
@@ -155,26 +156,18 @@ class ArchMIPS(ArchInterface):
         #operand_idx = self.dict_operand_label_to_index[operand_key]
         #mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
         bytes_per_word = self.constant_word_size / 8
-        for k, v in T.vars.items():
+        for var_name, var_value in T.vars.items():
             if operand_key == "PCRegion":
-                if k == "xxx":
+                if var_name == "xxx":
                     # High 28 bits from branch delay slot.
-                    T.vars[k] = ((M.pc + bytes_per_word) & (~0x0FFFFFFF)) + (v << 2)
-                    #print operand_key, k, (hex(v), hex(v<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
+                    T.vars[var_name] = ((M.pc + bytes_per_word) & (~0x0FFFFFFF)) + (var_value << 2)
+                    #print operand_key, var_name, (hex(var_value), hex(var_value<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
             elif operand_key == "PCRelative":
-                if k == "xxx":
-                    T.vars[k] = (M.pc + bytes_per_word) + (v << 2)
-                    #print operand_key, k, (hex(v), hex(v<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
+                if var_name == "xxx":
+                    T.vars[var_name] = (M.pc + bytes_per_word) + (var_value << 2)
+                    #print operand_key, var_name, (hex(var_value), hex(var_value<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
         return data_idx
     
-
-# TODO: The m68k instruction list does some sort of ordering and ambiguity detection, can this be generalised?
-
-def PLACEHOLDER_get_fpr_label(num):
-    return "$f%d" % num
-
-def PLACEHOLDER_get_gpr_label(num):
-    return "$%d" % num
 
 def PLACEHOLDER_get_gpr_name(num):
     return "$"+ {
