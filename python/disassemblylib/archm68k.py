@@ -15,15 +15,15 @@ This is not a valid addressing mode, so would cause F-Line.
 
   "+z"                          ADDI, ANDI, CMPI, EORI, ORI, SUBI reads one or two words depending on whether size is B, W or L.
   "z=00"                        ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
-  "DISPLACEMENT:(xxx=v)"        BCC, BRA, BSR reads 0,1 or 2 extra words depending on its instruction word displacement value. 
-  "DISPLACEMENT:(xxx=I1.W)"     DBCC reads 1 extra word for 16-bit diplacement 
+  "DISPLACEMENT:(xxx=v)"        BCC, BRA, BSR reads 0,1 or 2 extra words depending on its instruction word displacement value.
+  "DISPLACEMENT:(xxx=I1.W)"     DBCC reads 1 extra word for 16-bit diplacement
   - unimplemented -             MOVEP reads 1 extra word for 16-bit diplacement
   - irrelevant -                JMP / JSR operand based ..... ignore
-  "DISPLACEMENT:(xxx=I1.W)"     LINK.W reads 1 extra word 
-  "DISPLACEMENT:(xxx=I1.L)"     LINK.L reads 1 extra longword 
+  "DISPLACEMENT:(xxx=I1.W)"     LINK.W reads 1 extra word
+  "DISPLACEMENT:(xxx=I1.L)"     LINK.L reads 1 extra longword
   "RL:(xxx=I1.W)"               MOVEM
 
-B:00, W:01, L:10 - ADDI, ADDQ, ADDX, ANDI, ASd, CLR, CMPI, CMPM, EORI, LSd, NEG, NEGx, NOT, ORI, ROd, ROXd, SUBI, SUBQ, SUBX, TST, 
+B:00, W:01, L:10 - ADDI, ADDQ, ADDX, ANDI, ASd, CLR, CMPI, CMPM, EORI, LSd, NEG, NEGx, NOT, ORI, ROd, ROXd, SUBI, SUBQ, SUBX, TST,
 B:--, W:11, L:10 - CHK, MOVEA (handled case by case)
 B:01, W:11, L:10 - MOVE (handled case by case)
 B: -, W: 0, L: 1 - MOVEM (handled case by case)
@@ -92,18 +92,18 @@ class ArchM68k(ArchInterface):
         "GT", # %1110
         "LE", # %1111
     ]
-    
+
     constant_operand_var_constant_substitutions = {
         "00": 0,
         "01": 1,
         "10": 2,
     }
-    
+
     constant_table_size_names = [ "B", "W", "L" ]
     constant_table_direction_names = [ "R", "L" ]
-    
+
     variable_endian_type = ">"
-    
+
     def function_is_final_instruction(self, match, preceding_match=None):
         return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
 
@@ -184,10 +184,10 @@ class ArchM68k(ArchInterface):
             for var_name, var_value in vars.iteritems():
                 description = description.replace(var_name, str(var_value))
             return description
-            
+
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
-       
+
     def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
         """ Get a printable representation of an instruction operand. """
         def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
@@ -227,7 +227,7 @@ class ArchM68k(ArchInterface):
                 else:
                     mode_format = mode_format.replace(k, str(v))
             return mode_format
-        
+
         pc = instruction.pc
         key = operand.key
         if key is None:
@@ -269,7 +269,7 @@ class ArchM68k(ArchInterface):
             return key
         else:
             return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
-        
+
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
         return super(self.__class__, self).function_disassemble_one_line(data, data_idx, data_abs_idx)
 
@@ -278,7 +278,7 @@ class ArchM68k(ArchInterface):
         if self._get_byte(data, data_idx)[0] & 0xF0 == 0xF0:
             return 2
         return 0
-        
+
     def function_get_default_symbol_name(self, address, metadata):
         """
         'Resource'-style disassembly variable naming.
@@ -323,14 +323,14 @@ class ArchM68k(ArchInterface):
 
     def _get_long(self, data, data_idx):
         return self._get_value(data, data_idx, 32, False)
-        
+
     def _get_byte(self, data, data_idx):
         return self._get_value(data, data_idx, 8, False)
-    
+
     def _signed_value(self, size_char, value):
         unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
         return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
-    
+
     def _get_data_by_size_char(self, data, idx, char):
         if char == "B":
             word, idx = self._get_word(data, idx)
@@ -363,7 +363,7 @@ class ArchM68k(ArchInterface):
                     if line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != "Rn" and line[EAMI_MATCH_FIELDS][EAMI_MATCH_REG] != register_bits:
                         continue
                     return line[EAMI_LABEL]
-                    
+
         if T.specification.key == "RL":
             T2 = M.opcodes[1-operand_idx]
             word, size_char = _data_word_lookup(M.data_words, T.vars["xxx"])
@@ -379,6 +379,11 @@ class ArchM68k(ArchInterface):
                     return None
             if T2_key == "PreARi":
                 mask = 0x8000
+            elif M.table_mask in ("0100100010sssSSS", "0100100011sssSSS"): # MOVEM RL,EA:
+                if M.opcodes[1].vars["mode"] == 4: # -(An)
+			mask = 0x8000
+                else:
+			mask = 0x0001
             else:
                 mask = 0x0001
             dm = am = 0
@@ -478,7 +483,7 @@ class ArchM68k(ArchInterface):
             index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
             scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
             full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
-            # Xn.z*S                
+            # Xn.z*S
             T.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
             T.vars["z"] = ["W", "L"][index_size]
             T.vars["S"] = [1,2,4,8][scale]
@@ -513,7 +518,7 @@ class ArchM68k(ArchInterface):
             T.vars[k] = value
         return data_idx
 
-            
+
 def get_size_value(label):
     if label == "B": return 0
     if label == "W": return 1
@@ -528,10 +533,10 @@ FmtTable = [
 SpecialRegisters = ("CCR", "SR")
 
 # r: index register type (0: Dn, 1: An)
-# R: register number 
+# R: register number
 # z: word/long index size (0: sign-extended word, 1: long word)
 # X: scale (00: 1, 01: 2, 10: 4, 11: 8)
-# t: extension word type (0: brief, 1: full) 
+# t: extension word type (0: brief, 1: full)
 EffectiveAddressingWordMask = "rRRRzXXt00000000"
 # v: displacement
 EffectiveAddressingWordBriefMask = "00000000vvvvvvvv"
@@ -611,8 +616,8 @@ instruction_table = [
     [ "0100DDD100sssSSS", "CHK.L EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Check Register Against Bounds", ],
     [ "01000010zzsssSSS", "CLR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Clear an Operand", ],
     [ "1011DDD0zzsssSSS", "CMP.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Compare", ],
-    [ "1011DDD011sssSSS", "CMPA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Compare Address", ],
-    [ "1011DDD111sssSSS", "CMPA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Compare Address", ],
+    [ "1011DDD011sssSSS", "CMPA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Compare Address", ],
+    [ "1011DDD111sssSSS", "CMPA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Compare Address", ],
     [ "00001100zzsssSSS", "CMPI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Compare Immediate", ],
     [ "1011DDD1zz001SSS", "CMPM.z:(z=z) ARiPost:(Rn=S), ARiPost:(Rn=D)",      IF_000, "Compare Memory", ],
     [ "0101cccc11001DDD", "DBcc:(cc=c) DR:(Rn=D), DISPLACEMENT:(xxx=I1.W)",      IF_000|IFX_BRANCH, "Test Condition, Decrement, and Branch", ],
@@ -655,8 +660,8 @@ instruction_table = [
     [ "0100110011sssSSS", "MOVEM.L EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, RL:(xxx=I1.W)",     IF_000, "Move Multiple Registers", ],
     [ "0000DDD100001SSS", "MOVEP.W ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Periphial Data (memory to register)", ],
     [ "0000DDD101001SSS", "MOVEP.L ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Periphial Data (memory to register)", ],
-    [ "0000DDD110001SSS", "MOVEP.W DR:(Rn=S), ARid16:(Rn=D)",     IF_000, "Move Periphial Data (register to memory)", ],
-    [ "0000DDD111001SSS", "MOVEP.L DR:(Rn=S), ARid16:(Rn=D)",     IF_000, "Move Periphial Data (register to memory)", ],
+    [ "0000DDD110001SSS", "MOVEP.W DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Periphial Data (register to memory)", ],
+    [ "0000DDD111001SSS", "MOVEP.L DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Periphial Data (register to memory)", ],
     [ "0111DDD0vvvvvvvv", "MOVEQ Imm:(xxx=v),DR:(Rn=D)",     IF_000, "Move Quick", ],
     [ "1100DDD111sssSSS", "MULS.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Signed Multiply", ],
     [ "1100DDD011sssSSS", "MULU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Multiply", ],
