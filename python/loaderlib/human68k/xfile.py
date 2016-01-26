@@ -42,13 +42,6 @@ XDEF_BSS = 0x0203
 XDEF_STACK = 0x0204
 
 
-
-def is_accepted_file_type(word1):
-    """ Whether the first word of a potentially loaded file is handled by us. """
-    if word1 == MAGIC_WORD:
-        return True
-    return False
-
 LOADMODE_NORMAL = 0
 LOADMODE_MINIMAL_MEMORY = 1
 LOADMODE_HIGH_ADDRESS = 2

@@ -72,17 +72,6 @@ MEMF_NAMES[MEMF_CHIP] = "CHIP"
 MEMF_NAMES[MEMF_FAST] = "FAST"
 
 
-"""
-def is_accepted_file_type(word1):
-    if word1 == HUNK_UNIT:
-        return True
-    if False and word1 == HUNK_LIB: # ...
-        return True
-    if False and word1 == HUNK_HEADER: # ...
-        return True
-    return False
-"""
-
 class HunkFile(object):
     _header_table_size = None
     _first_hunk_slot = None
