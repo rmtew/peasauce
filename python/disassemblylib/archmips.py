@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012, 2013, 2014 Richard Tew
+    Copyright (C) 2012-2016 Richard Tew
     Licensed using the MIT license.
 """
 
@@ -46,7 +46,7 @@ class ArchMIPS(ArchInterface):
     ]
 
     constant_operand_var_constant_substitutions = {}
-    
+
     constant_table_condition_code_names = {
         _b2n("00000"): "F",
         _b2n("00001"): "UN",
@@ -65,7 +65,7 @@ class ArchMIPS(ArchInterface):
         _b2n("10110"): "LE",
         _b2n("10111"): "NGT",
     }
-    
+
     constant_table_size_names = []
     constant_table_direction_names = []
 
@@ -93,12 +93,12 @@ class ArchMIPS(ArchInterface):
                 if operand_key in ("PCRegion", "PCRelative") and subst_name == "xxx":
                     if (M.table_iflags & IFX_BRANCH) == IFX_BRANCH:
                         flags |= MAF_CODE
-                    ret[subst_value] = operand_idx, flags 
+                    ret[subst_value] = operand_idx, flags
         return ret
 
     def function_get_instruction_string(self, instruction, vars):
         return instruction.specification.key
-       
+
     def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
         key = operand.key
         if key is None:
@@ -118,14 +118,14 @@ class ArchMIPS(ArchInterface):
                     value_string = self.constant_hexadecimal_prefix + ("%X" % subst_value) + self.constant_hexadecimal_suffix
             mode_format = mode_format.replace(subst_name, value_string)
         return mode_format
-        
+
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
         return super(self.__class__, self).function_disassemble_one_line(data, data_idx, data_abs_idx)
-        
+
     def function_disassemble_as_data(self, data, data_idx):
         """ If a non-zero value is returned, it is the number of bytes to disassemble as data. """
         return 0
-        
+
     def function_get_default_symbol_name(self, address, metadata):
         char = "X"
         return "lb%s%08X" % (char, address)
@@ -149,7 +149,7 @@ class ArchMIPS(ArchInterface):
             new_entry[II_NAME] = new_name.replace(".z", "."+ text) + operands_string
             new_entries.append(new_entry)
         return new_entries
-        
+
     def _decode_operand(self, data, data_idx, operand_idx, M, T):
         """ ... """
         operand_key = T.specification.key
@@ -167,7 +167,7 @@ class ArchMIPS(ArchInterface):
                     T.vars[var_name] = (M.pc + bytes_per_word) + (var_value << 2)
                     #print operand_key, var_name, (hex(var_value), hex(var_value<<2)), (hex(M.pc), hex(M.pc+self.constant_word_size), hex((M.pc + self.constant_word_size) & (~0x0FFFFFFF))), hex(T.vars[k])
         return data_idx
-    
+
 
 def PLACEHOLDER_get_gpr_name(num):
     return "$"+ {
@@ -207,11 +207,11 @@ def PLACEHOLDER_get_gpr_name(num):
 
 
 # FMT:
-#   COP1: 0x10: 10000: .S: 
-#   COP1: 0x11: 10001: .D: 
+#   COP1: 0x10: 10000: .S:
+#   COP1: 0x11: 10001: .D:
 #   COP1: 0x14: 10100: .W:
-#   COP1: 0x15: 10101: .L: 
-#   COP1: 0x16: 10110: .PS: 
+#   COP1: 0x15: 10101: .L:
+#   COP1: 0x16: 10110: .PS:
 
 
 cop1_fmt_table = [

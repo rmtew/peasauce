@@ -1,16 +1,18 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012, 2013, 2014 Richard Tew
+    Copyright (C) 2012-2016 Richard Tew
     Licensed using the MIT license.
 """
 
 M68K_NAME = "m68k"
 MIPS_NAME = "mips"
+_65c816_NAME = "65c816"
 
 def get_arch_names():
     return [
         M68K_NAME,
         MIPS_NAME,
+        _65c816_NAME,
     ]
 
 def get_arch(arch_name):
@@ -22,6 +24,10 @@ def get_arch(arch_name):
         from archmips import ArchMIPS as ArchClass
         from archmips import instruction_table
         from archmips import operand_type_table
+    elif arch_name == _65c816_NAME:
+        from arch65c816 import Arch65c816 as ArchClass
+        from arch65c816 import instruction_table
+        from arch65c816 import operand_type_table
 
     arch = ArchClass()
     arch.set_operand_type_table(operand_type_table)

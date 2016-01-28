@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012, 2013, 2014 Richard Tew
+    Copyright (C) 2012-2016 Richard Tew
     Licensed using the MIT license.
 
 ----------------- RESEARCH NOTES -----------------
@@ -381,9 +381,9 @@ class ArchM68k(ArchInterface):
                 mask = 0x8000
             elif M.table_mask in ("0100100010sssSSS", "0100100011sssSSS"): # MOVEM RL,EA:
                 if M.opcodes[1].vars["mode"] == 4: # -(An)
-			mask = 0x8000
+                    mask = 0x8000
                 else:
-			mask = 0x0001
+                    mask = 0x0001
             else:
                 mask = 0x0001
             dm = am = 0

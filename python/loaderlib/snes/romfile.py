@@ -13,6 +13,12 @@ It is not implemented enough to map a rom to memory and present required data to
 At this time the architecture/processor disassembler has also not been implemented.
 
 Reference: https://en.wikibooks.org/wiki/Super_NES_Programming/SNES_memory_map
+
+TASKS:
+1. Load in rom data to different memory blocks, according to rom type (lo, hi, exlo, exhi, super).
+2. Implement support in ui/disassembler for separate address blocks (if not already there).
+3. Implement support for 65c816 architecture.
+
 """
 
 import cPickle
