@@ -111,10 +111,11 @@ class ArchM68k(ArchInterface):
         # Given a branch/jump address, should it be done next?
         def _extract_address(match, opcode_idx):
             opcode = match.opcodes[opcode_idx]
+            # Note that PC relative jumps are ignored, as the address may refer to leading offsets before referenced code.
             if opcode.key == "PCid16":
-                return match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
+                return None # match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key == "PCiId8":
-                return match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
+                return None # match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
             elif opcode.specification.key == DISPLACEMENT_OKEY: # JMP
