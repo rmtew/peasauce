@@ -456,12 +456,18 @@ class ArchM68k(ArchInterface):
                     logger.debug("Failed to fetch EA/Imm data")
                     return None
                 O.vars["xxx"] = value
+            elif operand_key == "Imm" and "xxx" not in O.vars and "z" in O.vars:
+                # This is a complete sized I+ reference, so convert it to an incomplete one for resolution below.
+                z_value = O.vars["z"]
+                O.vars["xxx"] = "I+.z"
+                O.vars["z"] = z_value[3] # e.g. "B" from "I+.B"
             elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
                 # These operations serve no purpose with 0, so the range is shifted from 0-7 to 1-8 by remapping 0.
                if O.vars["xxx"] == 0:
                     O.vars["xxx"] = 8
 
         if O.vars.get("xxx", None) == "I+.z":
+            # An incomplete I+ reference that needs to be resolved with a 'z' lookup.
             value, data_idx = self._get_data_by_size_char(data, data_idx, O.vars["z"])
             if value is None: # Disassembly failure.
                 logger.debug("Failed to fetch xxx/I+.z data")
@@ -658,6 +664,7 @@ instruction_table = [
     [ "0100111011sssSSS", "JMP EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Jump", ],
     [ "0100111010sssSSS", "JSR EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Jump to Subroutine", ],
     [ "0100DDD111sssSSS", "LEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, AR:(Rn=D)",       IF_000, "Load Effective Address", ],
+    [ "101000000000vvvv", "LINEA Imm:(xxx=v)",      IF_000, "A-Line", ],
     [ "0100111001010SSS", "LINK.W AR:(Rn=S), DISPLACEMENT:(xxx=I1.W)",      IF_000, "Link and Allocate (word)", ],
     [ "0100100000001SSS", "LINK.L AR:(Rn=S), DISPLACEMENT:(xxx=I1.L)",      IF_000, "Link and Allocate (long)", ],
     [ "1110vvvazz001DDD", "LSd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Logical Shift (register shifts, source immediate)", ],
