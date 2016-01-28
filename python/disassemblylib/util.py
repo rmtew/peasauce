@@ -193,7 +193,7 @@ def process_instruction_list(_A, _list):
             for operand_string in operands_bits:
                 spec = _make_specification(operand_string)
                 for var_name, value_name in spec.mask_char_vars.iteritems():
-                    if value_name[0] == "I": # I<word_idx>.<size_char>
+                    if value_name[0] == "I" and value_name[1] != "+": # I<word_idx>.<size_char>
                         size_idx = value_name.find(".")
                         if size_idx > 0:
                             word_idx = int(value_name[1:size_idx])
@@ -450,7 +450,7 @@ class ArchInterface(object):
         def copy_values(mask_char_vars, char_vars):
             d = {}
             for var_name, char_string in mask_char_vars.iteritems():
-                if char_string[0] in ("+", "I"): # Pending read, propagate for resolution when decoding this opcode
+                if char_string[0] == "I": # Pending read, propagate for resolution when decoding this opcode
                     var_value = char_string
                 else:
                     var_value = self.constant_operand_var_constant_substitutions.get(char_string, None)
@@ -466,11 +466,12 @@ class ArchInterface(object):
             return d
 
         var_names = I.specification.mask_char_vars.values()
+        # Extend the base variable list for the instruction itself with any valid candidates from each applicable operand.
         for O in I.opcodes:
             for mask_var_name in O.specification.mask_char_vars.itervalues():
                 if mask_var_name not in var_names and mask_var_name not in self.constant_operand_var_constant_substitutions:
                     var_names.append(mask_var_name)
-        # Extract the value for each variable from the instruction opcode.
+        # Extract the raw value for each variable from the instruction opcode.
         var_values = _get_var_values(var_names, I.data_words[0], I.table_mask)
         # The instruction size may be required by some operands.  Retrieve it and make it available to the gathering below.
         # TODO: This is currently only really useful for M68K arch.  MIPS gets more complicated with .Y.Z or .f.Y

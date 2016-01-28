@@ -13,8 +13,8 @@ This is not a valid addressing mode, so would cause F-Line.
 
 ----------------- INSTRUCTION SIZES -----------------
 
-  "+z"                          ADDI, ANDI, CMPI, EORI, ORI, SUBI reads one or two words depending on whether size is B, W or L.
-  "z=00"                        ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
+  "=I+.z"                       ADDI, ANDI, CMPI, EORI, ORI, SUBI reads one or two words depending on whether size is B, W or L.
+  "=00"                         ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
   "DISPLACEMENT:(xxx=v)"        BCC, BRA, BSR reads 0,1 or 2 extra words depending on its instruction word displacement value.
   "DISPLACEMENT:(xxx=I1.W)"     DBCC reads 1 extra word for 16-bit diplacement
   - unimplemented -             MOVEP reads 1 extra word for 16-bit diplacement
@@ -123,7 +123,7 @@ class ArchM68k(ArchInterface):
                 return match.pc + self._signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
-            elif opcode.specification.key == "DISPLACEMENT": # JMP
+            elif opcode.specification.key == DISPLACEMENT_OKEY: # JMP
                 return match.pc + opcode.vars["xxx"], 0
             return None
 
@@ -232,7 +232,7 @@ class ArchM68k(ArchInterface):
         key = operand.key
         if key is None:
             key = operand.specification.key
-        if key == "RL":
+        if key == REGISTER_LIST_OKEY:
             # D0-D3/D7/A0-A2
             ranges = []
             for ri, mask in enumerate(operand.rl_bits):
@@ -256,7 +256,7 @@ class ArchM68k(ArchInterface):
                 if r0 < rn:
                     s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
             return s
-        elif key == "DISPLACEMENT":
+        elif key == DISPLACEMENT_OKEY:
             value = vars["xxx"]
             if instruction.specification.key[0:4] == "LINK":
                 value_string = None
@@ -343,8 +343,20 @@ class ArchM68k(ArchInterface):
         elif char == "L":
             return self._get_long(data, idx)
 
-    def _decode_operand(self, data, data_idx, operand_idx, M, T):
+    def _decode_operand(self, data, data_idx, operand_idx, I, O):
+        """
+            data            The data stream.
+            data_idx        The next read position in the data stream.
+            operand_idx     The index of the current operand for the given instruction.
+            I               Instruction match.
+            O               Current operand for the given instruction.
+        """
         def _data_word_lookup(data_words, text):
+            """
+            An instruction has N data words.  Something has defined it's value to be one of these, for a given size.
+            e.g. A variable may refer to I1.W, which means the first data word.
+            Note that extra/data words are effectively 1-indexed, as the 0 entry is for word read for the instruction.
+            """
             size_idx = text.find(".")
             if size_idx > 0:
                 size_char = text[size_idx+1]
@@ -364,28 +376,31 @@ class ArchM68k(ArchInterface):
                         continue
                     return line[EAMI_LABEL]
 
-        if T.specification.key == "RL":
-            T2 = M.opcodes[1-operand_idx]
-            word, size_char = _data_word_lookup(M.data_words, T.vars["xxx"])
+        if O.specification.key == REGISTER_LIST_OKEY:
+            T2 = I.opcodes[1-operand_idx]
+            word, size_char = _data_word_lookup(I.data_words, O.vars["xxx"])
             if word is None:
-                logger.error("_decode_operand$%X: _data_word_lookup failure 1", M.pc)
+                logger.error("_decode_operand$%X: _data_word_lookup failure 1", I.pc)
                 return None
+
             T2_key = T2.specification.key
             if T2_key == "EA":
-                T2_key =  (T2.vars["mode"], T2.vars["register"], M.table_ea_masks[1-operand_idx])
+                T2_key =  (T2.vars["mode"], T2.vars["register"], I.table_ea_masks[1-operand_idx])
                 if T2_key is None:
                     logger.debug("_decode_operand$%X: failed to resolve EA key mode:%%%s register:%%%s operand: %d instruction: %s ea_mask: %X",
-                        M.pc, _n2b(T2.vars["mode"]), _n2b(T2.vars["register"]), operand_idx, M.specification.key, M.table_ea_masks[1-operand_idx])
+                        I.pc, _n2b(T2.vars["mode"]), _n2b(T2.vars["register"]), operand_idx, I.specification.key, I.table_ea_masks[1-operand_idx])
                     return None
+
             if T2_key == "PreARi":
                 mask = 0x8000
-            elif M.table_mask in ("0100100010sssSSS", "0100100011sssSSS"): # MOVEM RL,EA:
-                if M.opcodes[1].vars["mode"] == 4: # -(An)
+            elif I.table_mask in ("0100100010sssSSS", "0100100011sssSSS"): # MOVEM RL,EA:
+                if I.opcodes[1].vars["mode"] == 4: # -(An)
                     mask = 0x8000
                 else:
                     mask = 0x0001
             else:
                 mask = 0x0001
+
             dm = am = 0
             for i in range(16):
                 if word & mask:
@@ -397,12 +412,13 @@ class ArchM68k(ArchInterface):
                     word >>= 1
                 else:
                     word <<= 1
-            T.rl_bits = dm, am
+            O.rl_bits = dm, am
+
             return data_idx
-        elif T.specification.key == "DISPLACEMENT":
-            value = T.vars["xxx"]
+        elif O.specification.key == DISPLACEMENT_OKEY:
+            value = O.vars["xxx"]
             if type(value) is str:
-                value, size_char = _data_word_lookup(M.data_words, value)
+                value, size_char = _data_word_lookup(I.data_words, value)
             else:
                 size_char = "B"
                 if value == 0:
@@ -414,33 +430,33 @@ class ArchM68k(ArchInterface):
             if value is None: # Disassembly failure
                 logger.error("_decode_operand: Failed to obtain displacement offset")
                 return None
-            T.vars["xxx"] = self._signed_value(size_char, value)
+            O.vars["xxx"] = self._signed_value(size_char, value)
             return data_idx
-        elif T.specification.key in SpecialRegisters:
+        elif O.specification.key in SpecialRegisters:
             return data_idx
 
         # General EA possibility, or specific EA mode
-        instruction_key = M.specification.key
+        instruction_key = I.specification.key
         instruction_key4 = instruction_key[:4]
-        operand_key = specific_key = T.specification.key
+        operand_key = specific_key = O.specification.key
 
         if specific_key == "EA":
-            specific_key = T.key = _resolve_specific_ea_key(T.vars["mode"], T.vars["register"], M.table_ea_masks[operand_idx])
+            specific_key = O.key = _resolve_specific_ea_key(O.vars["mode"], O.vars["register"], I.table_ea_masks[operand_idx])
             if specific_key is None:
-                #logger.debug("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", M.pc, M.specification.key, _n2b(T.vars["mode"]), _n2b(T.vars["register"]))
+                #logger.debug("_decode_operand$%X: %s unresolved EA key mode:%s register:%s", I.pc, I.specification.key, _n2b(O.vars["mode"]), _n2b(O.vars["register"]))
                 return None
-            T.vars["Rn"] = T.vars["register"]
+            O.vars["Rn"] = O.vars["register"]
 
         eam_line = self.table_operand_types[self.dict_operand_label_to_index[specific_key]]
         read_string = eam_line[EAMI_DATA_FIELDS][EAMI_DATA_READS]
 
         # Special case.
         if specific_key == "Imm":
-            if operand_key == "EA":
-                if "z" in T.vars:
-                    size_char = T.vars["z"]
-                elif "z" in M.vars:
-                    size_char = M.vars["z"]
+            if operand_key == "EA": # The operand could be any of a range of EA depending on it's masked bits.
+                if "z" in O.vars:
+                    size_char = O.vars["z"]
+                elif "z" in I.vars:
+                    size_char = I.vars["z"]
                 elif instruction_key[-2] == "." and instruction_key[-1] in ("B", "W", "L"):
                     size_char = instruction_key[-1]
                 else:
@@ -450,72 +466,76 @@ class ArchM68k(ArchInterface):
                 #try:
                 value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
                 #except Exception:
-                #    print M.specification.key, T.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
+                #    print I.specification.key, O.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
                 #    raise
                 if value is None: # Disassembly failure.
                     logger.debug("Failed to fetch EA/Imm data")
                     return None
-                T.vars["xxx"] = value
-            elif operand_key == "Imm" and "z" in T.vars and "xxx" not in T.vars:
-                value, data_idx = self._get_data_by_size_char(data, data_idx, T.vars["z"])
-                T.vars["xxx"] = value
+                O.vars["xxx"] = value
+            elif operand_key == "Imm" and "z" in O.vars and "xxx" not in O.vars:
+                value, data_idx = self._get_data_by_size_char(data, data_idx, O.vars["z"])
+                O.vars["xxx"] = value
             elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
-               if T.vars["xxx"] == 0:
-                    T.vars["xxx"] = 8
+               if O.vars["xxx"] == 0:
+                    O.vars["xxx"] = 8
 
-        if "xxx" in T.vars:
-            if T.vars["xxx"] == "+z":
-                value, data_idx = self._get_data_by_size_char(data, data_idx, T.vars["z"])
-                if value is None: # Disassembly failure.
-                    logger.debug("Failed to fetch xxx/+z data")
-                    return None
-                T.vars["xxx"] = value
-
-        # Populate EA mode specific variables.
-        if read_string == "EW":
-            ew1, data_idx = self._get_word(data, data_idx)
-            if ew1 is None: # Disassembly failure.
-                logger.debug("Failed to extension word1")
-                return None
-
-            register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
-            register_number = _extract_masked_value(ew1, EffectiveAddressingWordMask, "R")
-            index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
-            scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
-            full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
-            # Xn.z*S
-            T.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
-            T.vars["z"] = ["W", "L"][index_size]
-            T.vars["S"] = [1,2,4,8][scale]
-
-            if full_extension_word:
-                ew2, data_idx = self._get_word(data, data_idx)
-                base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
-                index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
-                base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
-                index_selection = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "I")
-                # ...
-                base_displacement = 0
-                if base_displacement_size == 2: # %10
-                    base_displacement, data_idx = self._get_word(data, data_idx)
-                elif base_displacement_size == 3: # %11
-                    base_displacement, data_idx = self._get_long(data, data_idx)
-                if base_displacement is None: # Disassembly failure.
-                    return None
-                # TODO: Finish implementation.
-                logger.debug("%X: Skipping full extension word for instruction '%s'", M.pc-2, M.specification.key)
-                return None
-                # raise RuntimeError("Full displacement incomplete", M.specification.key)
-            else:
-                T.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
-        elif read_string:
-            k, v = [ s.strip() for s in read_string.split("=") ]
-            size_char = v[1]
-            value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
+        if O.vars.get("xxx", None) == "I+.z":
+            value, data_idx = self._get_data_by_size_char(data, data_idx, O.vars["z"])
             if value is None: # Disassembly failure.
-                logger.error("Failed to read extra size char")
+                logger.debug("Failed to fetch xxx/I+.z data")
                 return None
-            T.vars[k] = value
+            O.vars["xxx"] = value
+
+        # Different EA modes may cause extra data to be read, to populate specified variables.
+        if read_string:
+            if read_string == "EW":
+                ew1, data_idx = self._get_word(data, data_idx)
+                if ew1 is None: # Disassembly failure.
+                    logger.debug("Failed to extension word1")
+                    return None
+
+                register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
+                register_number = _extract_masked_value(ew1, EffectiveAddressingWordMask, "R")
+                index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
+                scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
+                full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
+                # Xn.z*S
+                O.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
+                O.vars["z"] = ["W", "L"][index_size]
+                O.vars["S"] = [1,2,4,8][scale]
+
+                if full_extension_word:
+                    ew2, data_idx = self._get_word(data, data_idx)
+                    base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
+                    index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
+                    base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
+                    index_selection = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "I")
+                    # ...
+                    base_displacement = 0
+                    if base_displacement_size == 2: # %10
+                        base_displacement, data_idx = self._get_word(data, data_idx)
+                    elif base_displacement_size == 3: # %11
+                        base_displacement, data_idx = self._get_long(data, data_idx)
+                    if base_displacement is None: # Disassembly failure.
+                        return None
+                    # TODO: Finish implementation.
+                    logger.debug("%X: Skipping full extension word for instruction '%s'", I.pc-2, I.specification.key)
+                    return None
+                    # raise RuntimeError("Full displacement incomplete", I.specification.key)
+                else:
+                    O.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
+            elif read_string.find("=I+.") != -1:
+                # Inject an extra word (or long) value under the given key as an available variable.
+                k, v = [ s.strip() for s in read_string.split("=") ]
+                size_char = v[3]
+                value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
+                if value is None: # Disassembly failure.
+                    logger.error("Failed to read extra size char")
+                    return None
+                O.vars[k] = value
+            else:
+                # Has to be "EW" or "I+.<W|L>"
+                raise RuntimeError("Bad operand table EAMI_DATA_READS value.")
         return data_idx
 
 
@@ -530,8 +550,11 @@ FmtTable = [
     [ _b2n("10"), "L" ],
 ]
 
+REGISTER_LIST_OKEY = "RL"
+DISPLACEMENT_OKEY = "DISPLACEMENT"
+
 SpecialRegisters = ("CCR", "SR")
-CustomOperandLabels = ("RL", "DISPLACEMENT")
+CustomOperandLabels = (REGISTER_LIST_OKEY, DISPLACEMENT_OKEY)
 
 # r: index register type (0: Dn, 1: An)
 # R: register number
@@ -558,24 +581,24 @@ EAMI_DATA_READS = 0
 operand_type_table = [
     # Syntax,        Formatting                        Match fields                      Data fields     Description
     #                                          Mode field       Register field     No. extension words
-    [ "DR",         "Dn",                   [ _b2n("000"),          "Rn",     ],    [ 0,        ],     "Data Register Direct Mode", ],
-    [ "AR",         "An",                   [ _b2n("001"),          "Rn",     ],    [ 0,        ],     "Address Register Direct Mode", ],
-    [ "ARi",        "(An)",                 [ _b2n("010"),          "Rn",     ],    [ 0,        ],     "Address Register Indirect Mode", ],
-    [ "ARiPost",    "(An)+",                [ _b2n("011"),          "Rn",     ],    [ 0,        ],     "Address Register Indirect Mode with Postincrement Mode", ],
-    [ "PreARi",     "-(An)",                [ _b2n("100"),          "Rn",     ],    [ 0,        ],     "Address Register Indirect Mode with Preincrement Mode", ],
-    [ "ARid16",     "(D16,An)",             [ _b2n("101"),          "Rn",     ],    [ "D16=+W", ],     "Address Register Indirect Mode with Displacement Mode", ],
-    [ "ARiId8",     "(D8,An,Xn.z*S)",       [ _b2n("110"),          "Rn",     ],    [ "EW",     ],     "Address Register Indirect with Index (8-Bit Displacement) Mode", ],
-    [ "ARiIdb",     "(bd,An,Xn.z*S)",       [ _b2n("110"),          "Rn",     ],    [ "EW",     ],     "Address Register Indirect with Index (Base Displacement) Mode", ],
-    [ "MEMiPost",   "([bd,An],Xn.z*S,od)",  [ _b2n("110"),          "Rn",     ],    [ "EW",     ],     "Memory Indirect Postindexed Mode", ],
-    [ "PreMEMi",    "([bd,An,Xn.z*S],od)",  [ _b2n("110"),          "Rn",     ],    [ "EW",     ],     "Memory Indirect Preindexed Mode", ],
-    [ "PCid16",     "(D16,PC)",             [ _b2n("111"),       _b2n("010"), ],    [ "D16=+W", ],     "Program Counter Indirect with Displacement Mode", ],
-    [ "PCiId8",     "(D8,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",     ],     "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
-    [ "PCiIdb",     "(bd,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",     ],     "Program Counter Indirect with Index (Base Displacement) Mode", ],
-    [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",     ],     "Program Counter Memory Indirect Postindexed Mode", ],
-    [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",     ],     "Program Counter Memory Indirect Preindexed Mode", ],
-    [ "AbsW",       "(xxx).W",              [ _b2n("111"),       _b2n("000"), ],    [ "xxx=+W", ],     "Absolute Short Addressing Mode", ],
-    [ "AbsL",       "(xxx).L",              [ _b2n("111"),       _b2n("001"), ],    [ "xxx=+L", ],     "Absolute Long Addressing Mode", ],
-    [ "Imm",        "#xxx",                 [ _b2n("111"),       _b2n("100"), ],    [ 0,        ],     "Immediate Data", ],
+    [ "DR",         "Dn",                   [ _b2n("000"),          "Rn",     ],    [ 0,          ],     "Data Register Direct Mode", ],
+    [ "AR",         "An",                   [ _b2n("001"),          "Rn",     ],    [ 0,          ],     "Address Register Direct Mode", ],
+    [ "ARi",        "(An)",                 [ _b2n("010"),          "Rn",     ],    [ 0,          ],     "Address Register Indirect Mode", ],
+    [ "ARiPost",    "(An)+",                [ _b2n("011"),          "Rn",     ],    [ 0,          ],     "Address Register Indirect Mode with Postincrement Mode", ],
+    [ "PreARi",     "-(An)",                [ _b2n("100"),          "Rn",     ],    [ 0,          ],     "Address Register Indirect Mode with Preincrement Mode", ],
+    [ "ARid16",     "(D16,An)",             [ _b2n("101"),          "Rn",     ],    [ "D16=I+.W", ],     "Address Register Indirect Mode with Displacement Mode", ],
+    [ "ARiId8",     "(D8,An,Xn.z*S)",       [ _b2n("110"),          "Rn",     ],    [ "EW",       ],     "Address Register Indirect with Index (8-Bit Displacement) Mode", ],
+    [ "ARiIdb",     "(bd,An,Xn.z*S)",       [ _b2n("110"),          "Rn",     ],    [ "EW",       ],     "Address Register Indirect with Index (Base Displacement) Mode", ],
+    [ "MEMiPost",   "([bd,An],Xn.z*S,od)",  [ _b2n("110"),          "Rn",     ],    [ "EW",       ],     "Memory Indirect Postindexed Mode", ],
+    [ "PreMEMi",    "([bd,An,Xn.z*S],od)",  [ _b2n("110"),          "Rn",     ],    [ "EW",       ],     "Memory Indirect Preindexed Mode", ],
+    [ "PCid16",     "(D16,PC)",             [ _b2n("111"),       _b2n("010"), ],    [ "D16=I+.W", ],     "Program Counter Indirect with Displacement Mode", ],
+    [ "PCiId8",     "(D8,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
+    [ "PCiIdb",     "(bd,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Indirect with Index (Base Displacement) Mode", ],
+    [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Memory Indirect Postindexed Mode", ],
+    [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Memory Indirect Preindexed Mode", ],
+    [ "AbsW",       "(xxx).W",              [ _b2n("111"),       _b2n("000"), ],    [ "xxx=I+.W", ],     "Absolute Short Addressing Mode", ],
+    [ "AbsL",       "(xxx).L",              [ _b2n("111"),       _b2n("001"), ],    [ "xxx=I+.L", ],     "Absolute Long Addressing Mode", ],
+    [ "Imm",        "#xxx",                 [ _b2n("111"),       _b2n("100"), ],    [ 0,          ],     "Immediate Data", ],
 ]
 
 def extend_operand_type_table():
@@ -595,9 +618,9 @@ def extend_operand_type_table():
 
 extend_operand_type_table()
 
-# z=00: Force size to one byte, read as lower byte of following word.
-# xxx=+z: Read a value from the following words, with the size obtained from the 'z' size field.
-# xxx=I<n>.[WL]: Starting with the nth word after the instruction word, use the word or longword at that point.
+# z=00             Force size to one byte, read as lower byte of following word.
+# xxx=I+.z         Read a value from the following words, with the size obtained from the 'z' size field.
+# xxx=In.[WL]      Starting with the nth word after the instruction word, use the word or longword at that point.
 
 instruction_table = [
     [ "1100DDD100000SSS", "ABCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
@@ -606,13 +629,13 @@ instruction_table = [
     [ "1101DDD1zzsssSSS", "ADD.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",             IF_000, "Add", ],
     [ "1101DDD011sssSSS", "ADDA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
     [ "1101DDD111sssSSS", "ADDA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
-    [ "00000110zzsssSSS", "ADDI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                       IF_000, "Add Immediate", ],
+    [ "00000110zzsssSSS", "ADDI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                       IF_000, "Add Immediate", ],
     [ "0101vvv0zzsssSSS", "ADDQ.z:(z=z) Imm:(xxx=v), EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                       IF_000, "Add Immediate", ],
     [ "1101DDD1zz000SSS", "ADDX.z:(z=z) DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Extended (register)", ],
     [ "1101DDD1zz001SSS", "ADDX.z:(z=z) PreARi:(Rn=S),PreARi:(Rn=D)",      IF_000, "Add Extended (memory)", ],
     [ "1100DDD0zzsssSSS", "AND.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",                        IF_000, "AND Logical (EA->DR)", ],
     [ "1100DDD1zzsssSSS", "AND.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                        IF_000, "AND Logical (DR->EA)", ],
-    [ "00000010zzsssSSS", "ANDI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "AND Immediate", ],
+    [ "00000010zzsssSSS", "ANDI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "AND Immediate", ],
     [ "0000001000111100", "ANDI Imm:(z=00), CCR",      IF_000, "CCR AND Immediate", ],
     [ "1110vvvazz000DDD", "ASd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source immediate)", ],
     [ "1110SSSazz100DDD", "ASd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source register)", ],
@@ -635,13 +658,13 @@ instruction_table = [
     [ "1011DDD0zzsssSSS", "CMP.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Compare", ],
     [ "1011DDD011sssSSS", "CMPA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Compare Address", ],
     [ "1011DDD111sssSSS", "CMPA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Compare Address", ],
-    [ "00001100zzsssSSS", "CMPI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Compare Immediate", ],
+    [ "00001100zzsssSSS", "CMPI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Compare Immediate", ],
     [ "1011DDD1zz001SSS", "CMPM.z:(z=z) ARiPost:(Rn=S), ARiPost:(Rn=D)",      IF_000, "Compare Memory", ],
     [ "0101cccc11001DDD", "DBcc:(cc=c) DR:(Rn=D), DISPLACEMENT:(xxx=I1.W)",      IF_000|IFX_BRANCH, "Test Condition, Decrement, and Branch", ],
     [ "1000DDD111sssSSS", "DIVS.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Signed Divide", ],
     [ "1000DDD011sssSSS", "DIVU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Divide", ],
     [ "1011DDDvvvsssSSS", "EOR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Exclusive-OR Logical", ],
-    [ "00001010zzsssSSS", "EORI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Exclusive-OR Immediate", ],
+    [ "00001010zzsssSSS", "EORI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Exclusive-OR Immediate", ],
     [ "0000101000111100", "EORI Imm:(z=00), CCR",      IF_000, "Exclusive-OR Immediate to Condition Code", ],
     [ "1100SSS101000DDD", "EXG DR:(Rn=S), DR:(Rn=D)",       IF_000, "Exchange Registers (data)", ],
     [ "1100SSS101001DDD", "EXG AR:(Rn=S), AR:(Rn=D)",       IF_000, "Exchange Registers (address)", ],
@@ -675,10 +698,10 @@ instruction_table = [
     [ "0100100011sssSSS", "MOVEM.L RL:(xxx=I1.W), EA:(mode=s&register=S){ARi|PreARi|ARid16|ARiId8|AbsW|AbsL}",     IF_000, "Move Multiple Registers", ],
     [ "0100110010sssSSS", "MOVEM.W EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, RL:(xxx=I1.W)",     IF_000, "Move Multiple Registers", ],
     [ "0100110011sssSSS", "MOVEM.L EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, RL:(xxx=I1.W)",     IF_000, "Move Multiple Registers", ],
-    [ "0000DDD100001SSS", "MOVEP.W ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Periphial Data (memory to register)", ],
-    [ "0000DDD101001SSS", "MOVEP.L ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Periphial Data (memory to register)", ],
-    [ "0000DDD110001SSS", "MOVEP.W DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Periphial Data (register to memory)", ],
-    [ "0000DDD111001SSS", "MOVEP.L DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Periphial Data (register to memory)", ],
+    [ "0000DDD100001SSS", "MOVEP.W ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Peripheral Data (memory to register)", ],
+    [ "0000DDD101001SSS", "MOVEP.L ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Peripheral Data (memory to register)", ],
+    [ "0000DDD110001SSS", "MOVEP.W DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Peripheral Data (register to memory)", ],
+    [ "0000DDD111001SSS", "MOVEP.L DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Peripheral Data (register to memory)", ],
     [ "0111DDD0vvvvvvvv", "MOVEQ Imm:(xxx=v),DR:(Rn=D)",     IF_000, "Move Quick", ],
     [ "1100DDD111sssSSS", "MULS.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Signed Multiply", ],
     [ "1100DDD011sssSSS", "MULU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Multiply", ],
@@ -689,7 +712,7 @@ instruction_table = [
     [ "01000110zzsssSSS", "NOT.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Logical Complement", ],
     [ "1000DDD0zzsssSSS", "OR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",        IF_000, "Inclusive-OR Logical (EA->DR)", ],
     [ "1000DDD1zzsssSSS", "OR.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",        IF_000, "Inclusive-OR Logical (DR->EA)", ],
-    [ "00000000zzsssSSS", "ORI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Inclusive-OR", ],
+    [ "00000000zzsssSSS", "ORI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Inclusive-OR", ],
     [ "0000000000111100", "ORI.B Imm:(z=00), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
     [ "0000000001111100", "ORI.W Imm:(z=01), SR",       IF_000, "Inclusive-OR Immediate to Status Register", ],
     [ "0100100001sssSSS", "PEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Push Effective Address", ],
@@ -711,7 +734,7 @@ instruction_table = [
     [ "1001DDD1zzsssSSS", "SUB.z:(z=z) DR:(Rn=D),EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Subtract", ],
     [ "1001DDD011sssSSS", "SUBA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Subtract Address (word)", ],
     [ "1001DDD111sssSSS", "SUBA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",      IF_000, "Subtract Address (long)", ],
-    [ "00000100zzsssSSS", "SUBI.z:(z=z) Imm:(z=z&xxx=+z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Subtract Immediate", ],
+    [ "00000100zzsssSSS", "SUBI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Subtract Immediate", ],
     [ "0101vvv1zzsssSSS", "SUBQ.z:(z=z) Imm:(xxx=v), EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Subtract Quick", ],
     [ "1001DDD1zz000SSS", "SUBX.z:(z=z) DR:(Rn=S), DR:(Rn=D)",      IF_000, "Subtract with Extend (data registers)", ],
     [ "1001DDD1zz001SSS", "SUBX.z:(z=z) PreARi:(Rn=S), PreARi:(Rn=S)",      IF_000, "Subtract with Extend (PreARi)", ],
