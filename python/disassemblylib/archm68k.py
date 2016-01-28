@@ -188,7 +188,7 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
-    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
+    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol):
         """ Get a printable representation of an instruction operand. """
         def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
             pc = instruction.pc
@@ -531,6 +531,7 @@ FmtTable = [
 ]
 
 SpecialRegisters = ("CCR", "SR")
+CustomOperandLabels = ("RL", "DISPLACEMENT")
 
 # r: index register type (0: Dn, 1: An)
 # R: register number
@@ -577,6 +578,22 @@ operand_type_table = [
     [ "Imm",        "#xxx",                 [ _b2n("111"),       _b2n("100"), ],    [ 0,        ],     "Immediate Data", ],
 ]
 
+def extend_operand_type_table():
+    dummy_operand_line = [ None ] * len(operand_type_table[0])
+
+    for label in SpecialRegisters:
+        l = dummy_operand_line[:]
+        l[EAMI_LABEL] = label
+        l[EAMI_DESCRIPTION] = "Special Register "+ label
+        operand_type_table.append(l)
+
+    for label in CustomOperandLabels:
+        l = dummy_operand_line[:]
+        l[EAMI_LABEL] = label
+        l[EAMI_DESCRIPTION] = "Special Operand Type "+ label
+        operand_type_table.append(l)
+
+extend_operand_type_table()
 
 # z=00: Force size to one byte, read as lower byte of following word.
 # xxx=+z: Read a value from the following words, with the size obtained from the 'z' size field.

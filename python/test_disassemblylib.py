@@ -17,7 +17,7 @@ class ArchmipsTestCase(BaseArchTestCase):
         self.arch = archmips.ArchMIPS()
         self.arch.set_operand_type_table(archmips.operand_type_table)
         self.arch.set_instruction_table(archmips.instruction_table)
-        
+
         self.test_data1 = "\x20\x01\x00\x0A"
         self.test_data1_entrypoint = 0x100
 
@@ -28,7 +28,7 @@ class ArchmipsTestCase(BaseArchTestCase):
         # Check that the match gives the expected PC address.
         match, data_idx = self.arch.function_disassemble_one_line(self.test_data1, 0, self.test_data1_entrypoint)
         self.assertEquals(match.pc, self.test_data1_entrypoint + self.arch.constant_pc_offset)
-        
+
         # Check that the match has the expected data words.
         bytes_per_instruction_word = int(self.arch.constant_word_size/8.0)
         data_word = struct.unpack(self.arch.variable_endian_type +"I", self.test_data1[0:bytes_per_instruction_word])[0]
@@ -38,12 +38,12 @@ class ArchmipsTestCase(BaseArchTestCase):
         self.assertEquals("ADDI", self.arch.function_get_instruction_string(match, match.vars))
         # Check that the right number of operands are present.
         self.assertEquals(len(match.opcodes), 3)
-       
+
         self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars)
         self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars)
         self.arch.function_get_operand_string(match, match.opcodes[2], match.opcodes[2].vars)
 
-        
+
 class Archm68kTestCase(BaseArchTestCase):
     def setUp(self):
         self.arch = archm68k.ArchM68k()
@@ -53,8 +53,21 @@ class Archm68kTestCase(BaseArchTestCase):
 
     def testInstructionParsing(self):
         self.arch.set_operand_type_table(archm68k.operand_type_table)
-        d = util.process_instruction_list(self.arch, archm68k.instruction_table)
-        # print d
+        util.process_instruction_list(self.arch, archm68k.instruction_table)
+
+    def testMoveq(self):
+        self.arch.set_operand_type_table(archm68k.operand_type_table)
+        self.arch.set_instruction_table(archm68k.instruction_table)
+
+        for op1value, binary_data in ((1, "\x70\x01"), (100, "\x70\x64"), (-100, "\x70\x9C"), (-1, "\x70\xFF")):
+            match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
+            self.assertEquals("MOVEQ", self.arch.function_get_instruction_string(match, match.vars))
+            self.assertEquals(len(match.opcodes), 2)
+            def lookup_symbol(address, absolute_info=None): return str(address)
+            value = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+            self.assertEquals(value, "#%d" % op1value)
+            register_name = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+            self.assertEquals(register_name, "D0")
 
 
 class binaryConversionTestCase(unittest.TestCase):
@@ -72,7 +85,7 @@ class binaryConversionTestCase(unittest.TestCase):
         self.assertTrue(util._n2b(255) == "11111111")
         self.assertTrue(util._n2b(254) == "11111110")
         self.assertTrue(util._n2b(256) == "100000000")
-        
+
     def testFromNumberPadded(self):
         """ Padded out to multiples of 4 bits (octets). """
         self.assertTrue(util._n2b(1, dynamic_padding=True) == "0001")
