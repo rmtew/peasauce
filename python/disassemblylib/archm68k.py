@@ -375,7 +375,7 @@ class ArchM68k(ArchInterface):
 
             T2_key = T2.specification.key
             if T2_key == "EA":
-                # Remove which EA operand it is.
+                # Resolve which specific EA operand is in use.
                 T2_key = self.dict_operand_index_to_label.get(T2.vars["mode"], None)
                 if T2_key is None:
                     logger.debug("_decode_operand$%X: failed to resolve EA key mode:%%%s register:%%%s operand: %d instruction: %s ea_mask: %X",
