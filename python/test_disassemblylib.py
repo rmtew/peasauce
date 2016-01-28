@@ -55,10 +55,11 @@ class Archm68kTestCase(BaseArchTestCase):
         self.arch.set_operand_type_table(archm68k.operand_type_table)
         util.process_instruction_list(self.arch, archm68k.instruction_table)
 
-    def testMoveq(self):
+    def testInstructions(self):
         self.arch.set_operand_type_table(archm68k.operand_type_table)
         self.arch.set_instruction_table(archm68k.instruction_table)
 
+        # moveq #<v>, d0
         for op1value, binary_data in ((1, "\x70\x01"), (100, "\x70\x64"), (-100, "\x70\x9C"), (-1, "\x70\xFF")):
             match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
             self.assertEquals("MOVEQ", self.arch.function_get_instruction_string(match, match.vars))
@@ -68,6 +69,26 @@ class Archm68kTestCase(BaseArchTestCase):
             self.assertEquals(value, "#%d" % op1value)
             register_name = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
             self.assertEquals(register_name, "D0")
+
+        # movem.w d0-d3/a1/a6,-(a7)
+        binary_data = "\x48\xA7\xF0\x42"
+        match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
+        self.assertEquals("MOVEM.W", self.arch.function_get_instruction_string(match, match.vars))
+        self.assertEquals(len(match.opcodes), 2)
+        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+        self.assertEquals(operand1, "D0-D3/A1/A6")
+        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+        self.assertEquals(operand2, "-(A7)")
+
+        # movem.w (a4)+, a0-a3/a5/d1-d4
+        binary_data = "\x4C\x9C\x2F\x1E"
+        match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
+        self.assertEquals("MOVEM.W", self.arch.function_get_instruction_string(match, match.vars))
+        self.assertEquals(len(match.opcodes), 2)
+        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+        self.assertEquals(operand1, "(A4)+")
+        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+        self.assertEquals(operand2, "D1-D4/A0-A3/A5")
 
 
 class binaryConversionTestCase(unittest.TestCase):

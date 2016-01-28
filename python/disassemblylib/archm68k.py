@@ -375,7 +375,8 @@ class ArchM68k(ArchInterface):
 
             T2_key = T2.specification.key
             if T2_key == "EA":
-                T2_key =  (T2.vars["mode"], T2.vars["register"], I.table_ea_masks[1-operand_idx])
+                # Remove which EA operand it is.
+                T2_key = self.dict_operand_index_to_label.get(T2.vars["mode"], None)
                 if T2_key is None:
                     logger.debug("_decode_operand$%X: failed to resolve EA key mode:%%%s register:%%%s operand: %d instruction: %s ea_mask: %X",
                         I.pc, _n2b(T2.vars["mode"]), _n2b(T2.vars["register"]), operand_idx, I.specification.key, I.table_ea_masks[1-operand_idx])
@@ -383,11 +384,6 @@ class ArchM68k(ArchInterface):
 
             if T2_key == "PreARi":
                 mask = 0x8000
-            elif I.table_mask in ("0100100010sssSSS", "0100100011sssSSS"): # MOVEM RL,EA:
-                if I.opcodes[1].vars["mode"] == 4: # -(An)
-                    mask = 0x8000
-                else:
-                    mask = 0x0001
             else:
                 mask = 0x0001
 
@@ -463,7 +459,7 @@ class ArchM68k(ArchInterface):
                 O.vars["z"] = z_value[3] # e.g. "B" from "I+.B"
             elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
                 # These operations serve no purpose with 0, so the range is shifted from 0-7 to 1-8 by remapping 0.
-               if O.vars["xxx"] == 0:
+                if O.vars["xxx"] == 0:
                     O.vars["xxx"] = 8
 
         if O.vars.get("xxx", None) == "I+.z":
