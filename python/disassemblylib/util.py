@@ -305,7 +305,6 @@ class ArchInterface(object):
     """ Constant: Method of filtered selection of multiple valid operand types. """
     constant_operand_type_general_label = None
 
-    constant_operand_var_constant_substitutions = None
     constant_table_condition_code_names = None
     constant_table_size_names = None
     constant_table_direction_names = None
@@ -453,9 +452,7 @@ class ArchInterface(object):
                 if char_string[0] == "I": # Pending read, propagate for resolution when decoding this opcode
                     var_value = char_string
                 else:
-                    var_value = self.constant_operand_var_constant_substitutions.get(char_string, None)
-                    if var_value is None:
-                        var_value = char_vars[char_string]
+                    var_value = char_vars[char_string]
                     if var_name == "cc":
                         var_value = self.constant_table_condition_code_names[var_value]
                     elif var_name == "z":
@@ -469,7 +466,7 @@ class ArchInterface(object):
         # Extend the base variable list for the instruction itself with any valid candidates from each applicable operand.
         for O in I.opcodes:
             for mask_var_name in O.specification.mask_char_vars.itervalues():
-                if mask_var_name not in var_names and mask_var_name not in self.constant_operand_var_constant_substitutions:
+                if mask_var_name not in var_names:
                     var_names.append(mask_var_name)
         # Extract the raw value for each variable from the instruction opcode.
         var_values = _get_var_values(var_names, I.data_words[0], I.table_mask)
@@ -586,7 +583,10 @@ def generate_all():
     Return the names of the objects in this file which are imported by the wildcard.
     This is done in this function, so as not to introduce entries into the global dictionary.
     """
-    l = [ "ArchInterface", "_b2n", "_n2b", "_make_specification", "_extract_masked_value", "_get_var_values", "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string" ]
+    l = [
+        "ArchInterface", "_b2n", "_n2b", "_make_specification", "_extract_masked_value", "_get_var_values",
+        "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string",
+    ]
     for k in globals().keys():
         if k.startswith("II_") or k.startswith("EAMI") or k.startswith("IFX_") or k.startswith("MAF_"):
             l.append(k)

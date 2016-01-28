@@ -14,7 +14,7 @@ This is not a valid addressing mode, so would cause F-Line.
 ----------------- INSTRUCTION SIZES -----------------
 
   "=I+.z"                       ADDI, ANDI, CMPI, EORI, ORI, SUBI reads one or two words depending on whether size is B, W or L.
-  "=00"                         ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
+  "=I+.B"                       ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
   "DISPLACEMENT:(xxx=v)"        BCC, BRA, BSR reads 0,1 or 2 extra words depending on its instruction word displacement value.
   "DISPLACEMENT:(xxx=I1.W)"     DBCC reads 1 extra word for 16-bit diplacement
   - unimplemented -             MOVEP reads 1 extra word for 16-bit diplacement
@@ -92,12 +92,6 @@ class ArchM68k(ArchInterface):
         "GT", # %1110
         "LE", # %1111
     ]
-
-    constant_operand_var_constant_substitutions = {
-        "00": 0,
-        "01": 1,
-        "10": 2,
-    }
 
     constant_table_size_names = [ "B", "W", "L" ]
     constant_table_direction_names = [ "R", "L" ]
@@ -453,29 +447,21 @@ class ArchM68k(ArchInterface):
         # Special case.
         if specific_key == "Imm":
             if operand_key == "EA": # The operand could be any of a range of EA depending on it's masked bits.
-                if "z" in O.vars:
-                    size_char = O.vars["z"]
-                elif "z" in I.vars:
-                    size_char = I.vars["z"]
-                elif instruction_key[-2] == "." and instruction_key[-1] in ("B", "W", "L"):
-                    size_char = instruction_key[-1]
-                else:
-                    # Presumably an F-line instruction.
-                    return None
+                size_char = O.vars.get("z", None)
+                if size_char is None:
+                    size_char = I.vars.get("z", None)
+                    if size_char is None and instruction_key[-2:] in (".B", ".W", ".L"):
+                        size_char = instruction_key[-1]
+                        if size_char is None:
+                            return None # Presumably an F-line instruction.
 
-                #try:
                 value, data_idx = self._get_data_by_size_char(data, data_idx, size_char)
-                #except Exception:
-                #    print I.specification.key, O.vars, "-- this should reach the core code and emit the dc.w instead for the instruction word"
-                #    raise
                 if value is None: # Disassembly failure.
                     logger.debug("Failed to fetch EA/Imm data")
                     return None
                 O.vars["xxx"] = value
-            elif operand_key == "Imm" and "z" in O.vars and "xxx" not in O.vars:
-                value, data_idx = self._get_data_by_size_char(data, data_idx, O.vars["z"])
-                O.vars["xxx"] = value
             elif instruction_key4 in ("LSd.", "ASd.", "ROd.", "ROXd", "ADDQ", "SUBQ"):
+                # These operations serve no purpose with 0, so the range is shifted from 0-7 to 1-8 by remapping 0.
                if O.vars["xxx"] == 0:
                     O.vars["xxx"] = 8
 
@@ -636,22 +622,22 @@ instruction_table = [
     [ "1100DDD0zzsssSSS", "AND.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",                        IF_000, "AND Logical (EA->DR)", ],
     [ "1100DDD1zzsssSSS", "AND.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                        IF_000, "AND Logical (DR->EA)", ],
     [ "00000010zzsssSSS", "ANDI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "AND Immediate", ],
-    [ "0000001000111100", "ANDI Imm:(z=00), CCR",      IF_000, "CCR AND Immediate", ],
+    [ "0000001000111100", "ANDI Imm:(z=I+.B), CCR",      IF_000, "CCR AND Immediate", ],
     [ "1110vvvazz000DDD", "ASd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source immediate)", ],
     [ "1110SSSazz100DDD", "ASd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",       IF_000, "Arithmetic Shift (register rotate, source register)", ],
     [ "1110000a11sssSSS", "ASd.W:(d=a) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Arithmetic Shift (memory rotate)", ],
     [ "0110ccccvvvvvvvv", "Bcc:(cc=c) DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch Conditionally", ],
     [ "0000DDD101sssSSS", "BCHG DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Change (register bit number)", ],
-    [ "0000100001sssSSS", "BCHG Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Change (static bit number)", ],
+    [ "0000100001sssSSS", "BCHG Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Change (static bit number)", ],
     [ "0000DDD110sssSSS", "BCLR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (register bit number)", ],
-    [ "0000100010sssSSS", "BCLR Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (static bit number)", ],
+    [ "0000100010sssSSS", "BCLR Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (static bit number)", ],
     [ "0100100001001vvv", "BKPT Imm:(xxx=v)",  IF_010|IF_020|IF_030|IF_040, "Breakpoint", ],
     [ "01100000vvvvvvvv", "BRA DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch Always", ],
     [ "0000DDD111sssSSS", "BSET DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (register bit number)", ],
-    [ "0000100011sssSSS", "BSET Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (static bit number)", ],
+    [ "0000100011sssSSS", "BSET Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (static bit number)", ],
     [ "01100001vvvvvvvv", "BSR DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch to Subroutine", ],
     [ "0000DDD100sssSSS", "BTST DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}",      IF_000, "Test a Bit (register bit number)", ],
-    [ "0000100000sssSSS", "BTST Imm:(z=00), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Test a Bit (static bit number)", ],
+    [ "0000100000sssSSS", "BTST Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",      IF_000, "Test a Bit (static bit number)", ],
     [ "0100DDD110sssSSS", "CHK.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Check Register Against Bounds", ],
     [ "0100DDD100sssSSS", "CHK.L EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",       IF_000, "Check Register Against Bounds", ],
     [ "01000010zzsssSSS", "CLR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Clear an Operand", ],
@@ -665,7 +651,7 @@ instruction_table = [
     [ "1000DDD011sssSSS", "DIVU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Divide", ],
     [ "1011DDDvvvsssSSS", "EOR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Exclusive-OR Logical", ],
     [ "00001010zzsssSSS", "EORI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Exclusive-OR Immediate", ],
-    [ "0000101000111100", "EORI Imm:(z=00), CCR",      IF_000, "Exclusive-OR Immediate to Condition Code", ],
+    [ "0000101000111100", "EORI Imm:(z=I+.B), CCR",      IF_000, "Exclusive-OR Immediate to Condition Code", ],
     [ "1100SSS101000DDD", "EXG DR:(Rn=S), DR:(Rn=D)",       IF_000, "Exchange Registers (data)", ],
     [ "1100SSS101001DDD", "EXG AR:(Rn=S), AR:(Rn=D)",       IF_000, "Exchange Registers (address)", ],
     [ "1100SSS110001DDD", "EXG DR:(Rn=S), AR:(Rn=D)",       IF_000, "Exchange Registers (address and data)", ],
@@ -713,8 +699,8 @@ instruction_table = [
     [ "1000DDD0zzsssSSS", "OR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",        IF_000, "Inclusive-OR Logical (EA->DR)", ],
     [ "1000DDD1zzsssSSS", "OR.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",        IF_000, "Inclusive-OR Logical (DR->EA)", ],
     [ "00000000zzsssSSS", "ORI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Inclusive-OR", ],
-    [ "0000000000111100", "ORI.B Imm:(z=00), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
-    [ "0000000001111100", "ORI.W Imm:(z=01), SR",       IF_000, "Inclusive-OR Immediate to Status Register", ],
+    [ "0000000000111100", "ORI.B Imm:(z=I+.B), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
+    [ "0000000001111100", "ORI.W Imm:(z=I+.W), SR",       IF_000, "Inclusive-OR Immediate to Status Register", ],
     [ "0100100001sssSSS", "PEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Push Effective Address", ],
     [ "0100111001110000", "RESET",     IF_000, "Reset External Devices", ],
     [ "1110vvvazz011DDD", "ROd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Rotate without Extend (register rotate, source immediate)", ],

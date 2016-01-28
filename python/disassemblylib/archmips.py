@@ -45,8 +45,6 @@ class ArchMIPS(ArchInterface):
         [ 2 * 32, 'PS' ], # Floating point
     ]
 
-    constant_operand_var_constant_substitutions = {}
-
     constant_table_condition_code_names = {
         _b2n("00000"): "F",
         _b2n("00001"): "UN",
