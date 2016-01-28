@@ -112,9 +112,9 @@ class ArchM68k(ArchInterface):
         def _extract_address(match, opcode_idx):
             opcode = match.opcodes[opcode_idx]
             if opcode.key == "PCid16":
-                return match.pc + self._signed_value("W", opcode.vars["D16"]), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key == "PCiId8":
-                return match.pc + self._signed_value("W", opcode.vars["D8"]), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
             elif opcode.specification.key == DISPLACEMENT_OKEY: # JMP
@@ -144,11 +144,11 @@ class ArchM68k(ArchInterface):
         # MAF_CERTAIN -> definitely should be mapped to labels.
         for i, opcode in enumerate(match.opcodes):
             if opcode.key == "PCid16":
-                address = match.pc + self._signed_value("W", opcode.vars["D16"])
+                address = match.pc + self._signed_value(opcode.vars["D16"], 16)
                 if address not in ret:
                     ret[address] = (i, MAF_CERTAIN)
             elif opcode.key == "PCiId8":
-                address = match.pc + self._signed_value("W", opcode.vars["D8"])
+                address = match.pc + self._signed_value(opcode.vars["D8"], 16)
                 if address not in ret:
                     ret[address] = (i, MAF_CERTAIN)
             elif opcode.key in ("AbsL", "AbsW"):
@@ -191,7 +191,7 @@ class ArchM68k(ArchInterface):
             reg_field = self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG]
             for k, v in vars.iteritems():
                 if k == "D16" or k == "D8":
-                    value = self._signed_value({ "D8": "B", "D16": "W", }[k], vars[k])
+                    value = self._signed_value(vars[k], { "D8": 8, "D16": 16, }[k])
                     """ [ "PCid16",     "(D16,PC)",             "111",          "010",               "D16=+W",      "Program Counter Indirect with Displacement Mode", ],
                         [ "PCiId8",     "(D8,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
                         [ "PCiIdb",     "(bd,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (Base Displacement) Mode", ],
@@ -321,10 +321,6 @@ class ArchM68k(ArchInterface):
     def _get_byte(self, data, data_idx):
         return self._get_value(data, data_idx, 8, False)
 
-    def _signed_value(self, size_char, value):
-        unpack_char, pack_char = { "B": ('b', 'B'), "W": ('h', 'H'), "L": ('i', 'I') }[size_char]
-        return struct.unpack(">"+ unpack_char, struct.pack(">"+ pack_char, value))[0]
-
     def _get_data_by_size_char(self, data, idx, char):
         if char == "B":
             word, idx = self._get_word(data, idx)
@@ -357,11 +353,11 @@ class ArchM68k(ArchInterface):
                 word_idx = int(text[1:size_idx])
                 if size_char == "B":
                     if data_words[word_idx] & ~0xFF: return # Sanity check.
-                    return data_words[word_idx] & 0xFF, size_char
+                    return data_words[word_idx] & 0xFF, 8
                 elif size_char == "W":
-                    return data_words[word_idx], size_char
+                    return data_words[word_idx], 16
                 elif size_char == "L":
-                    return (data_words[word_idx] << 16) + data_words[word_idx+1], size_char
+                    return (data_words[word_idx] << 16) + data_words[word_idx+1], 32
 
         def _resolve_specific_ea_key(mode_bits, register_bits, operand_ea_mask):
             for i, line in enumerate(self.table_operand_types):
@@ -412,19 +408,19 @@ class ArchM68k(ArchInterface):
         elif O.specification.key == DISPLACEMENT_OKEY:
             value = O.vars["xxx"]
             if type(value) is str:
-                value, size_char = _data_word_lookup(I.data_words, value)
+                value, bits = _data_word_lookup(I.data_words, value)
             else:
-                size_char = "B"
+                bits = 8
                 if value == 0:
-                    size_char = "W"
+                    bits = 16
                     value, data_idx = self._get_word(data, data_idx)
                 elif value == 0xFF:
-                    size_char = "L"
+                    bits = 32
                     value, data_idx = self._get_long(data, data_idx)
             if value is None: # Disassembly failure
                 logger.error("_decode_operand: Failed to obtain displacement offset")
                 return None
-            O.vars["xxx"] = self._signed_value(size_char, value)
+            O.vars["xxx"] = self._signed_value(value, bits)
             return data_idx
         elif O.specification.key in SpecialRegisters:
             return data_idx
@@ -604,9 +600,10 @@ def extend_operand_type_table():
 
 extend_operand_type_table()
 
-# z=00             Force size to one byte, read as lower byte of following word.
-# xxx=I+.z         Read a value from the following words, with the size obtained from the 'z' size field.
-# xxx=In.[WL]      Starting with the nth word after the instruction word, use the word or longword at that point.
+# z=I+.[BWL]                Force size to one byte, read as lower byte of following word.
+# xxx=I+.z                  Read a value from the following words, with the size obtained from the 'z' size field.
+# xxx=In.[WL]               Starting with the nth word after the instruction word, use the word or longword at that point.
+# <varname1>=+-<varname2>   Convert the value from unsigned to signed.
 
 instruction_table = [
     [ "1100DDD100000SSS", "ABCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
@@ -676,10 +673,10 @@ instruction_table = [
     [ "0100000011sssSSS", "MOVE.W SR, EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Move from the Status Register", ],
     [ "0100011011sssSSS", "MOVE.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, SR",      IF_000, "Move to the Status Register", ],
     ## 040 [ "1111011000100DDD", "MOVE16", IF_000, "Move 16-Byte Block (post increment)", ],
-    [ "1111011000000DDD", "MOVE16 ARiPost:(Dn=D), AbsL", IF_040, "Move 16-Byte Block (absolute)", ],
-    [ "1111011000001DDD", "MOVE16 AbsL, ARiPost:(Dn=D)", IF_040, "Move 16-Byte Block (absolute)", ],
-    [ "1111011000010DDD", "MOVE16 ARi:(Dn=D), AbsL", IF_040, "Move 16-Byte Block (absolute)", ],
-    [ "1111011000011DDD", "MOVE16 AbsL, ARi:(Dn=D)", IF_040, "Move 16-Byte Block (absolute)", ],
+    [ "1111011000000DDD", "MOVE16 ARiPost:(Dn=D), AbsL",          IF_040, "Move 16-Byte Block (absolute)", ],
+    [ "1111011000001DDD", "MOVE16 AbsL, ARiPost:(Dn=D)",          IF_040, "Move 16-Byte Block (absolute)", ],
+    [ "1111011000010DDD", "MOVE16 ARi:(Dn=D), AbsL",              IF_040, "Move 16-Byte Block (absolute)", ],
+    [ "1111011000011DDD", "MOVE16 AbsL, ARi:(Dn=D)",              IF_040, "Move 16-Byte Block (absolute)", ],
     [ "0100100010sssSSS", "MOVEM.W RL:(xxx=I1.W), EA:(mode=s&register=S){ARi|PreARi|ARid16|ARiId8|AbsW|AbsL}",     IF_000, "Move Multiple Registers", ],
     [ "0100100011sssSSS", "MOVEM.L RL:(xxx=I1.W), EA:(mode=s&register=S){ARi|PreARi|ARid16|ARiId8|AbsW|AbsL}",     IF_000, "Move Multiple Registers", ],
     [ "0100110010sssSSS", "MOVEM.W EA:(mode=s&register=S){ARi|ARiPost|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, RL:(xxx=I1.W)",     IF_000, "Move Multiple Registers", ],
@@ -688,7 +685,7 @@ instruction_table = [
     [ "0000DDD101001SSS", "MOVEP.L ARid16:(Rn=S), DR:(Rn=D)",     IF_000, "Move Peripheral Data (memory to register)", ],
     [ "0000DDD110001SSS", "MOVEP.W DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Peripheral Data (register to memory)", ],
     [ "0000DDD111001SSS", "MOVEP.L DR:(Rn=D), ARid16:(Rn=S)",     IF_000, "Move Peripheral Data (register to memory)", ],
-    [ "0111DDD0vvvvvvvv", "MOVEQ Imm:(xxx=v),DR:(Rn=D)",     IF_000, "Move Quick", ],
+    [ "0111DDD0vvvvvvvv", "MOVEQ Imm:(v=v&xxx=v.s8), DR:(Rn=D)",          IF_000, "Move Quick", ],
     [ "1100DDD111sssSSS", "MULS.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Signed Multiply", ],
     [ "1100DDD011sssSSS", "MULU.W EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",      IF_000, "Unsigned Multiply", ],
     [ "0100100000sssSSS", "NBCD EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Negate Decimal With Extend (register)", ],
@@ -699,8 +696,8 @@ instruction_table = [
     [ "1000DDD0zzsssSSS", "OR.z:(z=z) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",        IF_000, "Inclusive-OR Logical (EA->DR)", ],
     [ "1000DDD1zzsssSSS", "OR.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",        IF_000, "Inclusive-OR Logical (DR->EA)", ],
     [ "00000000zzsssSSS", "ORI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Inclusive-OR", ],
-    [ "0000000000111100", "ORI.B Imm:(z=I+.B), CCR",       IF_000, "Inclusive-OR Immediate to Condition Codes", ],
-    [ "0000000001111100", "ORI.W Imm:(z=I+.W), SR",       IF_000, "Inclusive-OR Immediate to Status Register", ],
+    [ "0000000000111100", "ORI.B Imm:(z=I+.B), CCR",              IF_000, "Inclusive-OR Immediate to Condition Codes", ],
+    [ "0000000001111100", "ORI.W Imm:(z=I+.W), SR",               IF_000, "Inclusive-OR Immediate to Status Register", ],
     [ "0100100001sssSSS", "PEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Push Effective Address", ],
     [ "0100111001110000", "RESET",     IF_000, "Reset External Devices", ],
     [ "1110vvvazz011DDD", "ROd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",       IF_000, "Rotate without Extend (register rotate, source immediate)", ],

@@ -376,6 +376,10 @@ class ArchInterface(object):
 
     # ...
 
+    def _signed_value(self, value, bits):
+        unpack_char, pack_char = { 8: ('b', 'B'), 16: ('h', 'H'), 32: ('i', 'I') }[bits]
+        return struct.unpack(self.variable_endian_type + unpack_char, struct.pack(self.variable_endian_type + pack_char, value))[0]
+
     def _get_word(self, data, data_idx):
         return self._get_value(data, data_idx, self.constant_word_size, False)
 
@@ -394,7 +398,7 @@ class ArchInterface(object):
         sfmt = self.variable_endian_type + d[k]
         size = struct.calcsize(sfmt)
         if data_idx + size <= len(data):
-            return struct.unpack(sfmt, data[data_idx:data_idx+size])[0], data_idx+size
+            return struct.unpack(sfmt, data[data_idx:data_idx+size])[0], data_idx + size
         return None, data_idx
 
     def _match_instructions(self, data, data_idx, data_abs_idx):
@@ -452,7 +456,18 @@ class ArchInterface(object):
                 if char_string[0] == "I": # Pending read, propagate for resolution when decoding this opcode
                     var_value = char_string
                 else:
-                    var_value = char_vars[char_string]
+                    sections = char_string.rsplit(".", 1)
+                    if len(sections) == 2:
+                        var_value = char_vars[sections[0]]
+                        var_type = sections[1][0]
+                        var_bits = int(sections[1][1:])
+                        if var_type == "s":
+                            var_value = self._signed_value(var_value, bits=var_bits)
+                        elif var_type != "u":
+                            raise RuntimeException("Bad variable type")
+                    else:
+                        var_value = char_vars[char_string]
+
                     if var_name == "cc":
                         var_value = self.constant_table_condition_code_names[var_value]
                     elif var_name == "z":
