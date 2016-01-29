@@ -49,6 +49,7 @@ IF_020 = 1<<2
 IF_030 = 1<<3
 IF_040 = 1<<4
 IF_060 = 1<<5
+IF_PROCESSOR_MASK = (IF_000 | IF_010 | IF_020 | IF_030 | IF_040 | IF_060)
 
 class ArchM68k(ArchInterface):
     constant_immediate_prefix = "#"
@@ -309,6 +310,27 @@ class ArchM68k(ArchInterface):
             new_entry[II_NAME] = new_name.replace(".z", "."+ text) + operands_string
             new_entries.append(new_entry)
         return new_entries
+
+    def parse_instruction_syntax(self, instruction_syntax):
+        bits = [ s.strip() for s in instruction_syntax.split(" ", 1) ]
+        if len(bits) > 1:
+            instruction_name, operand_syntax = bits
+            operand_syntaxes = [ s.strip() for s in operand_syntax.split(",") ]
+        else:
+            instruction_name = instruction_syntax
+            operand_syntaxes = []
+        return instruction_name, operand_syntaxes
+
+    def parse_operand_syntax(self, operand_syntax):
+        return operand_syntax.split(":", 1)
+
+    def get_bounds(self, s):
+        if s in ("Dn", "An"):
+            return ("n", (0, 7))
+        elif s in ("D8", ".B"):
+            return (s, (0, (1<<8)-1))
+        elif s in ("D16", ".W"):
+            return (s, (0, (1<<16)-1))
 
     def get_extra_words_for_size_char(self, size_char):
         # B (extracted from given word), W (extracted from given word), L (requires extra word)
