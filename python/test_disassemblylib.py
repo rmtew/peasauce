@@ -134,5 +134,8 @@ if __name__ == "__main__":
     else:
         ch = logging.NullHandler()
     logger.addHandler(ch)
-    unittest.main()
 
+    import testlib.tool_assembler_vasm
+    v = testlib.tool_assembler_vasm.Assembler()
+
+    unittest.main()
