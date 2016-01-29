@@ -2,6 +2,7 @@
 # decision to limit relative importing to "packages".
 
 import logging
+import os
 import struct
 import unittest
 
