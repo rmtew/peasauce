@@ -25,6 +25,7 @@ import struct
 import sys
 import logging
 
+from .. import constants
 
 logger = logging.getLogger("loader-human68k")
 
@@ -69,10 +70,20 @@ class XFile(object):
     _relocation_table_entries = None
     _symbol_table_entries = None
 
+EXPECTED_SUFFIX = "x"
 
 def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
+    result = constants.MatchResult()
+
+    if file_info.has_file_name_suffix(EXPECTED_SUFFIX):
+        result.confidence = constants.MATCH_POSSIBLE
+
     if load_x_file(file_info, data_types, input_file, f_offset, f_length):
-        return "Sharp X68000 executable"
+        result.platform_id = constants.PLATFORM_X68000
+        result.file_format_id = constants.FILE_FORMAT_X68000_X_EXECUTABLE
+        result.confidence = constants.MATCH_CERTAIN
+
+    return result
 
 def load_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
     return load_x_file(file_info, data_types, input_file, f_offset, f_length)
@@ -168,7 +179,7 @@ SIZEOF_SYMBOL_ENTRY = 1 + 1 + 4
 def _read_symbol_table(file_info, data_types, data, f):
     file_offset = SIZEOF_HEADER + data._text_segment_size + data._data_segment_size + data._relocation_table_size
     f.seek(file_offset, os.SEEK_SET)
-    
+
     entry_count = data._symbol_table_size
 
     l = []
@@ -191,10 +202,10 @@ def _read_symbol_table(file_info, data_types, data, f):
             if bytes_read & 1:
                 f.read(1)
                 bytes_read += 1
-            # logger.debug("_read_symbol_table %d %d %d \"%s\"", byte1, byte2, offset, name) 
+            # logger.debug("_read_symbol_table %d %d %d \"%s\"", byte1, byte2, offset, name)
     else:
         logger.debug("xfile.py: _read_symbol_table: no symbol table data to read")
-    
+
     data._symbol_table_entries = l
     return True
 

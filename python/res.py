@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger("res")
+
 # Resources
 
 ## Strings
@@ -21,3 +25,24 @@ class EnglishStrings(BaseResource):
 
 strings = EnglishStrings()
 
+import loaderlib
+
+PLATFORM_KEY = 1
+FILE_FORMAT_KEY = 2
+PROCESSOR_KEY = 3
+ENDIAN_KEY = 4
+
+def get_string_by_id(lookup_key, lookup_value):
+    lookup_result = None
+    if lookup_key == PLATFORM_KEY:
+        lookup_result = loaderlib.constants.platform_names.get(lookup_value, None)
+    elif lookup_key == FILE_FORMAT_KEY:
+        lookup_result = loaderlib.constants.file_format_names.get(lookup_value, None)
+    elif lookup_key == PROCESSOR_KEY:
+        lookup_result = loaderlib.constants.processor_names.get(lookup_value, None)
+    elif lookup_key == ENDIAN_KEY:
+        lookup_result = loaderlib.constants.endian_names.get(lookup_value, None)
+    if lookup_result is None:
+        logger.error("get_string_by_id: no match for %d/%d", lookup_key, lookup_value)
+        lookup_result = "-ERROR-"
+    return lookup_result

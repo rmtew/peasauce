@@ -18,6 +18,7 @@ import struct
 import sys
 import logging
 
+from .. import constants
 
 logger = logging.getLogger("loader-atarist")
 
@@ -58,10 +59,20 @@ class PRGFile(object):
     _symbol_table_entries = None
     _fixup_offsets = None
 
+EXPECTED_SUFFIX = "prg"
 
 def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
+    result = constants.MatchResult()
+
+    if file_info.has_file_name_suffix(EXPECTED_SUFFIX):
+        result.confidence = constants.MATCH_POSSIBLE
+
     if load_prg_file(file_info, data_types, input_file, f_offset, f_length):
-        return "Atari GEMDOS executable"
+        result.platform_id = constants.PLATFORM_ATARIST
+        result.file_format_id = constants.FILE_FORMAT_ATARIST_GEMDOS_EXECUTABLE
+        result.confidence = constants.MATCH_CERTAIN
+
+    return result
 
 def load_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
     return load_prg_file(file_info, data_types, input_file, f_offset, f_length)

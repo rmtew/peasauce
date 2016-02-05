@@ -129,7 +129,7 @@ class ClientAPI(object):
 
     def event_symbol_added(self, active_client, symbol_address, symbol_label):
         raise NotImplementedError
-        
+
     def event_symbol_removed(self, active_client, symbol_address, symbol_label):
         raise NotImplementedError
 
@@ -513,7 +513,7 @@ class EditorState(object):
             result = self._prolonged_action(acting_client, "TITLE_LOADING_PROJECT", "TEXT_GENERIC_LOADING", disassembly.load_project_file, load_file, file_name)
         else:
             new_options = disassembly.get_new_project_options(self.disassembly_data)
-            identify_result = loaderlib.identify_file(load_file)
+            identify_result = loaderlib.identify_file(load_file, file_name)
             # Parameters passed in, to help the client make up it's mind.
             if identify_result is not None:
                 new_options.is_binary_file = False
@@ -525,7 +525,7 @@ class EditorState(object):
                 new_options.is_binary_file = True
                 new_options.loader_load_address = 0
                 new_options.loader_entrypoint_offset = 0
-                new_options.loader_filetype = ""
+                new_options.loader_filetype = loaderlib.constants.FILE_FORMAT_UNKNOWN
                 new_options.loader_processor = ""
             # Prompt for new project option values.
             new_option_result = acting_client.request_new_project_option_values(new_options)
@@ -666,7 +666,7 @@ class WorkerThread(threading.Thread):
         completed_event = threading.Event()
         completed_event.result = None
         self.work_data.append((_callable, _args, _kwargs, completed_event))
- 
+
         if not self.is_alive():
             self.start()
         else:

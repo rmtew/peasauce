@@ -8,10 +8,13 @@ import os
 import logging
 import struct
 
-import amiga
-import atarist
-import binary
-import human68k
+from . import amiga
+from . import atarist
+from . import binary
+from . import human68k
+from . import snes
+from . import zxspectrum
+from . import constants
 
 
 logger = logging.getLogger("loader")
@@ -21,7 +24,7 @@ systems_by_name = {}
 
 def _generate_module_data():
     global systems_by_name
-    for module in (amiga, atarist, human68k, binary):
+    for module in (amiga, atarist, human68k, binary, snes, zxspectrum):
         system_name = module.__name__
         system = systems_by_name[system_name] = module.System()
         system.system_name = system_name
@@ -32,28 +35,34 @@ def get_system(system_name):
 
 def get_system_data_types(system_name):
     system = systems_by_name[system_name]
-    return DataTypes(system.big_endian)
- 
-def load_file(input_file, loader_options=None, file_offset=0, file_length=None):
+    return DataTypes(system.endian_id)
+
+def load_file(input_file, file_name, loader_options=None, file_offset=0, file_length=None):
     for system_name, system in systems_by_name.iteritems():
-        file_info = FileInfo(system, loader_options)
+        file_info = FileInfo(system, file_name, loader_options)
         data_types = get_system_data_types(system_name)
         if system.load_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length):
             return file_info, data_types
 
-def identify_file(input_file, file_offset=0, file_length=None):
+def identify_file(input_file, file_name, file_offset=0, file_length=None):
+    matches = []
     for system_name, system in systems_by_name.iteritems():
-        file_info = FileInfo(system)
+        file_info = FileInfo(system, file_name)
         data_types = get_system_data_types(system_name)
-        filetype_name = system.identify_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length)
-        if filetype_name is not None:
+        system_matches = system.identify_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length)
+        matches.extend(((file_info, match) for match in system_matches))
+
+    if len(matches):
+        # For now take the match we are most confident in.
+        matches.sort(lambda n0, n1: cmp(n1[1].confidence, n0[1].confidence))
+        file_info, match = matches[0]
+
+        if match.file_format_id != constants.FILE_FORMAT_UNKNOWN and match.confidence != constants.MATCH_NONE:
             result = {}
-            result["processor"] = system.get_arch_name()
-            result["filetype"] = filetype_name
-            if system.big_endian:
-                result["endian"] = "big"
-            else:
-                result["endian"] = "little"
+            result["processor"] = system.get_processor_id()
+            result["platform"] = match.platform_id
+            result["filetype"] = match.file_format_id
+            result["endian"] = system.endian_id
             return file_info, result
 
 
@@ -152,9 +161,9 @@ def get_entrypoint_address(file_info):
 
 
 class DataTypes(object):
-    def __init__(self, big_endian):
-        self.big_endian = big_endian
-        self._endian_char = [ "<", ">" ][big_endian]
+    def __init__(self, endian_id):
+        self.endian_id = endian_id
+        self._endian_char = [ "<", ">" ][endian_id == constants.ENDIAN_BIG]
 
     ## Data access related operations.
 
@@ -166,7 +175,7 @@ class DataTypes(object):
     def uint16_value(self, bytes, idx=None):
         if idx:
             bytes = bytes[idx:idx+2]
-        if self.big_endian:
+        if self.endian_id == constants.ENDIAN_BIG:
             return (bytes[0] << 8) + bytes[1]
         else:
             return (bytes[1] << 8) + bytes[0]
@@ -174,13 +183,13 @@ class DataTypes(object):
     def uint32_value(self, bytes, idx=None):
         if idx:
             bytes = bytes[idx:idx+4]
-        if self.big_endian:
+        if self.endian_id == constants.ENDIAN_BIG:
             return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]
         else:
             return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]
 
     def uint32_bytes(self, v):
-        if self.big_endian:
+        if self.endian_id == constants.ENDIAN_BIG:
             return [ (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF ]
         else:
             return [ v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF ]
@@ -212,11 +221,10 @@ class FileInfo(object):
     internal_data = None
     savefile_data = None
 
-    def __init__(self, system, loader_options=None):
+    def __init__(self, system, file_name, loader_options=None):
         self.system = system
+        self.file_name = file_name
         self.loader_options = loader_options
-
-        # self.file_path = file_path # TODO: reconcile
 
         self.segments = []
         self.relocations_by_segment_id = []
@@ -236,6 +244,9 @@ class FileInfo(object):
             self.entrypoint_offset = 0
 
     ## Query..
+
+    def has_file_name_suffix(self, suffix):
+        return self.file_name.lower().endswith("."+ suffix.lower())
 
     ## Segment registration related operations
 
@@ -294,7 +305,7 @@ class FileInfo(object):
 
 class BinaryFileOptions(object):
     is_binary_file = True
-    dis_name = None
+    processor_id = None
     load_address = None
     entrypoint_segment_id = 0
     entrypoint_offset = None

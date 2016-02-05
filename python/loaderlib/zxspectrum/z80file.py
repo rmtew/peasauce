@@ -4,23 +4,6 @@
     Licensed using the MIT license.
 """
 
-"""
-SNES rom files (.smc suffix).
-
-This is incomplete and should not be used.
-It has not been tested at all.
-It is not implemented enough to map a rom to memory and present required data to the disassembler.
-At this time the architecture/processor disassembler has also not been implemented.
-
-Reference: https://en.wikibooks.org/wiki/Super_NES_Programming/SNES_memory_map
-
-TASKS:
-1. Load in rom data to different memory blocks, according to rom type (lo, hi, exlo, exhi, super).
-2. Implement support in ui/disassembler for separate address blocks (if not already there).
-3. Implement support for 65c816 architecture.
-
-"""
-
 import cPickle
 import os
 import struct
@@ -29,13 +12,18 @@ import logging
 
 from .. import constants
 
-logger = logging.getLogger("loader-snes")
+logger = logging.getLogger("loader-zxspectrum-z80")
+
+OFFSET_V1_PROGRAM_COUNTER = 6
+OFFSET_V23_HEADER_LENGTH = 30
+
+LENGTH_V1_HEADER = 30
+LENGTH_V2_HEADER = 23
+LENGTH_V3_HEADER_A = 54
+LENGTH_V3_HEADER_B = 55
 
 class File(object):
-    EXPECTED_SUFFIX = "smc"
-
-    # header field values.
-    _header_page_count_8kb = None
+    EXPECTED_SUFFIX = "z80"
 
 
 def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
@@ -44,22 +32,31 @@ def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=
     if file_info.has_file_name_suffix(File.EXPECTED_SUFFIX):
         result.confidence = constants.MATCH_POSSIBLE
 
-    if load_smc_file(file_info, data_types, input_file, f_offset, f_length):
-        result.platform_id = PLATFORM_SNES
-        result.file_format_id = constants.FILE_FORMAT_X68000_X_EXECUTABLE
-        result.confidence = constants.MATCH_CERTAIN
+    # Check expected values
+    input_file.seek(f_offset + OFFSET_V1_PROGRAM_COUNTER)
+    header1_pc = data_types.uint16(input_file.read(2))
+    if header1_pc == 0:
+        input_file.seek(f_offset + OFFSET_V23_HEADER_LENGTH)
+        header2_length = data_types.uint16(input_file.read(2))
+        if header2_length == LENGTH_V2_HEADER:
+            result.file_format_id = constants.FILE_FORMAT_ZXSPECTRUM_Z80_2
+        elif header2_length in (LENGTH_V3_HEADER_A, LENGTH_V3_HEADER_B):
+            result.file_format_id = constants.FILE_FORMAT_ZXSPECTRUM_Z80_3
+
+        if result.file_format_id != constants.FILE_FORMAT_UNKNOWN:
+            result.confidence = MATCH_PROBABLE
+    else:
+        result.file_format_id = constants.FILE_FORMAT_ZXSPECTRUM_Z80_1
+
+    if result.file_format_id != constants.FILE_FORMAT_UNKNOWN:
+        result.platform_id = constants.PLATFORM_ZXSPECTRUM
 
     return result
 
 def load_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
-    return load_smc_file(file_info, data_types, input_file, f_offset, f_length)
+    return load_z80_file(file_info, data_types, input_file, f_offset, f_length)
 
-def load_smc_file(file_info, data_types, f, f_offset=0, f_length=None):
-    """
-    SMC format roms understood at the time of writing to be:
-        512 bytes of SMC header
-        The remaining file is the ROM.
-    """
+def load_z80_file(file_info, data_types, f, f_offset=0, f_length=None):
     f.seek(f_offset, os.SEEK_SET)
 
     # Offset    Bytes   ...

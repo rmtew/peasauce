@@ -54,10 +54,11 @@ import logging
 import struct
 import sys
 
+from .. import constants
 from .doshunks import *
 
 
-logger = logging.getLogger("loader-amiga")
+logger = logging.getLogger("loader-amiga-hunkfile")
 
 
 MEMF_ADVISORY = 1<<29
@@ -82,8 +83,14 @@ class HunkFile(object):
 
 
 def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
+    result = constants.MatchResult()
+
     if load_hunk_file(file_info, data_types, input_file, f_offset, f_length):
-        return "Amiga hunk-based executable"
+        result.platform_id = constants.PLATFORM_AMIGA
+        result.file_format_id = constants.FILE_FORMAT_AMIGA_HUNK_EXECUTABLE
+        result.confidence = constants.MATCH_CERTAIN
+
+    return result
 
 def load_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):
     return load_hunk_file(file_info, data_types, input_file, f_offset, f_length)
@@ -378,7 +385,7 @@ class HunkFile(object):
                             if f.tell() & 2:
                                 f.seek(2, os.SEEK_CUR)
                     elif debug_id == "HEAD":
-                        debug_id2 = f.read(8)              # 3                
+                        debug_id2 = f.read(8)              # 3
                         data = f.read((num_longwords - 4) * 4)
                         if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
                             print "  HUNK_DEBUG id=\"%s\" id2=\"%s\" base_offset=%d" % (debug_id, debug_id2, debug_base)
@@ -395,7 +402,7 @@ class HunkFile(object):
                             line_number = structures.read_uint32(f)
                             file_offset = structures.read_uint32(f)
                             loop_longwords -= 2
-                            
+
                         if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
                             print "  HUNK_DEBUG id=\"%s\" base_offset=%d num_line_offsets=%d" % (debug_id, debug_base, num_line_offsets)
                     elif debug_id == "OPTS":
@@ -444,5 +451,5 @@ class HunkFile(object):
                     #    pass
                     else: # , EXT_RELREF32, EXT_RELREF26
                         raise RuntimeError("Unknown symbol_type", hex(symbol_type))
-                        
+
                     name_length = structures.read_uint32(f)

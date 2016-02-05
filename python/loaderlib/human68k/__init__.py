@@ -4,17 +4,23 @@
     Licensed using the MIT license.
 """
 
+from .. import constants
 from . import xfile
 
 
 class System(object):
-    big_endian = True
+    endian_id = constants.ENDIAN_BIG
 
-    def get_arch_name(self):
-        return "m68k"
+    def get_processor_id(self):
+        return constants.PROCESSOR_M680x0
 
     def identify_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
-        return xfile.identify_input_file(input_file, file_info, data_types, f_offset, f_length)
+        matches = []
+        for handler in (xfile,):
+            match = handler.identify_input_file(input_file, file_info, data_types, f_offset, f_length)
+            if match.platform_id != constants.PLATFORM_UNKNOWN:
+                matches.append(match)
+        return matches
 
     def load_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
         return xfile.load_input_file(input_file, file_info, data_types, f_offset, f_length)

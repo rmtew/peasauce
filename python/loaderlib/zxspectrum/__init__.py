@@ -5,34 +5,34 @@
 """
 
 from .. import constants
-from . import romfile
+from . import z80file
 
 
 class System(object):
     endian_id = constants.ENDIAN_LITTLE
 
     def get_processor_id(self):
-        return constants.PROCESSOR_65c816
+        return constants.PROCESSOR_Z80
 
     def identify_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
         matches = []
-        for handler in (romfile,):
+        for handler in (z80file,):
             match = handler.identify_input_file(input_file, file_info, data_types, f_offset, f_length)
             if match.platform_id != constants.PLATFORM_UNKNOWN:
                 matches.append(match)
         return matches
 
     def load_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
-        return romfile.load_input_file(input_file, file_info, data_types, f_offset, f_length)
+        return z80file.load_input_file(input_file, file_info, data_types, f_offset, f_length)
 
     def load_project_data(self, f):
-        return romfile.load_project_data(f)
+        return z80file.load_project_data(f)
 
     def save_project_data(self, f, data):
-        romfile.save_project_data(f, data)
+        z80file.save_project_data(f, data)
 
     def print_summary(self, file_info):
-        romfile.print_summary(file_info)
+        z80file.print_summary(file_info)
 
     def has_segment_headers(self):
         return False

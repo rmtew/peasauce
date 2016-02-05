@@ -6,23 +6,24 @@
 
 import os
 
+from .. import constants
 
 class System(object):
-    big_endian = True
-    
-    arch_name = None
+    endian_id = constants.ENDIAN_BIG
 
-    def get_arch_name(self):
-        return self.arch_name
+    processor_id = None
 
-    def set_arch_name(self, arch_name):
-        self.arch_name = arch_name
+    def get_processor_id(self):
+        return self.processor_id
+
+    def set_processor_id(self, processor_id):
+        self.processor_id = processor_id
 
     def load_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
         if file_info.loader_options is None or not file_info.loader_options.is_binary_file:
             return False
-        self.set_arch_name(file_info.loader_options.dis_name)
-        
+        self.set_processor_id(file_info.loader_options.processor_id)
+
         if f_length is None:
             file_offset2 = input_file.tell()
             input_file.seek(0, os.SEEK_END)
@@ -37,7 +38,7 @@ class System(object):
 
     def identify_input_file(self, input_file, file_info, data_types, f_offset=0, f_length=None):
         """ User selected files should not be identified as binary. """
-        return None
+        return []
 
     def load_project_data(self, f):
         return None

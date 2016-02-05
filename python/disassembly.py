@@ -384,7 +384,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
     block_line_count0 = get_block_line_number(program_data, block_idx)
     block_line_countN = block_line_count0 + get_block_line_count_cached(program_data, block)
     segments = program_data.loader_segments
-    
+
     # If the line is at the start of the first segment, check if it is a segment header.
     leading_line_count = 0
     if block.segment_offset == 0 and loaderlib.has_segment_headers(program_data.loader_system_name):
@@ -676,7 +676,7 @@ def get_referring_addresses(program_data, address):
     if other_addresses is not None:
         referring_addresses.update(other_addresses)
     return referring_addresses
-    
+
 def get_entrypoint_address(program_data):
     return loaderlib.get_segment_address(program_data.loader_segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
 
@@ -688,7 +688,7 @@ def get_address_for_symbol(program_data, symbol_name):
 
 def set_symbol_insert_func(program_data, f):
     program_data.symbol_insert_func = f
-    
+
 def set_symbol_delete_func(program_data, f):
     program_data.symbol_delete_func = f
 
@@ -755,7 +755,7 @@ def get_block_line_count_cached(program_data, block):
     if block.line_count == 0:
         block.line_count = get_block_line_count(program_data, block)
     return block.line_count
-    
+
 def lookup_block_by_line_count(program_data, lookup_key):
     _recalculate_line_count_index(program_data)
     lookup_index = bisect.bisect_right(program_data.block_line0s, lookup_key)
@@ -842,7 +842,7 @@ def split_block(program_data, address, own_midinstruction=False):
             logger.debug("Splitting code block at odd address: %06X", address)
 
     # References: divide between blocks at the given address.
-    if block.references is not None:
+    if block.references is not None and len(block.references):
         for i, entry in enumerate(block.references):
             if entry[0] >= address:
                 break
@@ -869,12 +869,12 @@ def split_block(program_data, address, own_midinstruction=False):
     elif block_data_type == disassembly_data.DATA_TYPE_ASCII:
         _process_block_as_ascii(program_data, block)
         _process_block_as_ascii(program_data, new_block)
-        
+
     insert_block(program_data, block_idx + 1, new_block)
     clear_block_line_count(program_data, block, block_idx)
     #if 0x5f266 <= new_block.address <= 0x5f288:
     #    print "SPLIT BLOCK %d" % disassembly_data.get_block_data_type(block), hex(block.address), "->", hex(block.address + block.length), "LC", get_block_line_count_cached(program_data, block),",", hex(new_block.address), "->", hex(new_block.address + new_block.length), "LC", get_block_line_count_cached(program_data, new_block)
-    
+
     on_block_created(program_data, new_block)
 
     return new_block, block_idx + 1
@@ -1047,7 +1047,7 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
             event_blocks[t[0].address] = t
         program_data.new_block_events = None
         program_data.block_data_type_events = None
-    
+
     # The type of the block has been changed.  If the new type was code, then that may have cascaded changing the
     # type of other existing blocks, as well as splitting off parts of the original selected block.
     #
@@ -1055,7 +1055,7 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
     # New blocks should already have up-to-date references.
     #
     # In both cases, events need to be broadcast as otherwise the only place events are broadcast is on file load.
-    
+
     is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
     for k, (affected_block, data_type_old, data_type_new, length_old) in event_blocks.iteritems():
         do_broadcast = False
@@ -1150,7 +1150,7 @@ def get_auto_label(program_data, address, data_type):
     if address in program_data.loader_relocated_addresses:
         label += "r"
     return label
-        
+
 def _get_auto_label_for_block(program_data, block=None, address=None, data_type=None):
     if data_type is None:
         data_type = disassembly_data.get_block_data_type(block)
@@ -1228,7 +1228,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             split_addresses = []
             last_match_end_address = address + bytes_consumed
             longword_flags = disassembly_data.get_data_type_block_flags(disassembly_data.DATA_TYPE_LONGWORD)
-            # Reasons we are here:                
+            # Reasons we are here:
             if found_terminating_instruction:
                 # 1. We reached a terminating instruction before the end of the block (found_terminating_instruction is True).
                 #    ACTION: Split and mark trailing as of unprocessed longword type.
@@ -1349,7 +1349,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                         label = program_data.dis_get_default_symbol_name_func(address, "bounds")
                         insert_symbol(program_data, address, label)
                     elif result[1] == ERR_SPLIT_MIDINSTRUCTION:
-                        label = program_data.dis_get_default_symbol_name_func(address, "midinstruction") 
+                        label = program_data.dis_get_default_symbol_name_func(address, "midinstruction")
                         insert_symbol(program_data, address, label)
                     else:
                         logger.error("_process_address_as_code/labeling: At $%06X unexpected splitting error #%d", address, result[1])
@@ -1404,20 +1404,20 @@ def load_project_file(save_file, file_name, work_state=None):
     return program_data, get_file_line_count(program_data)
 
 def load_project_file_finalise(program_data):
-    onload_cache_uncertain_references(program_data)    
+    onload_cache_uncertain_references(program_data)
 
 def load_file(input_file, new_options, file_name, work_state=None):
     loader_options = None
     if new_options.is_binary_file:
         loader_options = loaderlib.BinaryFileOptions()
-        loader_options.dis_name = new_options.dis_name
+        loader_options.processor_id = new_options.processor_id
         loader_options.load_address = new_options.loader_load_address
         loader_options.entrypoint_offset = new_options.loader_entrypoint_offset
 
     if work_state is not None and work_state.check_exit_update(0.1, "TEXT_LOAD_ANALYSING_FILE"):
         return None
 
-    result = loaderlib.load_file(input_file, loader_options)
+    result = loaderlib.load_file(input_file, file_name, loader_options)
     if result is None:
         return None, 0
 
@@ -1441,7 +1441,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
     input_file.seek(0, os.SEEK_END)
     program_data.file_size = input_file.tell()
     program_data.file_checksum = util.calculate_file_checksum(input_file)
-    program_data.dis_name = file_info.system.get_arch_name()
+    program_data.processor_id = file_info.system.get_processor_id()
 
     segments = program_data.loader_segments = file_info.segments
 
@@ -1481,7 +1481,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
         program_data.block_addresses.append(block.address)
         program_data.block_line0s.append(None)
         program_data.blocks.append(block)
-        
+
         on_block_created(program_data, block)
 
         if segment_length > data_length:
@@ -1495,7 +1495,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
             program_data.block_addresses.append(block.address)
             program_data.block_line0s.append(None)
             program_data.blocks.append(block)
-            
+
             on_block_created(program_data, block)
 
     # Pass 2: Stuff.
@@ -1536,7 +1536,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
 
 def onload_set_disassemblylib_functions(program_data):
-    arch = disassemblylib.get_arch(program_data.dis_name)
+    arch = disassemblylib.get_processor(program_data.processor_id)
     program_data.dis_is_final_instruction_func = arch.function_is_final_instruction
     program_data.dis_get_match_addresses_func = arch.function_get_match_addresses
     program_data.dis_get_instruction_string_func = arch.function_get_instruction_string
@@ -1586,11 +1586,11 @@ def is_segment_data_cached(program_data):
         if loaderlib.get_segment_data(segments, i) is not None:
             return True
     return False
-    
+
 def on_block_created(program_data, block):
     if program_data.new_block_events is not None:
         program_data.new_block_events.append(block)
-        
+
 def on_block_data_type_change(program_data, block, old_data_type, new_data_type, old_length):
     if program_data.block_data_type_events is not None:
         program_data.block_data_type_events.append((block, old_data_type, new_data_type, old_length))

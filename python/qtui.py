@@ -177,16 +177,16 @@ class CustomItemModel(BaseItemModel):
 
     def _lookup_cell_value(self, row, column):
         return self._row_data[row][column]
-        
+
     def _get_sort_column1(self):
         return self._sort_column1
-        
+
     def _get_sort_column2(self):
         return self._sort_column2
 
     def rowCount(self, parent=None):
         return len(self._row_data)
-        
+
     def _sort_list(self, l):
         ix1 = self._sort_column1
         ix2 = self._sort_column2
@@ -467,7 +467,7 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def event_symbol_added(self, active_client, symbol_address, symbol_label):
         self.symbol_added_signal.emit((symbol_address, symbol_label))
-        
+
     def event_symbol_removed(self, active_client, symbol_address, symbol_label):
         self.symbol_removed_signal.emit((symbol_address, symbol_label))
 
@@ -497,9 +497,9 @@ class MainWindow(QtGui.QMainWindow):
 
         self.editor_state = editor_state.EditorState()
         self.editor_state.register_client(self.editor_client)
-        
+
         self.toolapiob = toolapi.ToolAPI(self.editor_state)
-        
+
         self.tracked_models = []
 
         ## GENERATE THE UI
@@ -569,7 +569,7 @@ class MainWindow(QtGui.QMainWindow):
         The goal of this method is to notify the editor state when the user changes the selected line number.
         At this time, it assumes single row selection, as that is what our code above configures.
         """
-        selected_indexes = result[0].indexes()        
+        selected_indexes = result[0].indexes()
         if len(selected_indexes) == 1:
             index = selected_indexes[0]
             self.editor_state.set_line_number(self.editor_client, index.row())
@@ -632,7 +632,7 @@ class MainWindow(QtGui.QMainWindow):
         # The "Uncertain Data References" list is currently hidden by default.
         dock = QtGui.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
-        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ]) 
+        self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.tracked_models.append(self.uncertain_data_references_model)
         self.uncertain_data_references_table = create_table_widget(dock, self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
@@ -664,7 +664,7 @@ class MainWindow(QtGui.QMainWindow):
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-segments") # State/geometry persistence requirement.
-        
+
         dock = QtGui.QDockWidget("Orphaned Blocks", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         model = create_table_model(self, [ ("Address", hex), ("Length", int), ("Source Code", str), ])
@@ -1148,7 +1148,7 @@ class MainWindow(QtGui.QMainWindow):
 
         self._progress_dialog = None
         self._progress_dialog_steps = 0
-        
+
     def _get_rows_from_indices(self, indices):
         # Whether the selection model is per-row (rather than per-cell) or not, we get all
         # selected cells.  So use a set generator expression to get a unique set of rows.
@@ -1286,7 +1286,7 @@ class LoadProjectDialog(QtGui.QDialog):
         # The algorithm used to enable the load button is:
         # - Wait 2 seconds after the last text change, or when return pressed.
         # - Check if given path is a file of the correct size.
-        # - 
+        # -
 
         self.validation_attempt = 0
         self.validation_attempt_text = None
@@ -1318,13 +1318,13 @@ class LoadProjectDialog(QtGui.QDialog):
             if self.validation_attempt_text != new_text:
                 _reset_widgets()
                 self.validation_attempt_text = new_text
-                self.validation_attempt += 1 
+                self.validation_attempt += 1
                 QtCore.QTimer.singleShot(2000, lambda n=self.validation_attempt: validate_file_path(n, new_text))
         def on_path_lineedit_returnPressed():
             if self.validation_attempt_text != path_lineedit.text():
                 _reset_widgets()
                 self.validation_attempt_text = path_lineedit.text()
-                self.validation_attempt += 1 
+                self.validation_attempt += 1
                 validate_file_path(self.validation_attempt, path_lineedit.text())
 
         path_lineedit.textChanged.connect(on_path_lineedit_textChanged)
@@ -1423,17 +1423,20 @@ class NewProjectDialog(QtGui.QDialog):
         file_hline.setMidLineWidth(1)
 
         file_type_key_label = QtGui.QLabel("Type:")
-        file_type_value_label = QtGui.QLabel(new_options.loader_filetype)
+        s = res.get_string_by_id(res.FILE_FORMAT_KEY, new_options.loader_filetype)
+        file_type_value_label = QtGui.QLabel(s)
         file_arch_key_label = QtGui.QLabel("Architecture:")
         self.file_arch_value_combobox = file_arch_value_combobox = QtGui.QComboBox(self)
         if new_options.is_binary_file:
             # List all supported processor options, for user to choose.
-            for arch_name in disassemblylib.get_arch_names():
-                file_arch_value_combobox.addItem(arch_name)
+            for processor_id in disassemblylib.get_processor_ids():
+                s = res.get_string_by_id(res.PROCESSOR_KEY, processor_id)
+                file_arch_value_combobox.addItem(s, processor_id)
             file_arch_value_combobox.setEnabled(True)
         else:
             # Fixed processor defined by the file format.
-            file_arch_value_combobox.addItem(new_options.loader_processor)
+            s = res.get_string_by_id(res.PROCESSOR_KEY, new_options.loader_processor)
+            file_arch_value_combobox.addItem(s, new_options.loader_processor)
             file_arch_value_combobox.setEnabled(False)
 
         information_groupbox = QtGui.QGroupBox("File Information")
@@ -1498,7 +1501,8 @@ class NewProjectDialog(QtGui.QDialog):
 
     def accept(self):
         if self.new_options.is_binary_file:
-            self.new_options.dis_name = self.file_arch_value_combobox.currentText()
+            idx = self.file_arch_value_combobox.currentIndex()
+            self.new_options.processor_id = self.file_arch_value_combobox.itemData(idx)
             self.new_options.loader_load_address = util.str_to_int(self.processing_loadaddress_value_textedit.text())
             self.new_options.loader_entrypoint_offset = util.str_to_int(self.processing_entryaddress_value_textedit.text()) - self.new_options.loader_load_address
         return super(NewProjectDialog, self).accept()
@@ -1647,7 +1651,7 @@ def run():
         """
         file_name = None
         input_file_name = None
-        arch_name = None
+        processor_id = None
         load_address = None
         entrypoint_address = None
         error_text = None
@@ -1655,8 +1659,9 @@ def run():
             if len(sys.argv) > 1:
                 file_name = sys.argv[1]
                 if len(sys.argv) == 5:
-                    arch_name = sys.argv[2]
-                    if arch_name.lower() not in disassemblylib.get_arch_names():
+                    processor_name = sys.argv[2]
+                    processor_id = loaderlib.constants.lookup_processor_id_by_name(processor_name)
+                    if processor_id not in disassemblylib.get_processor_ids():
                         error_text = "arch: not recognised"
                     else:
                         try:
@@ -1673,8 +1678,8 @@ def run():
                     else:
                         input_file_name = sys.argv[2]
             if error_text is None and file_name is not None:
-                if arch_name:
-                    error_text = window.toolapiob.load_binary_file(file_name, arch_name, load_address, entrypoint_address-load_address, input_file_name)
+                if processor_id is not None:
+                    error_text = window.toolapiob.load_binary_file(file_name, processor_id, load_address, entrypoint_address-load_address, input_file_name)
                 else:
                     error_text = window.toolapiob.load_file(file_name, input_file_name)
         if type(error_text) is types.StringType:

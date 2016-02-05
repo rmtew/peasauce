@@ -43,13 +43,13 @@ class ToolEditorClient(editor_state.ClientAPI):
 
     def request_new_project_option_values(self, new_options):
         if self._binary_parameters is not None:
-            new_options.dis_name, new_options.loader_load_address, new_options.loader_entrypoint_offset = self._binary_parameters
+            new_options.processor_id, new_options.loader_load_address, new_options.loader_entrypoint_offset = self._binary_parameters
         return new_options
 
     def request_load_project_option_values(self, load_options):
         load_options.loader_file_path = self.owner_ref().get_input_file_path()
         if self._binary_parameters is not None:
-            load_options.dis_name, load_options.loader_load_address, load_options.loader_entrypoint_offset = self._binary_parameters
+            load_options.processor_id, load_options.loader_load_address, load_options.loader_entrypoint_offset = self._binary_parameters
         return load_options
 
     def request_address(self, address):
@@ -81,7 +81,7 @@ class ToolAPI(object):
             editor_state_ob = editor_state.EditorState()
         editor_state_ob.register_client(self.editor_client)
         self.editor_state = editor_state_ob
-        
+
     def on_app_exit(self):
         self.editor_state.on_app_exit()
 
@@ -101,9 +101,9 @@ class ToolAPI(object):
         """ Called by the editor client. """
         return self.input_file_path
 
-    def load_binary_file(self, file_path, dis_name, load_address, entrypoint_offset, input_file_path=None):
+    def load_binary_file(self, file_path, processor_id, load_address, entrypoint_offset, input_file_path=None):
         # Not ideal, but works for now.
-        self.editor_client._binary_parameters = dis_name, load_address, entrypoint_offset
+        self.editor_client._binary_parameters = processor_id, load_address, entrypoint_offset
         try:
             return self.load_file(file_path, input_file_path)
         finally:
