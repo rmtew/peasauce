@@ -274,7 +274,7 @@ def convert_project_format_2_to_3(input_file):
         persistence.write_uint32(output_file, 0)
         output_data_offset = output_file.tell()
         # Modification.
-        persistence.write_uint16(output_file, CURRENT_HUNK_VERSIONS[hunk_id])
+        persistence.write_uint16(output_file, SNAPSHOT_HUNK_VERSIONS[hunk_id])
 
         input_data = input_file.read(input_hunk_length)
         output_file.write(input_data)
@@ -317,7 +317,7 @@ def convert_project_format_3_to_4(input_file):
 
     output_file = tempfile.TemporaryFile()
     persistence.write_uint32(output_file, savefile_id)
-    persistence.write_uint16(output_file, 3)
+    persistence.write_uint16(output_file, 4)
     persistence.write_uint32(output_file, save_count)
 
     while input_file.tell() < file_size:
@@ -332,6 +332,7 @@ def convert_project_format_3_to_4(input_file):
         if expected_hunk_version != actual_hunk_version:
             logger.error("convert_project_format_3_to_4: hunk %d version mismatch %d != %d", hunk_id, expected_hunk_version, actual_hunk_version)
             return None
+        logger.debug("convert_project_format_3_to_4: file hunk %d", hunk_id)
 
         # Copy unaffected hunks verbatim.
         if hunk_id != SAVEFILE_HUNK_DISASSEMBLY:
@@ -349,18 +350,30 @@ def convert_project_format_3_to_4(input_file):
         processor_name = persistence.read_string(input_file)
 
         # Reconstitute the segment block list.
-        num_blocks = persistence.read_uint32(f)
-        blocks = [ None ] * num_blocks
-        for i in xrange(num_blocks):
-            blocks[i] = read_SegmentBlock(f)
-
+        num_blocks = persistence.read_uint32(input_file)
+        input_file_offset = input_file.tell()
+        block_data_length = hunk_length - (input_file_offset - hunk_payload_offset)
+        block_data_string = input_file.read(block_data_length)
+        #blocks = [ None ] * num_blocks
+        #for i in xrange(num_blocks):
+        #    blocks[i] = read_SegmentBlock(input_file)
         ## 2. Write the generic hunk header, then the payload, then fill in the header.
+
+        # Only these two are likely to have been in use.
+        if processor_name == "m68k":
+            processor_id = loaderlib.constants.PROCESSOR_M680x0
+        elif processor_name == "mips":
+            processor_id = loaderlib.constants.PROCESSOR_MIPS
+        else:
+            logger.error("convert_project_format_3_to_4: unrecognised arch name %s", processor_name)
+            return None
+        logger.debug("convert_project_format_3_to_4: arch name %s maps to processor id %d", processor_name, processor_id)
 
         # Write the as yet to be updated header.
         persistence.write_uint16(output_file, hunk_id)
         output_file_length_offset = output_file.tell()
         persistence.write_uint32(output_file, 0)
-        output_file_payload_offset = f.tell()
+        output_file_payload_offset = output_file.tell()
         persistence.write_uint16(output_file, SNAPSHOT_HUNK_VERSIONS[SAVEFILE_HUNK_DISASSEMBLY] + 1)
 
         # Write the payload in the modified format.
@@ -371,20 +384,30 @@ def convert_project_format_3_to_4(input_file):
         persistence.write_uint32(output_file, flags)
         persistence.write_uint32(output_file, processor_id)
 
-        persistence.write_uint32(output_file, len(blocks))
-        for block in blocks:
-            write_SegmentBlock(output_file, block)
+        persistence.write_uint32(output_file, num_blocks)
+        output_file_offset = output_file.tell()
+        #for block in blocks:
+        #    write_SegmentBlock(output_file, block)
+        output_file.write(block_data_string)
+        if output_file.tell() - output_file_offset != block_data_length:
+            logger.error("convert_project_format_3_to_4: block length mismatch %d != %d", output_file.tell() - output_file_offset, block_data_length)
+            return None
 
         # Update the header length field, then fast forward to the end of the hunk.
         new_hunk_length = output_file.tell() - output_file_payload_offset
         output_file.seek(output_file_length_offset, os.SEEK_SET)
         persistence.write_uint32(output_file, new_hunk_length)
-        output_file.seek(hunk_length, os.SEEK_CUR)
+        output_file.seek(new_hunk_length, os.SEEK_CUR)
+
+        if output_file.tell() - output_file_payload_offset != new_hunk_length:
+            logger.error("convert_project_format_3_to_4: block length mismatch %d != %d", output_file.tell() - output_file_payload_offset, new_hunk_length)
+            return None
 
     return output_file
 
 
 def load_project(f, work_state=None):
+    logger.debug("file %s", f)
     while True:
         if work_state is not None and work_state.check_exit_update(0.1, "TEXT_LOAD_CONVERTING_PROJECT_FILE"):
             return None
@@ -403,17 +426,18 @@ def load_project(f, work_state=None):
             if savefile_version == 2:
                 new_f = convert_project_format_2_to_3(f)
                 savefile_version = 3
-            if savefile_version == 3:
-                new_f = convert_project_format_3_to_4(new_f)
+            elif savefile_version == 3:
+                new_f = convert_project_format_3_to_4(f)
                 savefile_version = 4
-            if new_f is None or savefile_version != SAVEFILE_VERSION:
-                logger.error("Save-file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
+            if new_f is None:
+                logger.error("load_project: save file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
                 return None
             f = new_f
-            logger.info("Save-file upgraded to version %d", SAVEFILE_VERSION)
+            logger.info("load_project: save file upgraded to version %d", savefile_version)
             continue
         break
 
+    logger.debug("bfile %s", f)
     program_data = ProgramData()
     program_data.save_count = persistence.read_uint32(f)
 
@@ -472,7 +496,7 @@ def load_disassembly_hunk(f, program_data):
     program_data.symbols_by_address = persistence.read_dict_uint32_to_string(f)
     program_data.post_segment_addresses = persistence.read_dict_uint32_to_list_of_uint32s(f)
     program_data.flags = persistence.read_uint32(f)
-    program_data.processor_id = persistence.read_string(f)
+    program_data.processor_id = persistence.read_uint32(f)
 
     # Reconstitute the segment block list.
     num_blocks = persistence.read_uint32(f)

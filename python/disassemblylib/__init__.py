@@ -4,9 +4,10 @@
     Licensed using the MIT license.
 """
 
-M68K_NAME = "m68k"
-MIPS_NAME = "mips"
-_65c816_NAME = "65c816"
+import logging
+
+logger = logging.getLogger("disassemblylib")
+
 
 def get_processor_ids():
     import loaderlib
@@ -30,6 +31,8 @@ def get_processor(processor_id):
         from arch65c816 import Arch65c816 as ArchClass
         from arch65c816 import instruction_table
         from arch65c816 import operand_type_table
+    else:
+        logger.error("get_processor: %s unknown", processor_id)
 
     arch = ArchClass()
     arch.set_operand_type_table(operand_type_table)

@@ -35,10 +35,10 @@ This project is licensed under the MIT license.
 
 ## Installation
 
-Currently Peasauce is prototyped in Python using wxPython to display it's user interface.  The only installation you need to do, is to ensure the following prerequisites are installed on your computer.
+Currently Peasauce is prototyped in Python 2.7 using Pyside to display it's user interface.  The only installation you need to do, is to ensure the following prerequisites are installed on your computer.
 
 1. Download and install [Python 2.7](http://python.org/download/) for your platform.
-2. Download and install [PySide for Python 2.7](http://www.pyside.org/) for your platform.
+2. Download and install [PySide for Python 2.7](http://www.pyside.org/) for your platform (pip install pyside).
 
 ## Usage
 

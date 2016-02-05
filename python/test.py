@@ -23,22 +23,23 @@ import disassembly_data
 import editor_state
 import qtui
 import toolapi
+import loaderlib
 
 
 class CORE_ProgramData_TestCase(unittest.TestCase):
     def setUp(self):
         self.program_data = disassembly_data.ProgramData()
-        
+
     def test_state_initialisation(self):
         """Program data requires a program to be loaded, so starts in the loading state."""
         self.assertEqual(self.program_data.state, disassembly_data.STATE_LOADING)
-        
+
     def test_state_modification(self):
         """Program data gets it's state set to loaded when the program is finished loading."""
         disassembly_data.program_data_set_state(self.program_data, disassembly_data.STATE_LOADED)
         self.assertEqual(self.program_data.state, disassembly_data.STATE_LOADED)
 
-        
+
 class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
     def setUp(self):
         self.toolapiob = toolapi.ToolAPI()
@@ -50,7 +51,7 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
         if "TESTDATA_PATH" not in os.environ:
             self.fail("TESTDATA_PATH environment variable required")
 
-        FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "project-compatibility", "gdbstop.psproj")
+        FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "project-compatibility", "gdbstop2.psproj")
         INPUT_FILE_NAME = os.path.join(os.environ["TESTDATA_PATH"], "amiga", "gdbstop")
 
         if not os.path.exists(FILE_NAME):
@@ -65,6 +66,7 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
             self.fail("did not get correct load return value")
 
         # At this point, the project has been upgraded and loaded successfully.
+
 
 
 class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
@@ -84,7 +86,7 @@ class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
             self.fail("did not get correct load return value")
-        
+
         TARGET_ADDRESS = 0x4
         code_string = self.toolapiob.get_source_code_for_address(TARGET_ADDRESS)
         self.assertEqual("DC.L $4D4F4E20", code_string)
@@ -109,7 +111,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
         if not os.path.exists(FILE_NAME):
             self.skipTest("binary file dependency not available")
 
-        result = self.toolapiob.load_binary_file(FILE_NAME, "m68k", 0x21000, 0x57B8A-0x21000)
+        result = self.toolapiob.load_binary_file(FILE_NAME, loaderlib.constants.PROCESSOR_M680x0, 0x21000, 0x57B8A-0x21000)
         if type(result) in types.StringTypes:
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
@@ -154,11 +156,11 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
                 self._row_data = _row_data
                 self._addition_rows = addition_rows
                 self._removal_rows = removal_rows
-                
+
             _sort_order = QtCore.Qt.SortOrder.AscendingOrder
             _sort_column1 = 0
             _sort_column2 = 0
-            
+
             def _sort_list(self, _row_data):
                 qtui.CustomItemModel._sort_list.im_func(self, _row_data)
 
@@ -316,4 +318,11 @@ if __name__ == "__main__":
     else:
         ch = logging.NullHandler()
     logger.addHandler(ch)
-    unittest.main()
+
+    if True:
+        unittest.main()
+    else:
+        test_cases = [ v for v in globals().values() if type(v) is types.TypeType and issubclass(v, unittest.TestCase) ]
+        for v in test_cases:
+            suite = unittest.TestLoader().loadTestsFromTestCase(v)
+            unittest.TextTestRunner(verbosity=2).run(suite)
