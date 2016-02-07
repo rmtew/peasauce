@@ -92,8 +92,100 @@ class Archm68kTestCase(BaseArchTestCase):
         self.assertEquals(operand2, "D1-D4/A0-A3/A5")
 
 
-class binaryConversionTestCase(unittest.TestCase):
-    def testToNumber(self):
+
+class UtilFunctionalityTestCase(unittest.TestCase):
+    mask1_template_string = "L01MMMM001110TTT"
+    mask1M_bit_string     = "0001111000000000"
+    mask1T_bit_string     = "0000000000000111"
+    mask1L_bit_string     = "1000000000000000"
+    mask1L_shift = 15
+    mask1M_shift = 9
+    mask1T_shift = 0
+    mask1M_base_mask_string = "1111"
+    mask1T_base_mask_string = "111"
+    mask1L_base_mask_string = "1"
+
+    def test_get_mask_and_shift_from_mask_string(self):
+        # When the mask character is not present.
+        mask, shift = util.get_mask_and_shift_from_mask_string(self.mask1_template_string, "c")
+        self.assertEqual(mask, 0)
+        self.assertEqual(shift, 0)
+
+        # When the mask character is leading.
+        mask, shift = util.get_mask_and_shift_from_mask_string(self.mask1_template_string, "L")
+        self.assertEqual(mask, util._b2n(self.mask1L_bit_string))
+        self.assertEqual(shift, self.mask1L_shift)
+
+        # When the mask character is mid-string.
+        mask, shift = util.get_mask_and_shift_from_mask_string(self.mask1_template_string, "M")
+        self.assertEqual(mask, util._b2n(self.mask1M_bit_string))
+        self.assertEqual(shift, self.mask1M_shift)
+
+        # When the mask character is trailing.
+        mask, shift = util.get_mask_and_shift_from_mask_string(self.mask1_template_string, "T")
+        self.assertEqual(mask, util._b2n(self.mask1T_bit_string))
+        self.assertEqual(shift, self.mask1T_shift)
+
+    def test_get_masked_value_for_variable(self):
+        # When the mask character is not present.
+        value = util.get_masked_value_for_variable(0x00000000, self.mask1_template_string, "c")
+        self.assertEqual(value, 0)
+        value = util.get_masked_value_for_variable(0xFFFFFFFF, self.mask1_template_string, "c")
+        self.assertEqual(value, 0)
+
+        # When the value fits in the masked area.
+        mask_chars = ("L", "M", "T") # leading.. mid ..trailing.
+        mask_char_strings = (self.mask1L_base_mask_string, self.mask1M_base_mask_string, self.mask1T_base_mask_string)
+        for input_value in (0x00000000, 0xFFFFFFFF):
+            for i, input_mask_char in enumerate(mask_chars):
+                extracted_value = util.get_masked_value_for_variable(input_value, self.mask1_template_string, input_mask_char)
+                if input_value == 0:
+                    expected_value = 0
+                else:
+                    expected_value = util._b2n(mask_char_strings[i])
+                self.assertEqual(extracted_value, expected_value)
+
+    def test_set_masked_value_for_variable(self):
+        test_data = [
+            ("L", self.mask1L_bit_string, self.mask1L_base_mask_string),
+            ("M", self.mask1M_bit_string, self.mask1M_base_mask_string),
+            ("T", self.mask1T_bit_string, self.mask1T_base_mask_string),
+        ]
+        for mask_char, bit_string, base_mask_string in test_data:
+            mask, shift = util.get_mask_and_shift_from_mask_string(self.mask1_template_string, mask_char)
+            mask_value = util._b2n(base_mask_string)
+            # Test setting those bits to a value they will always accept (1).
+            resulting_value = util.set_masked_value_for_variable(0, self.mask1_template_string, mask_char, 1)
+            self.assertTrue(resulting_value >> shift, 1)
+            # Test setting a value that won't fit in the available bit range.
+            self.assertRaises(ValueError, util.set_masked_value_for_variable, 0, self.mask1_template_string, mask_char, mask_value+1)
+
+    test_cases_gmvfv = [ ("L", util._b2n("1")), ("M", util._b2n("101")), ("T", util._b2n("10")) ]
+
+    def test_get_masked_values_for_variables_specific(self):
+        # Whether specified variables are all extracted.
+        #                  L01MMMM001110TTT
+        value = util._b2n("1010101010101010")
+        variable_chars = [ "L", "M", "T" ]
+        char_vars = util.get_masked_values_for_variables(value, self.mask1_template_string, variable_chars)
+        self.assertEqual(len(variable_chars), len(char_vars), "failed to find all expected variables")
+
+        for var_char, var_value in self.test_cases_gmvfv:
+            self.assertTrue(var_char in char_vars, "var '%s' not present" % var_char)
+            self.assertEqual(char_vars[var_char], var_value, "%s != %s" % (char_vars[var_char], var_value))
+
+    def test_get_masked_values_for_variables_all(self):
+        # Whether all variables present are extracted.
+        #                  L01MMMM001110TTT
+        value = util._b2n("1010101010101010")
+        char_vars = util.get_masked_values_for_variables(value, self.mask1_template_string)
+
+        self.assertEqual(len(self.test_cases_gmvfv), len(char_vars), "failed to find all expected variables")
+        for var_char, var_value in self.test_cases_gmvfv:
+            self.assertTrue(var_char in char_vars, "var '%s' not present" % var_char)
+            self.assertEqual(char_vars[var_char], var_value, "%s != %s" % (char_vars[var_char], var_value))
+
+    def test_binary2number(self):
         self.assertTrue(util._b2n("1") == 1)
         self.assertTrue(util._b2n("10") == (1<<1))
         self.assertTrue(util._b2n("11") == (1<<1) + 1)
@@ -101,21 +193,21 @@ class binaryConversionTestCase(unittest.TestCase):
         self.assertTrue(util._b2n("11110000") == 0xF0)
         self.assertTrue(util._b2n("00000000") == 0x00)
 
-    def testFromNumber(self):
+    def test_number2binary(self):
         self.assertTrue(util._n2b(1) == "1")
         self.assertTrue(util._n2b(7) == "111")
         self.assertTrue(util._n2b(255) == "11111111")
         self.assertTrue(util._n2b(254) == "11111110")
         self.assertTrue(util._n2b(256) == "100000000")
 
-    def testFromNumberPadded(self):
+    def test_number2binary_padded(self):
         """ Padded out to multiples of 4 bits (octets). """
         self.assertTrue(util._n2b(1, dynamic_padding=True) == "0001")
         self.assertTrue(util._n2b(15, dynamic_padding=True) == "1111")
         self.assertTrue(util._n2b(16, dynamic_padding=True) == "00010000")
         self.assertTrue(util._n2b(255, dynamic_padding=True) == "11111111")
 
-    def testFromNumberPaddingLength(self):
+    def test_number2binary_padded_length(self):
         self.assertTrue(util._n2b(util._b2n("1"), padded_length=2) == "01")
         self.assertTrue(util._n2b(util._b2n("1"), padded_length=3) == "001")
         for text in ("111", "001", "00001111"):

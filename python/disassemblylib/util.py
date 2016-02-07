@@ -183,7 +183,7 @@ def process_instruction_list(_A, _list):
 
         # Matching and comparison masks.
         entry[II_ANDMASK], entry[II_CMPMASK] = make_operand_mask(operand_mask)
-        entry[II_OPERANDMASKS] = [ None ] * _A.constant_operand_count_max
+        entry[II_OPERANDMASKS] = [ ]
 
         # Take into account if the instruction needs extra words from the stream for it's definition.
         max_extra_words = 0
@@ -213,6 +213,8 @@ def process_instruction_list(_A, _list):
                 if spec.filter_keys is not None:
                     for ea_key in spec.filter_keys:
                         mask |= 1 << _A.dict_operand_label_to_index[ea_key]
+                while len(entry[II_OPERANDMASKS]) < i+1:
+                    entry[II_OPERANDMASKS].append(None)
                 entry[II_OPERANDMASKS][i] = mask
 
         # Sort the masks.  These are ordered in terms of how many known bits there are, leaving variable masks lower in priority.
@@ -294,8 +296,6 @@ class ArchInterface(object):
 
     """ Constant: Core architecture bit mask. """
     constant_core_architecture_mask = 0
-    """ Constant: Maximum number of operands per instruction. """
-    constant_operand_count_max = 0
     """ Constant: The architecture supported endian types.  little endian '<' big endian '>'."""
     constant_endian_types = None
     """ Constant: How many bits an architectural word is comprised of. """
@@ -484,7 +484,7 @@ class ArchInterface(object):
                 if mask_var_name not in var_names:
                     var_names.append(mask_var_name)
         # Extract the raw value for each variable from the instruction opcode.
-        var_values = _get_var_values(var_names, I.data_words[0], I.table_mask)
+        var_values = get_masked_values_for_variables(I.data_words[0], I.table_mask, var_names)
         # The instruction size may be required by some operands.  Retrieve it and make it available to the gathering below.
         # TODO: This is currently only really useful for M68K arch.  MIPS gets more complicated with .Y.Z or .f.Y
         idx0 = I.specification.key.rfind(".")
@@ -539,7 +539,7 @@ def signed_hex_string(_arch, v):
 # ----------------------------------------------------------------------------
 
 @memoize
-def _extract_mask_bits(mask_string, s):
+def get_mask_and_shift_from_mask_string(mask_string, mask_char):
     """
     A mask string is composed of instruction bits and data.  The bits for a given
     piece of data, are indicated by the same variable character repeated.
@@ -559,30 +559,67 @@ def _extract_mask_bits(mask_string, s):
          f = 1
     """
     mask = 0
-    for i, c in enumerate(mask_string):
+    for c in mask_string:
         mask <<= 1
-        if c == s:
+        if c == mask_char:
             mask |= 1
     shift = 0
     if mask:
         mask_copy = mask
-        while mask_copy & 1 == 0:
+        while (mask_copy & 1) == 0:
             mask_copy >>= 1
             shift += 1
     return mask, shift
 
-def _extract_masked_value(data_word, mask_string, mask_char):
-    """ Extract the value of the mask char in the data word. """
-    mask, shift = _extract_mask_bits(mask_string, mask_char)
-    return (data_word & mask) >> shift
+def get_masked_value_for_variable(base_value, mask_string, mask_char):
+    """
+    Extract the masked variable value from the base value.
 
-def _get_var_values(chars, data_word1, mask_string):
+    Example:
+        mask_char = v
+        base_value = %--------101----- (binary number, dashed bits irrelevant)
+        mask_string = 10101010vvv10101 (bits obscured by v define the value)
+    So:
+        result = %101 = 5
+    """
+    mask, shift = get_mask_and_shift_from_mask_string(mask_string, mask_char)
+    return (base_value & mask) >> shift
+
+def set_masked_value_for_variable(base_value, mask_string, mask_char, value):
+    """
+    Overwrite the masked variable value in the base value.
+
+    Example:
+        base_value = %0000000000000000 (binary value for 0)
+        value = %101 (binary value for 5)
+        mask_char = v
+        mask_string = 10101010vvv10101 (bits obscured by v define the value)
+    So:
+        result =     %0000000010100000
+    """
+    mask, shift = get_mask_and_shift_from_mask_string(mask_string, mask_char)
+    shifted_value = value << shift
+    # Verify that the value can fit within the mask.
+    excess_bits = shifted_value & (0xFFFFFFFF & ~mask)
+    if excess_bits != 0:
+        raise ValueError("set_masked_value_for_variable: invalid value 0x%x (base_value 0x%x, mask 0x%x, value 0x%x, shift %d, shifted value 0x%x)" % (excess_bits, base_value, mask, value, shift, shifted_value))
+    return base_value | shifted_value
+
+unwanted_chars = set([ "0", "1" ])
+
+def get_masked_values_for_variables(value, mask_string, variable_chars=None):
     """ Variables generally come from the decoded instruction opcode.  Map their decoded value to their name. """
+    # If the caller does not specify what variables, they want them all.
+    if variable_chars is None:
+        variable_chars = set([])
+        for c in mask_string:
+            if c not in variable_chars and c not in unwanted_chars:
+                variable_chars.add(c)
+
     var_values = {}
-    if chars:
-        for mask_char in chars:
-            if mask_char in mask_string:
-                var_values[mask_char] = _extract_masked_value(data_word1, mask_string, mask_char)
+    for mask_char in variable_chars:
+        if mask_char in mask_string:
+            var_values[mask_char] = get_masked_value_for_variable(value, mask_string, mask_char)
     return var_values
 
 MAF_CODE = 1
@@ -599,7 +636,11 @@ def generate_all():
     This is done in this function, so as not to introduce entries into the global dictionary.
     """
     l = [
-        "ArchInterface", "_b2n", "_n2b", "_make_specification", "_extract_masked_value", "_get_var_values",
+        "ArchInterface",
+        "_b2n", "_n2b",
+        "_make_specification",
+        "get_masked_value_for_variable", "set_masked_value_for_variable",
+        "get_masked_values_for_variables", "get_mask_and_shift_from_mask_string",
         "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string",
     ]
     for k in globals().keys():

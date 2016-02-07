@@ -63,17 +63,18 @@ class ArchM68k(ArchInterface):
     constant_comment_prefix = ";"
 
     constant_core_architecture_mask = IF_000
-    constant_operand_count_max = 2
     constant_endian_types = ">"
     constant_word_size = 16
     constant_pc_offset = 2
     constant_operand_type_general_label = "EA"
 
+    """
     constant_table_bits = [
         [ 8,  'B' ],
         [ 16, 'W' ],
         [ 32, 'L' ],
     ]
+    """
 
     constant_table_condition_code_names = [
         "T",  # %0000
@@ -501,11 +502,11 @@ class ArchM68k(ArchInterface):
                     logger.debug("Failed to extension word1")
                     return None
 
-                register_type = _extract_masked_value(ew1, EffectiveAddressingWordMask, "r")
-                register_number = _extract_masked_value(ew1, EffectiveAddressingWordMask, "R")
-                index_size = _extract_masked_value(ew1, EffectiveAddressingWordMask, "z")
-                scale = _extract_masked_value(ew1, EffectiveAddressingWordMask, "X")
-                full_extension_word = _extract_masked_value(ew1, EffectiveAddressingWordMask, "t")
+                register_type = get_masked_value_for_variable(ew1, EffectiveAddressingWordMask, "r")
+                register_number = get_masked_value_for_variable(ew1, EffectiveAddressingWordMask, "R")
+                index_size = get_masked_value_for_variable(ew1, EffectiveAddressingWordMask, "z")
+                scale = get_masked_value_for_variable(ew1, EffectiveAddressingWordMask, "X")
+                full_extension_word = get_masked_value_for_variable(ew1, EffectiveAddressingWordMask, "t")
                 # Xn.z*S
                 O.vars["Xn"] = ["D", "A"][register_type] + str(register_number)
                 O.vars["z"] = ["W", "L"][index_size]
@@ -513,10 +514,10 @@ class ArchM68k(ArchInterface):
 
                 if full_extension_word:
                     ew2, data_idx = self._get_word(data, data_idx)
-                    base_register_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "b")
-                    index_suppressed = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "i")
-                    base_displacement_size = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "B")
-                    index_selection = _extract_masked_value(ew1, EffectiveAddressingWordFullMask, "I")
+                    base_register_suppressed = get_masked_value_for_variable(ew1, EffectiveAddressingWordFullMask, "b")
+                    index_suppressed = get_masked_value_for_variable(ew1, EffectiveAddressingWordFullMask, "i")
+                    base_displacement_size = get_masked_value_for_variable(ew1, EffectiveAddressingWordFullMask, "B")
+                    index_selection = get_masked_value_for_variable(ew1, EffectiveAddressingWordFullMask, "I")
                     # ...
                     base_displacement = 0
                     if base_displacement_size == 2: # %10
@@ -530,7 +531,7 @@ class ArchM68k(ArchInterface):
                     return None
                     # raise RuntimeError("Full displacement incomplete", I.specification.key)
                 else:
-                    O.vars["D8"] = _extract_masked_value(ew1, EffectiveAddressingWordBriefMask, "v")
+                    O.vars["D8"] = get_masked_value_for_variable(ew1, EffectiveAddressingWordBriefMask, "v")
             elif read_string.find("=I+.") != -1:
                 # Inject an extra word (or long) value under the given key as an available variable.
                 k, v = [ s.strip() for s in read_string.split("=") ]

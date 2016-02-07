@@ -33,10 +33,10 @@ class ArchMIPS(ArchInterface):
     constant_comment_prefix = "#"
 
     constant_core_architecture_mask = IF_MIPS32
-    constant_operand_count_max = 4
     constant_endian_types = ">"
     constant_word_size = 32
 
+    """
     constant_table_bits = [
         [     32, 'S' ],  # Floating point
         [     64, 'D' ],  # Floating point
@@ -44,6 +44,7 @@ class ArchMIPS(ArchInterface):
         [     64, 'L' ],  # Fixed point
         [ 2 * 32, 'PS' ], # Floating point
     ]
+    """
 
     constant_table_condition_code_names = {
         _b2n("00000"): "F",
