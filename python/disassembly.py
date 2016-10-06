@@ -15,6 +15,7 @@ MAF_CERTAIN = 16
 
 import bisect
 import logging
+import operator
 import os
 #import traceback
 
@@ -263,7 +264,11 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
     result = get_code_block_info_for_line_number(program_data, line_number)
     if result is not None:
         address, match = result
-        return [ k for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems() if k in program_data.symbols_by_address ]
+        return [
+			k
+			for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems()
+			if k in program_data.symbols_by_address
+		]
     return []
 
 
@@ -276,7 +281,7 @@ def get_all_references(program_data):
         if target_block.address != target_address:
             logger.error("get_all_references: analysing reference referrers, target address mismatch: %X != %X", target_block.address, target_address)
             continue
-        if disassembly_data.get_block_data_type(target_block) == disassembly_data.DATA_TYPE_LONGWORD:
+        if disassembly_data.get_block_data_type(target_block) == disassembly_data.DATA_TYPE_DATA32:
             for source_address in referring_addresses:
                 source_block, source_block_idx = lookup_block_by_address(program_data, source_address)
                 if disassembly_data.get_block_data_type(source_block) == disassembly_data.DATA_TYPE_CODE:
@@ -285,11 +290,11 @@ def get_all_references(program_data):
 
 def get_data_type_sizes(block):
     data_type = disassembly_data.get_block_data_type(block)
-    if data_type == disassembly_data.DATA_TYPE_LONGWORD:
+    if data_type == disassembly_data.DATA_TYPE_DATA32:
         size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
-    elif data_type == disassembly_data.DATA_TYPE_WORD:
+    elif data_type == disassembly_data.DATA_TYPE_DATA16:
         size_types = [ ("W", 2), ("B", 1) ]
-    elif data_type == disassembly_data.DATA_TYPE_BYTE:
+    elif data_type == disassembly_data.DATA_TYPE_DATA08:
         size_types = [ ("B", 1) ]
 
     sizes = []
@@ -562,9 +567,12 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     elif size_char == "B":
                         value = program_data.loader_data_types.uint8_value(data, data_idx)
                     label = None
-                    # Only turn the value into a symbol if we actually relocated the value.
-                    if size_char == "L" and value in program_data.loader_relocatable_addresses:
-                        label = get_symbol_for_address(program_data, value)
+                    # Use the value's symbol for data aligned to pointer size, if this data value is an address that was relocated.
+                    if size_char == "L" and value in program_data.loader_relocated_addresses:
+                        segment_address = loaderlib.get_segment_address(segments, block.segment_id)
+                        # But only if the address of the data had that address relocated within it.
+                        if segment_address + data_idx in program_data.loader_relocated_addresses[value]:
+                            label = get_symbol_for_address(program_data, value)
                     if label is None:
                         label = ("$%0"+ str(num_bytes<<1) +"X") % value
                     return label
@@ -625,6 +633,14 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
 
 
 def check_known_address(program_data, address):
+    """
+    Returns True if the address is valid.  Valid addresses are of two kinds, addresses that
+    fall within the known address ranges for segments, and specific addresses the lie outside
+    of segments.
+
+    NOTE(rmtew): I'm not sure how well this works, given we only accept post segment addresses
+    at 1 byte higher than the end of the any segment that precedes it.
+    """
     pre_ids = set()
     for address0, addressN, segment_ids in program_data.address_ranges:
         if address < address0:
@@ -692,11 +708,11 @@ def set_symbol_insert_func(program_data, f):
 def set_symbol_delete_func(program_data, f):
     program_data.symbol_delete_func = f
 
-def insert_symbol(program_data, address, name):
+def insert_symbol(program_data, address, symbol_label):
     if not check_known_address(program_data, address):
         return
-    program_data.symbols_by_address[address] = name
-    if program_data.symbol_insert_func: program_data.symbol_insert_func(address, name)
+    program_data.symbols_by_address[address] = symbol_label
+    if program_data.symbol_insert_func: program_data.symbol_insert_func(address, symbol_label)
 
 def get_symbol_for_address(program_data, address, absolute_info=None):
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
@@ -765,13 +781,13 @@ def lookup_block_by_address(program_data, lookup_key):
     lookup_index = bisect.bisect_right(program_data.block_addresses, lookup_key)
     return program_data.blocks[lookup_index-1], lookup_index-1
 
-def get_next_data_line_number(program_data, line_idx, dir=1):
+def get_next_block_line_number(program_data, data_type, line_idx, direction_offset=1, op_func=operator.eq):
     block, block_idx = lookup_block_by_line_count(program_data, line_idx)
-    block_idx += dir
+    block_idx += direction_offset
     while block_idx < len(program_data.blocks) and block_idx >= 0:
-        if disassembly_data.get_block_data_type(program_data.blocks[block_idx]) != disassembly_data.DATA_TYPE_CODE:
+        if op_func(disassembly_data.get_block_data_type(program_data.blocks[block_idx]), data_type):
             return get_block_line_number(program_data, block_idx)
-        block_idx += dir
+        block_idx += direction_offset
 
 def insert_block(program_data, insert_idx, block):
     program_data.block_addresses.insert(insert_idx, block.address)
@@ -788,7 +804,12 @@ ERR_SPLIT_MIDINSTRUCTION = -3
 def IS_SPLIT_ERR(value): return value < 0
 
 def split_block(program_data, address, own_midinstruction=False):
-    """ This function should preserve line count. """
+    """
+    Locate the block at `address` and split it if possible.
+    own_midinstruction: Where something refers to an address mid-instruction in a code block, split it and add a relative EQU to deal with it.
+
+    CONSTRAINT: This function should preserve line count.
+    """
     block, block_idx = lookup_block_by_address(program_data, address)
     if block.address == address:
         return block, ERR_SPLIT_EXISTING
@@ -1137,11 +1158,11 @@ def _get_byte_representation(byte):
         return "$%X" % byte
 
 __label_metadata = {
-    disassembly_data.DATA_TYPE_CODE: "code",
-    disassembly_data.DATA_TYPE_ASCII: "ascii",
-    disassembly_data.DATA_TYPE_BYTE: "data08",
-    disassembly_data.DATA_TYPE_WORD: "data16",
-    disassembly_data.DATA_TYPE_LONGWORD: "data32"
+    disassembly_data.DATA_TYPE_CODE: disassemblylib.constants.DIS_ID_CODE,
+    disassembly_data.DATA_TYPE_ASCII: disassemblylib.constants.DIS_ID_ASCII,
+    disassembly_data.DATA_TYPE_DATA08: disassemblylib.constants.DIS_ID_DATA08,
+    disassembly_data.DATA_TYPE_DATA16: disassemblylib.constants.DIS_ID_DATA16,
+    disassembly_data.DATA_TYPE_DATA32: disassemblylib.constants.DIS_ID_DATA32,
 }
 
 def get_auto_label(program_data, address, data_type):
@@ -1227,7 +1248,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             # [ (address, new_data_type, attempt_to_disassemble), ... ]
             split_addresses = []
             last_match_end_address = address + bytes_consumed
-            longword_flags = disassembly_data.get_data_type_block_flags(disassembly_data.DATA_TYPE_LONGWORD)
+            longword_flags = disassembly_data.get_data_type_block_flags(disassembly_data.DATA_TYPE_DATA32)
             # Reasons we are here:
             if found_terminating_instruction:
                 # 1. We reached a terminating instruction before the end of the block (found_terminating_instruction is True).
@@ -1346,10 +1367,10 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                 if IS_SPLIT_ERR(result[1]):
                     # These are the only possible block splitting errors.
                     if result[1] == ERR_SPLIT_BOUNDS:
-                        label = program_data.dis_get_default_symbol_name_func(address, "bounds")
+                        label = program_data.dis_get_default_symbol_name_func(address, disassemblylib.constants.DIS_ID_BOUNDS)
                         insert_symbol(program_data, address, label)
                     elif result[1] == ERR_SPLIT_MIDINSTRUCTION:
-                        label = program_data.dis_get_default_symbol_name_func(address, "midinstruction")
+                        label = program_data.dis_get_default_symbol_name_func(address, disassemblylib.constants.DIS_ID_MIDINSTRUCTION)
                         insert_symbol(program_data, address, label)
                     else:
                         logger.error("_process_address_as_code/labeling: At $%06X unexpected splitting error #%d", address, result[1])
@@ -1419,7 +1440,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
     result = loaderlib.load_file(input_file, file_name, loader_options)
     if result is None:
-        return None, 0
+        return None
 
     file_info, data_types = result
 
@@ -1473,7 +1494,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
         block = disassembly_data.SegmentBlock()
         if loaderlib.is_segment_type_bss(segments, segment_id):
             block.flags |= disassembly_data.BLOCK_FLAG_ALLOC
-        disassembly_data.set_block_data_type(block, disassembly_data.DATA_TYPE_LONGWORD)
+        disassembly_data.set_block_data_type(block, disassembly_data.DATA_TYPE_DATA32)
         block.segment_id = segment_id
         block.segment_offset = 0
         block.address = address
@@ -1487,7 +1508,7 @@ def load_file(input_file, new_options, file_name, work_state=None):
         if segment_length > data_length:
             block = disassembly_data.SegmentBlock()
             block.flags |= disassembly_data.BLOCK_FLAG_ALLOC
-            disassembly_data.set_block_data_type(block, disassembly_data.DATA_TYPE_LONGWORD)
+            disassembly_data.set_block_data_type(block, disassembly_data.DATA_TYPE_DATA32)
             block.segment_id = segment_id
             block.segment_offset = data_length
             block.address = address + data_length

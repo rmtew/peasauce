@@ -122,7 +122,7 @@ def write_segment_list_entry(f, v):
 
 
 SAVEFILE_ID = 0x5053504a
-SAVEFILE_VERSION = 4
+SAVEFILE_VERSION = 5
 
 SAVEFILE_HUNK_SOURCEDATA = 2001            # The entire source input file that the disassembly was created from.
 SAVEFILE_HUNK_SOURCEDATAINFO = 2002        # The metadata about the source input file.
@@ -133,7 +133,7 @@ SAVEFILE_HUNK_DISASSEMBLY = 2005           # General disassembly state.
 CURRENT_HUNK_VERSIONS = {
     SAVEFILE_HUNK_SOURCEDATA: 1,
     SAVEFILE_HUNK_SOURCEDATAINFO: 1,
-    SAVEFILE_HUNK_LOADER: 1,
+    SAVEFILE_HUNK_LOADER: 2,
     SAVEFILE_HUNK_LOADERINTERNAL: 1,
     SAVEFILE_HUNK_DISASSEMBLY: 2,
 }
@@ -207,7 +207,7 @@ def save_disassembly_hunk(f, program_data):
 def save_loader_hunk(f, program_data):
     persistence.write_string(f, program_data.loader_system_name)
     write_segment_list(f, program_data.loader_segments)
-    persistence.write_set_of_uint32s(f, program_data.loader_relocated_addresses)
+    persistence.write_dict_uint32_to_set_of_uint32s(f, program_data.loader_relocated_addresses)
     persistence.write_set_of_uint32s(f, program_data.loader_relocatable_addresses)
     persistence.write_uint16(f, program_data.loader_entrypoint_segment_id)
     persistence.write_uint32(f, program_data.loader_entrypoint_offset)
@@ -405,6 +405,91 @@ def convert_project_format_3_to_4(input_file):
 
     return output_file
 
+def convert_project_format_4_to_5(input_file):
+    """
+    This function should encapsulate all application-specific logic involved to
+    make it independent of as many changes as possible.
+
+    Version 4 -> 5.
+    Modifications:
+    - symbols by address has gone from a label to a structure with metadata.
+    """
+    SNAPSHOT_HUNK_VERSIONS = {
+        SAVEFILE_HUNK_SOURCEDATA: 1,
+        SAVEFILE_HUNK_SOURCEDATAINFO: 1,
+        SAVEFILE_HUNK_LOADER: 1,
+        SAVEFILE_HUNK_LOADERINTERNAL: 1,
+        SAVEFILE_HUNK_DISASSEMBLY: 2,
+    }
+
+    input_file.seek(0, os.SEEK_END)
+    file_size = input_file.tell()
+    input_file.seek(0, os.SEEK_SET)
+
+    savefile_id = persistence.read_uint32(input_file)
+    savefile_version = persistence.read_uint16(input_file)
+    if savefile_version != 4:
+        return None
+
+    logger.info("Upgrading save-file from version 4 to version 5: symbols by address..")
+    save_count = persistence.read_uint32(input_file)
+
+    output_file = tempfile.TemporaryFile()
+    persistence.write_uint32(output_file, savefile_id)
+    persistence.write_uint16(output_file, 5)
+    persistence.write_uint32(output_file, save_count)
+
+    while input_file.tell() < file_size:
+        # This should be pretty straightforward.
+        hunk_header_offset = input_file.tell()
+        hunk_id = persistence.read_uint16(input_file)
+        hunk_length = persistence.read_uint32(input_file)
+        hunk_payload_offset = input_file.tell()
+
+        actual_hunk_version = persistence.read_uint16(input_file)
+        expected_hunk_version = SNAPSHOT_HUNK_VERSIONS[hunk_id]
+        if expected_hunk_version != actual_hunk_version:
+            logger.error("convert_project_format_4_to_5: hunk %d version mismatch %d != %d", hunk_id, expected_hunk_version, actual_hunk_version)
+            return None
+        logger.debug("convert_project_format_4_to_5: file hunk %d", hunk_id)
+
+        if SAVEFILE_HUNK_LOADER != hunk_id:
+            input_file.seek(hunk_header_offset, os.SEEK_SET)
+            raw_hunk_length = (hunk_payload_offset - hunk_header_offset) + hunk_length
+            output_file.write(input_file.read(raw_hunk_length))
+            continue
+
+        # Write the as yet to be updated header.
+        persistence.write_uint16(output_file, hunk_id)
+        output_file_length_offset = output_file.tell()
+        persistence.write_uint32(output_file, 0)
+        output_file_payload_offset = output_file.tell()
+        persistence.write_uint16(output_file, SNAPSHOT_HUNK_VERSIONS[SAVEFILE_HUNK_LOADER] + 1)
+
+        # Transform the hunk from input file to output file.
+        persistence.write_string(output_file, persistence.read_string(input_file)) # loader_system_name
+        data_size = persistence.read_uint32(input_file)
+        persistence.write_uint32(output_file, data_size) # loader_segments
+        output_file.write(input_file.read(data_size))
+        set_value = persistence.read_set_of_uint32s(input_file)
+        persistence.write_dict_uint32_to_list_of_uint32s(output_file, { k: [] for k in set_value }) # loader_relocated_addresses
+        set_value = persistence.read_set_of_uint32s(input_file)
+        persistence.write_set_of_uint32s(output_file, set_value) # loader_relocatable_addresses
+        persistence.write_uint16(output_file, persistence.read_uint16(input_file)) # loader_entrypoint_segment_id
+        persistence.write_int32(output_file, persistence.read_uint32(input_file)) # loader_entrypoint_offset
+
+        # Update the header length field, then fast forward to the end of the hunk.
+        new_hunk_length = output_file.tell() - output_file_payload_offset
+        output_file.seek(output_file_length_offset, os.SEEK_SET)
+        persistence.write_uint32(output_file, new_hunk_length)
+        output_file.seek(new_hunk_length, os.SEEK_CUR)
+
+        if output_file.tell() - output_file_payload_offset != new_hunk_length:
+            logger.error("convert_project_format_4_to_5: block length mismatch %d != %d", output_file.tell() - output_file_payload_offset, new_hunk_length)
+            return None
+
+    return output_file
+
 
 def load_project(f, work_state=None):
     logger.debug("file %s", f)
@@ -429,6 +514,9 @@ def load_project(f, work_state=None):
             elif savefile_version == 3:
                 new_f = convert_project_format_3_to_4(f)
                 savefile_version = 4
+            elif savefile_version == 4:
+                new_f = convert_project_format_4_to_5(f)
+                savefile_version = 5
             if new_f is None:
                 logger.error("load_project: save file is version %s, only version %s is supported at this time.", savefile_version, SAVEFILE_VERSION)
                 return None
@@ -515,7 +603,7 @@ def load_disassembly_hunk(f, program_data):
 def load_loader_hunk(f, program_data):
     program_data.loader_system_name = persistence.read_string(f)
     program_data.loader_segments = read_segment_list(f)
-    program_data.loader_relocated_addresses = persistence.read_set_of_uint32s(f)
+    program_data.loader_relocated_addresses = persistence.read_dict_uint32_to_set_of_uint32s(f)
     program_data.loader_relocatable_addresses = persistence.read_set_of_uint32s(f)
     program_data.loader_entrypoint_segment_id = persistence.read_uint16(f)
     program_data.loader_entrypoint_offset = persistence.read_uint32(f)

@@ -37,6 +37,7 @@ import os
 import sys
 import struct
 
+from . import constants
 from .util import *
 
 
@@ -115,9 +116,9 @@ class ArchM68k(ArchInterface):
             opcode = match.opcodes[opcode_idx]
             # Note that PC relative jumps are ignored, as the address may refer to leading offsets before referenced code.
             if opcode.key == "PCid16":
-                return None # match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key == "PCiId8":
-                return None # match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
+                return match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
             elif opcode.specification.key == DISPLACEMENT_OKEY: # JMP
@@ -281,20 +282,20 @@ class ArchM68k(ArchInterface):
         'Resource'-style disassembly variable naming.
         See amiga-dev wiki page.  Link to be inserted here asap.
         """
-        if metadata == "midinstruction":
+        if metadata == constants.DIS_ID_MIDINSTRUCTION:
             return "SYM%06X" % address
-        elif metadata == "bounds":
+        elif metadata == constants.DIS_ID_BOUNDS:
             return "lbZ%06X" % address
 
-        if metadata == "ascii":
+        if metadata == constants.DIS_ID_ASCII:
             char = "A"
-        elif metadata == "code":
+        elif metadata == constants.DIS_ID_CODE:
             char = "C"
-        elif metadata == "data08":
+        elif metadata == constants.DIS_ID_DATA08:
             char = "B"
-        elif metadata == "data16":
+        elif metadata == constants.DIS_ID_DATA16:
             char = "W"
-        elif metadata == "data32":
+        elif metadata == constants.DIS_ID_DATA32:
             char = "L"
         else:
             # Default to a character which means the unexpected case.
@@ -635,7 +636,7 @@ instruction_table = [
     [ "1100DDD100000SSS", "ABCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
     [ "1100DDD100001SSS", "ABCD PreARi:(Rn=S),PreARi:(Rn=D)",      IF_000, "Add Decimal With Extend (memory)", ],
     [ "1101DDD0zzsssSSS", "ADD.z:(z=z) EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, DR:(Rn=D)",             IF_000, "Add", ],
-    [ "1101DDD1zzsssSSS", "ADD.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",             IF_000, "Add", ],
+    [ "1101DDD1zzsssSSS", "ADD.z:(z=z) DR:(Rn=D), EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                             IF_000, "Add", ],
     [ "1101DDD011sssSSS", "ADDA.W EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
     [ "1101DDD111sssSSS", "ADDA.L EA:(mode=s&register=S){DR|AR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL|Imm|PCid16|PCiId8}, AR:(Rn=D)",                     IF_000, "Add Address", ],
     [ "00000110zzsssSSS", "ADDI.z:(z=z) Imm:(z=z&xxx=I+.z), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",                       IF_000, "Add Immediate", ],

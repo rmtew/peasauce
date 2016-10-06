@@ -1,0 +1,96 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{ca51d85b-81fa-4d2b-86cf-d7e2bf579ec7}</ProjectGuid>
+    <ProjectHome />
+    <StartupFile>python\qtui.py</StartupFile>
+    <SearchPath />
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <ProjectTypeGuids>{888888a0-9f3d-457c-b088-3a5042f75d52}</ProjectTypeGuids>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <InterpreterId>{2af0f10d-7135-4994-9156-5d01c9c11b7e}</InterpreterId>
+    <InterpreterVersion>2.7</InterpreterVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" />
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" />
+  <PropertyGroup>
+    <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
+    <PtvsTargetsFile>$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets</PtvsTargetsFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="CHANGES.txt" />
+    <Content Include="cli.sh" />
+    <Content Include="python\NOTES.txt" />
+    <Content Include="README.md" />
+    <Content Include="run.bat" />
+    <Content Include="run.sh" />
+    <Content Include="test-data\README.md" />
+    <Content Include="test.bat" />
+    <Content Include="test.sh" />
+    <Content Include="x.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="python\cli.py" />
+    <Compile Include="python\disassembly.py" />
+    <Compile Include="python\disassemblylib\arch65c816.py" />
+    <Compile Include="python\disassemblylib\archm68k.py" />
+    <Compile Include="python\disassemblylib\archmips.py" />
+    <Compile Include="python\disassemblylib\archz80.py" />
+    <Compile Include="python\disassemblylib\constants.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="python\disassemblylib\parser.py" />
+    <Compile Include="python\disassemblylib\util.py" />
+    <Compile Include="python\disassemblylib\__init__.py" />
+    <Compile Include="python\disassembly_data.py" />
+    <Compile Include="python\disassembly_persistence.py" />
+    <Compile Include="python\editor_state.py" />
+    <Compile Include="python\graveyard.py" />
+    <Compile Include="python\loaderlib\amiga\doshunks.py" />
+    <Compile Include="python\loaderlib\amiga\hunkfile.py" />
+    <Compile Include="python\loaderlib\amiga\__init__.py" />
+    <Compile Include="python\loaderlib\atarist\prgfile.py" />
+    <Compile Include="python\loaderlib\atarist\__init__.py" />
+    <Compile Include="python\loaderlib\binary\__init__.py" />
+    <Compile Include="python\loaderlib\constants.py" />
+    <Compile Include="python\loaderlib\human68k\xfile.py" />
+    <Compile Include="python\loaderlib\human68k\__init__.py" />
+    <Compile Include="python\loaderlib\snes\romfile.py" />
+    <Compile Include="python\loaderlib\snes\__init__.py" />
+    <Compile Include="python\loaderlib\zxspectrum\z80file.py" />
+    <Compile Include="python\loaderlib\zxspectrum\__init__.py" />
+    <Compile Include="python\loaderlib\__init__.py" />
+    <Compile Include="python\persistence.py" />
+    <Compile Include="python\qtui.py" />
+    <Compile Include="python\res.py" />
+    <Compile Include="python\test.py" />
+    <Compile Include="python\testlib\constants.py" />
+    <Compile Include="python\testlib\tool_assembler_vasm.py" />
+    <Compile Include="python\testlib\__init__.py" />
+    <Compile Include="python\test_disassemblylib.py" />
+    <Compile Include="python\test_testlib.py" />
+    <Compile Include="python\toolapi.py" />
+    <Compile Include="python\util.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="python" />
+    <Folder Include="python\disassemblylib" />
+    <Folder Include="python\loaderlib" />
+    <Folder Include="python\loaderlib\amiga" />
+    <Folder Include="python\loaderlib\atarist" />
+    <Folder Include="python\loaderlib\binary" />
+    <Folder Include="python\loaderlib\human68k" />
+    <Folder Include="python\loaderlib\snes" />
+    <Folder Include="python\loaderlib\zxspectrum" />
+    <Folder Include="python\testlib" />
+    <Folder Include="test-data" />
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />
+  </ItemGroup>
+  <Import Project="$(PtvsTargetsFile)" Condition="Exists($(PtvsTargetsFile))" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" Condition="!Exists($(PtvsTargetsFile))" />
+</Project>

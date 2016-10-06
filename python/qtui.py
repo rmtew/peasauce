@@ -683,11 +683,11 @@ class MainWindow(QtGui.QMainWindow):
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
 
         self.edit_datatype_submenu_action = QtGui.QAction("Change address datatype", self, statusTip="Change data type at current address")
-        self.edit_set_datatype_code_action = QtGui.QAction("Code", self, statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
-        self.edit_set_datatype_32bit_action = QtGui.QAction("32 bit", self, statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
-        self.edit_set_datatype_16bit_action = QtGui.QAction("16 bit", self, statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
-        self.edit_set_datatype_8bit_action = QtGui.QAction("8 bit", self, statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
-        self.edit_set_datatype_ascii_action = QtGui.QAction("ASCII", self, statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
+        self.edit_set_datatype_code_action = QtGui.QAction("Code", self, shortcut="Alt+C", statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
+        self.edit_set_datatype_32bit_action = QtGui.QAction("32 bit", self, shortcut="Alt+3", statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
+        self.edit_set_datatype_16bit_action = QtGui.QAction("16 bit", self, shortcut="Alt+2", statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
+        self.edit_set_datatype_8bit_action = QtGui.QAction("8 bit", self, shortcut="Alt+1", statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
+        self.edit_set_datatype_ascii_action = QtGui.QAction("ASCII", self, shortcut="Alt+A", statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
 
         self.edit_numericbase_submenu_action = QtGui.QAction("Operand numeric base", self, statusTip="Change numeric base of selected operand")
         self.edit_set_numericbase_decimal_action = QtGui.QAction("Decimal", self, statusTip="Change numeric base to decimal", triggered=lambda: None)
@@ -696,8 +696,14 @@ class MainWindow(QtGui.QMainWindow):
 
         self.search_find = QtGui.QAction("Find..", self, shortcut="Ctrl+F", statusTip="Find some specific text", triggered=self.menu_search_find)
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
-        self.goto_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
-        self.goto_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
+        if True:
+            self.search_previous_submenu_action = QtGui.QAction("Previous", self, statusTip="Previous navigation options")
+            self.search_previous_code_block_action = QtGui.QAction("Go to previous code", self, shortcut="Ctrl+Shift+C", statusTip="View previous code block", triggered=self.menu_search_goto_previous_code_block)
+            self.search_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
+        if True:
+            self.search_next_submenu_action = QtGui.QAction("Next", self, statusTip="Next navigation options")
+            self.search_next_code_block_action = QtGui.QAction("Go to next code", self, shortcut="Ctrl+C", statusTip="View next code block", triggered=self.menu_search_goto_next_code_block)
+            self.search_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
         self.choose_font_action = QtGui.QAction("Select disassembly font", self, statusTip="Change the font used in the disassembly view", triggered=self.menu_settings_choose_font)
 
         self.file_menu = self.menuBar().addMenu("&File")
@@ -732,8 +738,18 @@ class MainWindow(QtGui.QMainWindow):
         self.search_menu = self.menuBar().addMenu("&Search")
         self.search_menu.addAction(self.search_find)
         self.search_menu.addAction(self.goto_address_action)
-        self.search_menu.addAction(self.goto_previous_data_block_action)
-        self.search_menu.addAction(self.goto_next_data_block_action)
+        self.search_menu.addAction(self.search_previous_submenu_action)
+        if True:
+            self.search_previous_submenu = QtGui.QMenu(self.search_menu)
+            self.search_previous_submenu.addAction(self.search_previous_data_block_action)
+            self.search_previous_submenu.addAction(self.search_previous_code_block_action)
+            self.search_previous_submenu_action.setMenu(self.search_previous_submenu)
+        self.search_menu.addAction(self.search_next_submenu_action)
+        if True:
+            self.search_next_submenu = QtGui.QMenu(self.search_menu)
+            self.search_next_submenu.addAction(self.search_next_data_block_action)
+            self.search_next_submenu.addAction(self.search_next_code_block_action)
+            self.search_next_submenu_action.setMenu(self.search_next_submenu)
 
         self.viewMenu = self.menuBar().addMenu("&View")
 
@@ -795,8 +811,22 @@ class MainWindow(QtGui.QMainWindow):
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
+    def menu_search_goto_previous_code_block(self):
+        errmsg = self.editor_state.goto_previous_code_block(self.editor_client)
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
+
     def menu_search_goto_previous_data_block(self):
         errmsg = self.editor_state.goto_previous_data_block(self.editor_client)
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
+
+    def menu_search_goto_next_code_block(self):
+        errmsg = self.editor_state.goto_next_code_block(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
         else:

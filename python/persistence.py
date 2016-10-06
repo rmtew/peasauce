@@ -44,7 +44,7 @@ def read_bytes(f, num_bytes):
 def read_string(f):
     s = ""
     while 1:
-        v = f.read(1)
+        v = read_bytes(f, 1)
         if v == '\0':
             break
         s += v

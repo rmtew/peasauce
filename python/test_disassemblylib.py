@@ -146,6 +146,7 @@ class UtilFunctionalityTestCase(unittest.TestCase):
                 self.assertEqual(extracted_value, expected_value)
 
     def test_set_masked_value_for_variable(self):
+        # Whether the value gets updated for the variable.
         test_data = [
             ("L", self.mask1L_bit_string, self.mask1L_base_mask_string),
             ("M", self.mask1M_bit_string, self.mask1M_base_mask_string),
@@ -185,6 +186,25 @@ class UtilFunctionalityTestCase(unittest.TestCase):
             self.assertTrue(var_char in char_vars, "var '%s' not present" % var_char)
             self.assertEqual(char_vars[var_char], var_value, "%s != %s" % (char_vars[var_char], var_value))
 
+    def test_get_mask_variables(self):
+        # Whether all the variables are identified within the mask string.
+        char_vars = util.get_mask_variables(self.mask1_template_string)
+        self.assertEqual(char_vars, set([ "L", "M", "T" ]))
+
+    def test_update_mask_string(self):
+        # Whether variables are correctly inserted into the mask string.
+        self.assertEqual("001MMMM001110TTT", util.update_mask_string(self.mask1_template_string, "L", util._b2n("0")))
+        self.assertEqual("101MMMM001110TTT", util.update_mask_string(self.mask1_template_string, "L", util._b2n("1")))
+        self.assertRaises(ValueError, util.update_mask_string, self.mask1_template_string, "L", util._b2n("10"))
+
+        self.assertEqual("L010000001110TTT", util.update_mask_string(self.mask1_template_string, "M", util._b2n("0")))
+        self.assertEqual("L011011001110TTT", util.update_mask_string(self.mask1_template_string, "M", util._b2n("1011")))
+        self.assertRaises(ValueError, util.update_mask_string, self.mask1_template_string, "M", util._b2n("11111"))
+
+        self.assertEqual("L01MMMM001110000", util.update_mask_string(self.mask1_template_string, "T", util._b2n("0")))
+        self.assertEqual("L01MMMM001110101", util.update_mask_string(self.mask1_template_string, "T", util._b2n("101")))
+        self.assertRaises(ValueError, util.update_mask_string, self.mask1_template_string, "T", util._b2n("1111"))
+
     def test_binary2number(self):
         self.assertTrue(util._b2n("1") == 1)
         self.assertTrue(util._b2n("10") == (1<<1))
@@ -201,9 +221,10 @@ class UtilFunctionalityTestCase(unittest.TestCase):
         self.assertTrue(util._n2b(256) == "100000000")
 
     def test_number2binary_padded(self):
-        """ Padded out to multiples of 4 bits (octets). """
+        # Padded out to multiples of 4 bits (an octet worth).
         self.assertTrue(util._n2b(1, dynamic_padding=True) == "0001")
         self.assertTrue(util._n2b(15, dynamic_padding=True) == "1111")
+        # Padded out to multiples of 8 bits (a byte worth).
         self.assertTrue(util._n2b(16, dynamic_padding=True) == "00010000")
         self.assertTrue(util._n2b(255, dynamic_padding=True) == "11111111")
 

@@ -6,13 +6,23 @@ You can email me at:
 
  richard.m.tew@gmail.com
 
-If you wish to generally support or encourage the development of this tool, or sponsor the development of specific features, [Paypal donations](http://disinterest.org/donate.html) will be used for that purpose.  For those who are serious about sponsoring development of a specific feature it is best to discuss it with me at my email address first.
+If you wish to generally support or encourage the development of this tool, or
+sponsor the development of specific features, [Paypal donations](http://disinterest.org/donate.html)
+will be used for that purpose.  For those who are serious about sponsoring
+development of a specific feature it is best to discuss it with me at my email
+address first.
 
 ## Goal
 
-The current primary goal is to handle disassembling Amiga m68000 executables. Support for the wider family of m680x0 instructions, or executables for other platforms that used these chips is within scope, in order to drive better code structure for later expansion to other architectures or platforms.
+The current primary goal is to handle disassembling Amiga m68000 executables.
+Support for the wider family of m680x0 instructions, or executables for other
+platforms that used these chips is within scope, in order to drive better
+code structure for later expansion to other architectures or platforms.
 
-Using Resource to disassemble within an Amiga emulator is still a wonderful experience, however it has aged.  It is not possible to modify it, and it is also nowhere near as nice as being able to use a proper application in your own operating system.
+Using Resource to disassemble within an Amiga emulator is still a wonderful
+experience, however it has aged.  It is not possible to modify it, and it is
+also nowhere near as nice as being able to use a proper application in your
+own operating system.
 
 ## Features
 
@@ -23,7 +33,9 @@ Peasauce can currently do the following:
 * Load and attempt to disassemble X68000 m68k executable files.
 * Load and attempt to disassemble m68k binary files, with specified load and entrypoint addresses.
 
-While there is comprehensive m68k support, it is not currently complete.  There are also cases where special features of certain executable file formats are not currently supported.
+While there is comprehensive m68k support, it is not currently complete. 
+There are also cases where special features of certain executable file formats
+are not currently supported.
 
 ![Editing a label](http://i.imgur.com/cUMLj.png "Editing a label")
 
@@ -35,14 +47,22 @@ This project is licensed under the MIT license.
 
 ## Installation
 
-Currently Peasauce is prototyped in Python 2.7 using Pyside to display it's user interface.  The only installation you need to do, is to ensure the following prerequisites are installed on your computer.
+Currently Peasauce is prototyped in Python 2.7 using Pyside to display it's
+user interface.  The only installation you need to do, is to ensure the
+following prerequisites are installed on your computer.
 
 1. Download and install [Python 2.7](http://python.org/download/) for your platform.
 2. Download and install [PySide for Python 2.7](http://www.pyside.org/) for your platform (pip install pyside).
 
 ## Usage
 
-With the prerequisites installed, and with the source code that accompanies this file on hand, you should be able to run Peasauce.  Note that you will need either Amiga, X68000 or Atari ST executable files to load into it.  You can obtain many Amiga programs from [aminet.net](http://aminet.net).  Some Amiga programs are archived using now obscure compression programs, but if you also download and install [7zip](www.7-zip.org) you should be able to extract files from within them.
+With the prerequisites installed, and with the source code that accompanies
+this file on hand, you should be able to run Peasauce.  Note that you will
+need either Amiga, X68000 or Atari ST executable files to load into it.  You
+can obtain many Amiga programs from [aminet.net](http://aminet.net).  Some
+Amiga programs are archived using now obscure compression programs, but if
+you also download and install [7zip](www.7-zip.org) you should be able to
+extract files from within them.
 
 Method 1 (any platform):
 * Enter the "python" directory and run the "qtui.py" Python script.
@@ -65,27 +85,44 @@ You should be able to use the user interface to:
 * Select from, and jump to addresses that refer to the currently selected label (Ctrl+Shift+Right).
 * Return to the last address jumped from (Ctrl+Left).
 
-Note that the ongoing work save file format is not final, and when it changes, older save files will not be loadable.  For this reason, you should not use this disassembler unless you can deal with that.
+Note that the ongoing work save file format is not final, and when it changes,
+older save files will not be loadable.  For this reason, you should not use
+this disassembler unless you can deal with that.
+
+### QT UI Keyboard Shortcuts
+
+* CTRL+g: Open a dialog to enter an address to jump to.
+* CTRL+o: Open a dialog to select a file to open to disassemble.
+* CTRL+Q: Quit.
+* CTRL+D: Go to the next data block that follows the current cursor position.
+* CTRL+SHIFT+D: Go to the first data block that precedes the current cursor position.
+* CTRL+SHIFT+RIGHT: Open a dialog with a list of references to the label at the current cursor position.
+* CTRL+RIGHT: Jump to an address referenced on the line at the current cursor position.
+* CTRL+LEFT: Return to the last address where you followed a reference from.
 
 ## Future Work
 
-This is intended to be a summarised list of points that briefly note intended work, or possible future work.
+This is intended to be a summarised list of points that briefly note intended
+work, or possible future work.
 
 ### Short Term Tasks
 
 #### Bugs
 
-* Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled.  What was wanted here is now unclear with passing of time..
-* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.  What was wanted here is now unclear with passing of time..
+* Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled.  Old entry with unclear meaning.
+* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.  Old entry with unclear meaning.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* Disassembly: Some relocated addresses in data blocks don't get displayed with symbols (e.g. Neuro sample, following referring addresses leads to a raw dc.l data block).
 * UI: There is a period of time between when the loading dialog goes away and when the view is updated with the loaded file data, where the user could use the UI and interfere with things in an unexpected way.  A progress dialog should stay on screen for the duration of this period to prevent this happening through the nature of modal dialogs.
 
 #### Functionality
 
-* UI: Add window to show orphaned blocks.  Address, length, leading data..?
+* UI: The orphaned block window should show entries, including address, length, leading data..?  What are orphaned blocks again?
+* UI: All actions should happen as part of a scriptable system with an accumulator.
+  * Execution of actions should be automatic, interactive (user confirms all), or conditional (user confirms flagged actions, rest are automatic).
+  * Design with an undo/redo functionality.
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
-* UI: Add undo/redo functionality.
 * UI: Uncertain references: use context menu to add labels for one or more selected entries (should work in a macro-like fashion / window.toolapiob).
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).

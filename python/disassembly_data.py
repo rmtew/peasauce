@@ -30,11 +30,11 @@ def _make_bitmask(bitcount):
 
 DATA_TYPE_CODE          = 1
 DATA_TYPE_ASCII         = 2
-DATA_TYPE_BYTE          = 3
-DATA_TYPE_WORD          = 4
-DATA_TYPE_LONGWORD      = 5
+DATA_TYPE_DATA08        = 3
+DATA_TYPE_DATA16        = 4
+DATA_TYPE_DATA32        = 5
 DATA_TYPE_BIT0          = DATA_TYPE_CODE - 1
-DATA_TYPE_BITCOUNT      = _count_bits(DATA_TYPE_LONGWORD)
+DATA_TYPE_BITCOUNT      = _count_bits(DATA_TYPE_DATA32)
 DATA_TYPE_BITMASK       = _make_bitmask(DATA_TYPE_BITCOUNT)
 
 """ Indicates that the block is not backed by file data. """
@@ -47,7 +47,7 @@ BLOCK_FLAG_PROCESSED    = 1 << (DATA_TYPE_BITCOUNT+1)
 BLOCK_SPLIT_BITMASK     = BLOCK_FLAG_ALLOC | DATA_TYPE_BITMASK | BLOCK_FLAG_PROCESSED
 
 
-NUMERIC_DATA_TYPES = (DATA_TYPE_LONGWORD, DATA_TYPE_WORD, DATA_TYPE_BYTE)
+NUMERIC_DATA_TYPES = (DATA_TYPE_DATA32, DATA_TYPE_DATA16, DATA_TYPE_DATA08)
 
 def get_block_flags_data_type(flags):
     return (flags >> DATA_TYPE_BIT0) & DATA_TYPE_BITMASK
@@ -110,7 +110,8 @@ class ProgramData(object):
         self.file_checksum = None
         self.loader_system_name = None
         self.loader_segments = []
-        self.loader_relocated_addresses = None # set()
+        "{ relocated_address_n: [ address_of_reference_1, ... ], }"
+        self.loader_relocated_addresses = None # dict()
         self.loader_relocatable_addresses = None # dict()
         self.loader_entrypoint_segment_id = None
         self.loader_entrypoint_offset = None

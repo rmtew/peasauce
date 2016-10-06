@@ -1,3 +1,5 @@
+OVERVIEW
+~~~~~~~~
 
 INTELLIGENT DISASSEMBLING
 =========================
@@ -18,11 +20,8 @@ Two types of addresses can be found:
 1. Branch addresses.
 2. Reference addresses.
 
-
-
 RELOCATIBLE FILES
 -----------------
-
 
 BINARY FILES
 ------------
@@ -30,3 +29,21 @@ BINARY FILES
 There's a lot more room for ambiguity.
 Imm values (#xxx) cannot be assumed to be references if they fall within known address spaces.
 
+SCRIPTABLE ACTION SYSTEM
+------------------------
+
+Listed in the functionality todo section:
+- Undo/redo.
+
+How to do this?  Stack?  Actions with parameters?
+
+GENERAL NOTES
+~~~~~~~~~~~~~
+
+2016-09-27
+- When I see a block which is one data type, and I want to know why it was
+  created as there are no references to it, to jump to, I want to be able
+  to view information about it.
+  - Inserting a symbol, should note metadata about it's automatic creation.
+- Need to write a new save file migration, from version 4 to 5.
+  - Relocated addresses is now a dictionary, with a list of what

@@ -12,6 +12,7 @@ reproducing the same logic.
 
 # TODO: Look at revisiting the navigation by line numbers (see get_address commentary).
 
+import operator
 import os
 import types
 import threading
@@ -177,7 +178,6 @@ class EditorState(object):
     def reset_state(self, acting_client):
         self.disassembly_data = None
         self.line_number = 0
-        self.specific_address = None
         self.address_stack = []
 
         # Clear out related data.
@@ -233,11 +233,11 @@ class EditorState(object):
             return "code"
         elif data_type == disassembly_data.DATA_TYPE_ASCII:
             return "ascii"
-        elif data_type == disassembly_data.DATA_TYPE_BYTE:
+        elif data_type == disassembly_data.DATA_TYPE_DATA08:
             return "8bit"
-        elif data_type == disassembly_data.DATA_TYPE_WORD:
+        elif data_type == disassembly_data.DATA_TYPE_DATA16:
             return "16bit"
-        elif data_type == disassembly_data.DATA_TYPE_LONGWORD:
+        elif data_type == disassembly_data.DATA_TYPE_DATA32:
             return "32bit"
 
     def get_source_code_for_address(self, acting_client, address):
@@ -268,8 +268,6 @@ class EditorState(object):
         # within.  If the units are 16 bits, the line number may be for 0x10000 and the actual
         # specific user targeted address may be 0x10001.  This is a complication, and it may be
         # worth reconsidering dealing with things in terms of line numbers.  TODO.
-        if self.specific_address is not None:
-            return self.specific_address
         return disassembly.get_address_for_line_number(self.disassembly_data, self.line_number)
 
     def get_line_number_for_address(self, acting_client, address):
@@ -278,11 +276,10 @@ class EditorState(object):
     def get_line_number(self, acting_client):
         return self.line_number
 
-    def set_line_number(self, acting_client, line_number, specific_address=None):
+    def set_line_number(self, acting_client, line_number):
         if type(line_number) not in (int, long):
             raise ValueError("expected numeric type, got %s (%s)" % (line_number.__class__.__name__, line_number))
         self.line_number = line_number
-        self.specific_address = specific_address
 
     def get_line_count(self, acting_client):
         if self.disassembly_data is None:
@@ -344,7 +341,7 @@ class EditorState(object):
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, result)
-        self.set_line_number(acting_client, line_number, result)
+        self.set_line_number(acting_client, line_number)
 
     def goto_referring_address(self, acting_client):
         current_address = self.get_address(acting_client)
@@ -377,16 +374,30 @@ class EditorState(object):
         self.address_stack.append(current_address)
         return True
 
+    def goto_previous_code_block(self, acting_client):
+        line_idx = self.get_line_number(acting_client)
+        new_line_idx = disassembly.get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, -1)
+        if new_line_idx is None:
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+        self.set_line_number(acting_client, new_line_idx)
+
     def goto_previous_data_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, -1)
+        new_line_idx = disassembly.get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, -1, operator.ne)
+        if new_line_idx is None:
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+        self.set_line_number(acting_client, new_line_idx)
+
+    def goto_next_code_block(self, acting_client):
+        line_idx = self.get_line_number(acting_client)
+        new_line_idx = disassembly.get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, 1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
 
     def goto_next_data_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.get_next_data_line_number(self.disassembly_data, line_idx, 1)
+        new_line_idx = disassembly.get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, 1, operator.ne)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
@@ -458,7 +469,7 @@ class EditorState(object):
         address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_LONGWORD)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_DATA32)
 
     def set_datatype_16bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -467,7 +478,7 @@ class EditorState(object):
         address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_WORD)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_DATA16)
 
     def set_datatype_8bit(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -476,7 +487,7 @@ class EditorState(object):
         address = self.get_address(acting_client)
         if address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
-        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_BYTE)
+        self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_DATA08)
 
     def set_datatype_ascii(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:

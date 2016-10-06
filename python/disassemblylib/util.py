@@ -500,15 +500,19 @@ class ArchInterface(object):
             O.vars = copy_values(O.specification.mask_char_vars, var_values)
 
 
-def binary2number(s):
+if False:
+    def binary2number(s):
+        """ Convert a string of 1 and 0 to the equivalent integer value. """
+        v = 0
+        while len(s):
+            v <<= 1
+            if s[0] == "1":
+                v |= 1
+            s = s[1:]
+        return v
+else:
     """ Convert a string of 1 and 0 to the equivalent integer value. """
-    v = 0
-    while len(s):
-        v <<= 1
-        if s[0] == "1":
-            v |= 1
-        s = s[1:]
-    return v
+    binary2number = lambda v: int(v, 2)
 """ Shorter alias for binary2number. """
 _b2n = binary2number
 
@@ -605,22 +609,38 @@ def set_masked_value_for_variable(base_value, mask_string, mask_char, value):
         raise ValueError("set_masked_value_for_variable: invalid value 0x%x (base_value 0x%x, mask 0x%x, value 0x%x, shift %d, shifted value 0x%x)" % (excess_bits, base_value, mask, value, shift, shifted_value))
     return base_value | shifted_value
 
-unwanted_chars = set([ "0", "1" ])
+def update_mask_string(mask_string, mask_char, value):
+    value_mask_substring = _n2b(value)
+    value_bitcount = len(value_mask_substring)
+
+    mask, shift = get_mask_and_shift_from_mask_string(mask_string, mask_char)
+    mask_bit_string = _n2b(mask >> shift)
+    mask_bitcount = len(mask_bit_string)
+    if value_bitcount > mask_bitcount:
+        raise ValueError("too big, %s > %s" % (value_mask_substring, mask_bit_string))
+
+    value_mask_string = _n2b(value, padded_length=mask_bitcount)
+    return mask_string.replace(mask_char * len(mask_bit_string), value_mask_string)
+
+def get_mask_variables(mask_string):
+    variable_chars = set([])
+    for c in mask_string:
+        if c not in variable_chars and c not in "01":
+            variable_chars.add(c)
+    return variable_chars
 
 def get_masked_values_for_variables(value, mask_string, variable_chars=None):
     """ Variables generally come from the decoded instruction opcode.  Map their decoded value to their name. """
     # If the caller does not specify what variables, they want them all.
     if variable_chars is None:
-        variable_chars = set([])
-        for c in mask_string:
-            if c not in variable_chars and c not in unwanted_chars:
-                variable_chars.add(c)
+        variable_chars = get_mask_variables(mask_string)
 
     var_values = {}
     for mask_char in variable_chars:
         if mask_char in mask_string:
             var_values[mask_char] = get_masked_value_for_variable(value, mask_string, mask_char)
     return var_values
+
 
 MAF_CODE = 1
 MAF_ABSOLUTE_ADDRESS = 2
@@ -637,8 +657,8 @@ def generate_all():
     """
     l = [
         "ArchInterface",
-        "_b2n", "_n2b",
-        "_make_specification",
+        "_b2n", "_n2b", "_make_specification",
+        "update_mask_string", "get_mask_variables",
         "get_masked_value_for_variable", "set_masked_value_for_variable",
         "get_masked_values_for_variables", "get_mask_and_shift_from_mask_string",
         "make_operand_mask", "memoize", "process_instruction_list", "signed_hex_string",
