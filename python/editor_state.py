@@ -408,7 +408,8 @@ class EditorState(object):
         result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, -1)
         if type(result) in types.StringTypes:
             return result
-        self.set_line_number(acting_client, result)
+        if result is not None:
+            self.set_line_number(acting_client, result)
 
     def goto_next_code_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
@@ -431,7 +432,8 @@ class EditorState(object):
         result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, 1)
         if type(result) in types.StringTypes:
             return result
-        self.set_line_number(acting_client, result)
+        if result is not None:
+            self.set_line_number(acting_client, result)
 
     ## UNCERTAIN REFERENCES:
 
@@ -554,9 +556,9 @@ class EditorState(object):
             work_state.set_description("Line %d" % line_number)
         else:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-
         # We broke out on a match.
-        return line_number
+        if not work_state.is_cancelled():
+            return line_number
 
     def load_file(self, acting_client):
         self.reset_state(acting_client)

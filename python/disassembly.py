@@ -269,6 +269,16 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
 			for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems()
 			if k in program_data.symbols_by_address
 		]
+
+    block, block_idx = lookup_block_by_line_count(program_data, line_number)
+    data_type = disassembly_data.get_block_data_type(block)
+    if data_type == disassembly_data.DATA_TYPE_DATA32:
+        address = get_address_for_line_number(program_data, line_number)
+        data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
+        value = program_data.loader_data_types.uint32_value(data, block.segment_offset + (address - block.address))
+        if value in program_data.symbols_by_address:
+            return [ value ]
+
     return []
 
 

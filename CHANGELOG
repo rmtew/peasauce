@@ -6,3 +6,4 @@
 	  search for that text in either the label, instruction or operand text.
 	  The prolonged action system is used to prevent locking up the UI, and to
 	  both show progress and to allow the user to cancel.
+	- Symbols on a line within a data block can now be followed.
