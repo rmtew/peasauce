@@ -1,0 +1,8 @@
+2016-10-06
+	- In data blocks, a value that is known to be a relocated address where
+	  the address the value is located in had that value relocated, now gets
+	  displayed as a symbol.
+	- Search for text is now implemented.  It basically does a case-insensitive
+	  search for that text in either the label, instruction or operand text.
+	  The prolonged action system is used to prevent locking up the UI, and to
+	  both show progress and to allow the user to cancel.

@@ -22,6 +22,7 @@ class EnglishStrings(BaseResource):
     TITLE_DATA_TYPE_CHANGE = "Data type change"
     TITLE_LOADING_FILE = "Loading file"
     TITLE_LOADING_PROJECT = "Loading project"
+    TITLE_SEARCHING = "Searching"
 
 strings = EnglishStrings()
 

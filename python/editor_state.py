@@ -137,7 +137,7 @@ class ClientAPI(object):
 
 class WorkState(object):
     completeness = 0.0
-    description = "?"
+    description = "[set a description]"
     cancelled = False
 
     def get_completeness(self): return self.completeness
@@ -179,6 +179,8 @@ class EditorState(object):
         self.disassembly_data = None
         self.line_number = 0
         self.address_stack = []
+        self.last_search_text = None
+        self.last_search_direction = None
 
         # Clear out related data.
         for client in self.clients:
@@ -328,6 +330,16 @@ class EditorState(object):
         line_number = disassembly.get_line_number_for_address(self.disassembly_data, address)
         self.set_line_number(acting_client, line_number)
 
+    def search_text(self, acting_client):
+        result = acting_client.request_text("Find what?", "Text:", self.last_search_text or "")
+        if result is None:
+            return
+        self.last_search_text = result
+        if self.last_search_direction is None:
+            self.last_search_direction = 1
+
+        return self.goto_next_text_match(acting_client)
+
     def goto_address(self, acting_client):
         address = self.get_address(acting_client)
         if address is None: # Current line does not have an address.
@@ -388,6 +400,16 @@ class EditorState(object):
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
 
+    def goto_previous_text_match(self, acting_client):
+        # If no text to search for, prompt for it.
+        if self.last_search_text is None:
+            self.last_search_direction = -1
+            return self.search_text(acting_client)
+        result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, -1)
+        if type(result) in types.StringTypes:
+            return result
+        self.set_line_number(acting_client, result)
+
     def goto_next_code_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
         new_line_idx = disassembly.get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, 1)
@@ -401,6 +423,15 @@ class EditorState(object):
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
+
+    def goto_next_text_match(self, acting_client):
+        # If no text to search for, prompt for it.
+        if self.last_search_text is None:
+            return self.search_text(acting_client)
+        result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, 1)
+        if type(result) in types.StringTypes:
+            return result
+        self.set_line_number(acting_client, result)
 
     ## UNCERTAIN REFERENCES:
 
@@ -500,6 +531,32 @@ class EditorState(object):
 
     def _set_data_type(self, acting_client, address, data_type):
         self._prolonged_action(acting_client, "TITLE_DATA_TYPE_CHANGE", "TEXT_GENERIC_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
+
+    def _search_text(self, acting_client, direction, work_state=None):
+        # Start after the current line.
+        line_number = self.get_line_number(acting_client) + direction
+        line_count = self.get_line_count(acting_client)
+        result_lower_case = self.last_search_text.lower()
+        while line_number >= 0 and line_number < line_count and not work_state.is_cancelled():
+            text = disassembly.get_file_line(self.disassembly_data, line_number, disassembly.LI_LABEL)
+            text += " "+ disassembly.get_file_line(self.disassembly_data, line_number, disassembly.LI_INSTRUCTION)
+            text += " "+ disassembly.get_file_line(self.disassembly_data, line_number, disassembly.LI_OPERANDS)
+            if disassembly.DEBUG_ANNOTATE_DISASSEMBLY:
+                text += " "+ disassembly.get_file_line(self.disassembly_data, line_number, disassembly.LI_ANNOTATIONS)
+
+            if result_lower_case in text.lower():
+                break
+            line_number += direction
+            if direction == 1:
+                work_state.set_completeness(line_number / float(line_count))
+            else:
+                work_state.set_completeness((line_count - line_number) / float(line_count))
+            work_state.set_description("Line %d" % line_number)
+        else:
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
+        # We broke out on a match.
+        return line_number
 
     def load_file(self, acting_client):
         self.reset_state(acting_client)

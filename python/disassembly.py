@@ -687,8 +687,6 @@ def get_referring_addresses(program_data, address):
     referring_addresses.update(program_data.branch_addresses.get(address, set()))
     referring_addresses.update(program_data.reference_addresses.get(address, set()))
     other_addresses = program_data.loader_relocated_addresses.get(address, None)
-# TODO:  These other addresses don't seem to be treated as symbols, and are instead shown as values??
-# ....: ./run.sh samples/amiga-executable/Tutorial2
     if other_addresses is not None:
         referring_addresses.update(other_addresses)
     return referring_addresses

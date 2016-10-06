@@ -91,11 +91,13 @@ this disassembler unless you can deal with that.
 
 ### QT UI Keyboard Shortcuts
 
-* CTRL+g: Open a dialog to enter an address to jump to.
-* CTRL+o: Open a dialog to select a file to open to disassemble.
+* CTRL+G: Open a dialog to enter an address to jump to.
+* CTRL+O: Open a dialog to select a file to open to disassemble.
 * CTRL+Q: Quit.
-* CTRL+D: Go to the next data block that follows the current cursor position.
-* CTRL+SHIFT+D: Go to the first data block that precedes the current cursor position.
+* CTRL+D: Go to the next data block after the current cursor position.
+* CTRL+SHIFT+D: Go to the next data block before the current cursor position.
+* CTRL+F: Go to the next search match after the current cursor position.
+* CTRL+SHIFT+F: Go to the next search match before the current cursor position.
 * CTRL+SHIFT+RIGHT: Open a dialog with a list of references to the label at the current cursor position.
 * CTRL+RIGHT: Jump to an address referenced on the line at the current cursor position.
 * CTRL+LEFT: Return to the last address where you followed a reference from.
@@ -112,7 +114,6 @@ work, or possible future work.
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled.  Old entry with unclear meaning.
 * Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.  Old entry with unclear meaning.
 * Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
-* Disassembly: Some relocated addresses in data blocks don't get displayed with symbols (e.g. Neuro sample, following referring addresses leads to a raw dc.l data block).
 * UI: There is a period of time between when the loading dialog goes away and when the view is updated with the loaded file data, where the user could use the UI and interfere with things in an unexpected way.  A progress dialog should stay on screen for the duration of this period to prevent this happening through the nature of modal dialogs.
 
 #### Functionality

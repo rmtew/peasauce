@@ -393,6 +393,12 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
         if len(save_file_path):
             return open(save_file_path, "wb")
 
+    def request_text(self, title_text, prompt_text, default_text=""):
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), title_text, prompt_text, QtGui.QLineEdit.Normal, default_text)
+        text = text.strip()
+        if ok and text != '':
+            return text
+
     def request_address(self, default_address):
         text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
         text = text.strip()
@@ -694,16 +700,18 @@ class MainWindow(QtGui.QMainWindow):
         self.edit_set_numericbase_hexadecimal_action = QtGui.QAction("Hexadecimal", self, statusTip="Change numeric base to hexadecimal", triggered=lambda: None)
         self.edit_set_numericbase_binary_action = QtGui.QAction("Binary", self, statusTip="Change numeric base to binary", triggered=lambda: None)
 
-        self.search_find = QtGui.QAction("Find..", self, shortcut="Ctrl+F", statusTip="Find some specific text", triggered=self.menu_search_find)
+        self.search_find = QtGui.QAction("Find..", self, statusTip="Find some specific text", triggered=self.menu_search_find)
         self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
         if True:
             self.search_previous_submenu_action = QtGui.QAction("Previous", self, statusTip="Previous navigation options")
-            self.search_previous_code_block_action = QtGui.QAction("Go to previous code", self, shortcut="Ctrl+Shift+C", statusTip="View previous code block", triggered=self.menu_search_goto_previous_code_block)
-            self.search_previous_data_block_action = QtGui.QAction("Go to previous data", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
+            self.search_previous_code_block_action = QtGui.QAction("Go to previous code block", self, shortcut="Ctrl+Shift+C", statusTip="View previous code block", triggered=self.menu_search_goto_previous_code_block)
+            self.search_previous_data_block_action = QtGui.QAction("Go to previous data block", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
+            self.search_previous_text_match_action = QtGui.QAction("Go to previous text match", self, shortcut="Ctrl+Shift+F", statusTip="View previous text match", triggered=self.menu_search_goto_previous_text_match)
         if True:
             self.search_next_submenu_action = QtGui.QAction("Next", self, statusTip="Next navigation options")
-            self.search_next_code_block_action = QtGui.QAction("Go to next code", self, shortcut="Ctrl+C", statusTip="View next code block", triggered=self.menu_search_goto_next_code_block)
-            self.search_next_data_block_action = QtGui.QAction("Go to next data", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
+            self.search_next_code_block_action = QtGui.QAction("Go to next code block", self, shortcut="Ctrl+C", statusTip="View next code block", triggered=self.menu_search_goto_next_code_block)
+            self.search_next_data_block_action = QtGui.QAction("Go to next data block", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
+            self.search_next_text_match_action = QtGui.QAction("Go to next text match", self, shortcut="Ctrl+F", statusTip="View next text match", triggered=self.menu_search_goto_next_text_match)
         self.choose_font_action = QtGui.QAction("Select disassembly font", self, statusTip="Change the font used in the disassembly view", triggered=self.menu_settings_choose_font)
 
         self.file_menu = self.menuBar().addMenu("&File")
@@ -743,12 +751,14 @@ class MainWindow(QtGui.QMainWindow):
             self.search_previous_submenu = QtGui.QMenu(self.search_menu)
             self.search_previous_submenu.addAction(self.search_previous_data_block_action)
             self.search_previous_submenu.addAction(self.search_previous_code_block_action)
+            self.search_previous_submenu.addAction(self.search_previous_text_match_action)
             self.search_previous_submenu_action.setMenu(self.search_previous_submenu)
         self.search_menu.addAction(self.search_next_submenu_action)
         if True:
             self.search_next_submenu = QtGui.QMenu(self.search_menu)
             self.search_next_submenu.addAction(self.search_next_data_block_action)
             self.search_next_submenu.addAction(self.search_next_code_block_action)
+            self.search_next_submenu.addAction(self.search_next_text_match_action)
             self.search_next_submenu_action.setMenu(self.search_next_submenu)
 
         self.viewMenu = self.menuBar().addMenu("&View")
@@ -800,9 +810,11 @@ class MainWindow(QtGui.QMainWindow):
             self.close()
 
     def menu_search_find(self):
-        text, ok = QtGui.QInputDialog.getText(self, "Find what?", "Text:", QtGui.QLineEdit.Normal, "")
-        if ok and text != '':
-            pass
+        errmsg = self.editor_state.search_text(self.editor_client)
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_address(self):
         errmsg = self.editor_state.goto_address(self.editor_client)
@@ -825,6 +837,13 @@ class MainWindow(QtGui.QMainWindow):
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
+    def menu_search_goto_previous_text_match(self):
+        errmsg = self.editor_state.goto_previous_text_match(self.editor_client)
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
+
     def menu_search_goto_next_code_block(self):
         errmsg = self.editor_state.goto_next_code_block(self.editor_client)
         if type(errmsg) in types.StringTypes:
@@ -834,6 +853,13 @@ class MainWindow(QtGui.QMainWindow):
 
     def menu_search_goto_next_data_block(self):
         errmsg = self.editor_state.goto_next_data_block(self.editor_client)
+        if type(errmsg) in types.StringTypes:
+            QtGui.QMessageBox.information(self, "Error", errmsg)
+        else:
+            self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
+
+    def menu_search_goto_next_text_match(self):
+        errmsg = self.editor_state.goto_next_text_match(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
         else:
