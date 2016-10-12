@@ -145,10 +145,10 @@ def has_segment_headers(system_name):
 def get_segment_header(system_name, segment_id, data):
     return get_system(system_name).get_segment_header(segment_id, data)
 
-def get_data_instruction_string(system_name, segments, segment_id, with_file_data):
+def get_data_instruction_string(system_name, segments, segment_id, data_size, with_file_data):
     segment_type = get_segment_type(segments, segment_id)
     is_bss_segment = segment_type == SEGMENT_TYPE_BSS
-    return get_system(system_name).get_data_instruction_string(is_bss_segment, with_file_data)
+    return get_system(system_name).get_data_instruction_string(data_size, is_bss_segment, with_file_data)
 
 
 def get_load_address(file_info):
@@ -166,6 +166,15 @@ class DataTypes(object):
         self._endian_char = [ "<", ">" ][endian_id == constants.ENDIAN_BIG]
 
     ## Data access related operations.
+
+    def sized_value(self, data_size, bytes, idx=None):
+        if data_size == constants.DATA_TYPE_DATA32:
+            return self.uint32_value(bytes, idx)
+        elif data_size == constants.DATA_TYPE_DATA16:
+            return self.uint16_value(bytes, idx)
+        elif data_size == constants.DATA_TYPE_DATA08:
+            return self.uint8_value(bytes, idx)
+        raise Exception("unsupported size", data_size)
 
     def uint8_value(self, bytes, idx=None):
         if idx:

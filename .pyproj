@@ -21,8 +21,11 @@
     <PtvsTargetsFile>$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets</PtvsTargetsFile>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="CHANGELOG" />
     <Content Include="CHANGES.txt" />
     <Content Include="cli.sh" />
+    <Content Include="LICENSE" />
+    <Content Include="NOTES.md" />
     <Content Include="python\NOTES.txt" />
     <Content Include="README.md" />
     <Content Include="run.bat" />

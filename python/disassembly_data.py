@@ -37,6 +37,25 @@ DATA_TYPE_BIT0          = DATA_TYPE_CODE - 1
 DATA_TYPE_BITCOUNT      = _count_bits(DATA_TYPE_DATA32)
 DATA_TYPE_BITMASK       = _make_bitmask(DATA_TYPE_BITCOUNT)
 
+DATA_TYPE_SIZES = [
+    (DATA_TYPE_DATA32, 4),
+    (DATA_TYPE_DATA16, 2),
+    (DATA_TYPE_DATA08, 1),
+]
+
+def __init_descending_data_sizes():
+    def __get_descending_data_sizes_from(data_size):
+        for i, entry in enumerate(DATA_TYPE_SIZES):
+            if data_size == entry[0]:
+                return DATA_TYPE_SIZES[i:]
+        raise Exception("unsupported size", data_size)
+    result = {}
+    for value in DATA_TYPE_SIZES:
+        result[value[0]] = __get_descending_data_sizes_from(value[0])
+    return result
+
+DESCENDING_DATA_TYPE_SIZES = __init_descending_data_sizes()
+
 """ Indicates that the block is not backed by file data. """
 BLOCK_FLAG_ALLOC        = 1 << (DATA_TYPE_BITCOUNT+0)
 

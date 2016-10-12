@@ -1,4 +1,6 @@
 2016-10-06
+	- Remove hard-coded m68k references from core disassembly logic.
+2016-10-06
 	- In data blocks, a value that is known to be a relocated address where
 	  the address the value is located in had that value relocated, now gets
 	  displayed as a symbol.

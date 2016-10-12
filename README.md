@@ -143,6 +143,7 @@ work, or possible future work.
 * Metadata: "Imm"/absolute operand value label lookup should be improved.  Track offsets in instruction relocations are made?
 * Editor state: Error messages should be reconsidered.  Return the message name, not the text?
 * File loading: Saved projects save relocation metadata, but have to reload the relocation data to do the relocations (which recalculates the metadata).
+* UI: Display configuration and trailing lines is m68k specific (get_instruction_line_count).
 
 ### Medium Term Tasks
 
@@ -153,6 +154,7 @@ work, or possible future work.
 * Decompilation: Look into IRs.  LLVM?
 * Disassembly: Handle more / differentiate between different M680x0 instructions.
 * File loading: Use 'vamos' or Toni Wilen's WinUAE example to run amiga packer detection and unpacking.
+* Persistence: Currently a flat representation of edits is stored, investigate storing a change history which gets applied on load (#0001).
 
 ### Long Term Tasks
 

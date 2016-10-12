@@ -41,7 +41,13 @@ class System(object):
         return "this section header should never be seen"
 
     def get_data_instruction_string(self, is_bss_segment, with_file_data):
+        suffix_by_size = {
+            constants.DATA_TYPE_DATA08: "B",
+            constants.DATA_TYPE_DATA16: "W",
+            constants.DATA_TYPE_DATA32: "L",
+        }
+        suffix = "."+ suffix_by_size[data_size]
         if is_bss_segment:
-            return "DS"
-        return "DC"
+            return "DS"+ suffix
+        return "DC"+ suffix
 

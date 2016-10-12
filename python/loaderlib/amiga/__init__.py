@@ -53,9 +53,15 @@ class System(object):
             s += ", "+ hunkfile.MEMF_NAMES[memf_mask & hunkfile.MEMF_MASK]
         return s
 
-    def get_data_instruction_string(self, is_bss_segment, with_file_data):
+    def get_data_instruction_string(self, data_size, is_bss_segment, with_file_data):
+        suffix_by_size = {
+            constants.DATA_TYPE_DATA08: "B",
+            constants.DATA_TYPE_DATA16: "W",
+            constants.DATA_TYPE_DATA32: "L",
+        }
+        suffix = "."+ suffix_by_size[data_size]
         if with_file_data:
-            return "DC"
+            return "DC"+ suffix
         if is_bss_segment:
-            return "DS"
-        return "DX"
+            return "DS"+ suffix
+        return "DX"+ suffix

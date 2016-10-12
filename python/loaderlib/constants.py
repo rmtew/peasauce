@@ -104,3 +104,12 @@ class MatchResult(object):
     confidence = MATCH_NONE
     platform_id = PLATFORM_UNKNOWN
     file_format_id = FILE_FORMAT_UNKNOWN
+
+def __import_data_types():
+    import disassembly_data
+    for attr_name in dir(disassembly_data):
+        if attr_name.startswith("DATA_TYPE_"):
+            globals()[attr_name] = getattr(disassembly_data, attr_name)
+
+__import_data_types()
+

@@ -72,6 +72,7 @@ def get_block_header_line_count(program_data, block):
 
 def get_instruction_line_count(program_data, match):
     line_count = 1
+    # TODO(rmtew): Make non-architecture specific.  m68k = should be a per-instruction configuration?
     if display_configuration.trailing_line_trap and match.specification.key == "TRAP":
         line_count += 1
     elif display_configuration.trailing_line_branch and match.specification.key in ("Bcc", "DBcc",):
@@ -94,7 +95,7 @@ def get_block_line_count(program_data, block):
                 line_count += 1
     elif data_type in disassembly_data.NUMERIC_DATA_TYPES:
         sizes = get_data_type_sizes(block)
-        for size_char, num_bytes, size_count, size_lines in sizes:
+        for data_size, num_bytes, size_count, size_lines in sizes:
             line_count += size_lines
     elif data_type == disassembly_data.DATA_TYPE_ASCII:
         line_count = len(block.line_data)
@@ -202,7 +203,7 @@ def get_line_number_for_address(program_data, address):
         block_lineN = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
         block_offsetN = 0
         address_block_offset = address - block.address
-        for size_char, num_bytes, size_count, size_lines in get_data_type_sizes(block):
+        for data_size, num_bytes, size_count, size_lines in get_data_type_sizes(block):
             block_offset0 = block_offsetN
             block_offsetN += num_bytes * size_count
             block_line0 = block_lineN
@@ -238,7 +239,7 @@ def get_address_for_line_number(program_data, line_number):
         base_line_count = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
         block_lineN = base_line_count
         block_offsetN = 0
-        for size_char, num_bytes, size_count, size_lines in get_data_type_sizes(block):
+        for data_size, num_bytes, size_count, size_lines in get_data_type_sizes(block):
             block_offset0 = block_offsetN
             block_offsetN += num_bytes * size_count
             block_line0 = block_lineN
@@ -299,17 +300,12 @@ def get_all_references(program_data):
 """
 
 def get_data_type_sizes(block):
-    data_type = disassembly_data.get_block_data_type(block)
-    if data_type == disassembly_data.DATA_TYPE_DATA32:
-        size_types = [ ("L", 4), ("W", 2), ("B", 1) ]
-    elif data_type == disassembly_data.DATA_TYPE_DATA16:
-        size_types = [ ("W", 2), ("B", 1) ]
-    elif data_type == disassembly_data.DATA_TYPE_DATA08:
-        size_types = [ ("B", 1) ]
+    block_data_size = disassembly_data.get_block_data_type(block)
+    size_types = disassembly_data.DESCENDING_DATA_TYPE_SIZES[block_data_size]
 
     sizes = []
     unconsumed_byte_count = block.length
-    for size_char, num_bytes in size_types:
+    for data_size, num_bytes in size_types:
         size_count = unconsumed_byte_count / num_bytes
         if size_count == 0:
             continue
@@ -317,11 +313,11 @@ def get_data_type_sizes(block):
             size_lines = 1
         else:
             size_lines = size_count
-        sizes.append((size_char, num_bytes, size_count, size_lines))
+        sizes.append((data_size, num_bytes, size_count, size_lines))
         unconsumed_byte_count -= size_count * num_bytes
     return sizes
 
-def find_previous_entry(line_data, idx, entry_type):
+def find_previous_entry(program_data, block, line_data, idx, entry_type):
     while idx > 0:
         idx -= 1
         if line_data[idx][0] == entry_type:
@@ -345,7 +341,7 @@ def get_block_footer_line_count(program_data, block, block_idx):
             if type(entry) is int:
                 entry = realise_instruction_entry(program_data, block, entry)
             if display_configuration.trailing_line_exit:
-                preceding_entry = find_previous_entry(block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
+                preceding_entry = find_previous_entry(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
                 if program_data.dis_is_final_instruction_func(entry, preceding_entry):
                     line_count += 1
 
@@ -520,6 +516,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
             if line_type_id == disassembly_data.SLD_INSTRUCTION:
                 lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(program_data, address, absolute_info)
                 operand_string = ""
+                # TODO(rmtew): Make non-architecture specific.  m68k = operand seperator, configurable spacing, assembler-specific setting?
                 for i, operand in enumerate(line_match.opcodes):
                     if i > 0:
                         operand_string += ", "
@@ -543,7 +540,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         block_lineN = block_line_count0 + leading_line_count
         block_offsetN = block.segment_offset
         sizes = get_data_type_sizes(block)
-        for i, (size_char, num_bytes, size_count, size_lines) in enumerate(sizes):
+        for i, (data_size, num_bytes, size_count, size_lines) in enumerate(sizes):
             block_offset0 = block_offsetN
             block_offsetN += num_bytes * size_count
             block_line0 = block_lineN
@@ -564,21 +561,17 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                         return ""
                     return label
                 elif column_idx == LI_INSTRUCTION:
-                    name = loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, (block.flags & disassembly_data.BLOCK_FLAG_ALLOC) != disassembly_data.BLOCK_FLAG_ALLOC)
-                    return name +"."+ size_char
+                    with_file_data = (block.flags & disassembly_data.BLOCK_FLAG_ALLOC) != disassembly_data.BLOCK_FLAG_ALLOC
+                    return loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, data_size, with_file_data)
                 elif column_idx == LI_OPERANDS:
                     if block.flags & disassembly_data.BLOCK_FLAG_ALLOC:
                         return str(size_count)
                     data = loaderlib.get_segment_data(segments, block.segment_id)
-                    if size_char == "L":
-                        value = program_data.loader_data_types.uint32_value(data, data_idx)
-                    elif size_char == "W":
-                        value = program_data.loader_data_types.uint16_value(data, data_idx)
-                    elif size_char == "B":
-                        value = program_data.loader_data_types.uint8_value(data, data_idx)
+                    value = program_data.loader_data_types.sized_value(data_size, data, data_idx)
                     label = None
                     # Use the value's symbol for data aligned to pointer size, if this data value is an address that was relocated.
-                    if size_char == "L" and value in program_data.loader_relocated_addresses:
+                    # TODO(rmtew): Should this be per-architecture pointer sized, not just 32 bit?
+                    if data_size == disassembly_data.DATA_TYPE_DATA32 and value in program_data.loader_relocated_addresses:
                         segment_address = loaderlib.get_segment_address(segments, block.segment_id)
                         # But only if the address of the data had that address relocated within it.
                         if segment_address + data_idx in program_data.loader_relocated_addresses[value]:
@@ -610,12 +603,12 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                         return ""
                     return label
                 elif column_idx == LI_INSTRUCTION:
-                    name = loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, True)
-                    return name +".B"
+                    return loaderlib.get_data_instruction_string(program_data.loader_system_name, segments, block.segment_id, disassembly_data.DATA_TYPE_DATA08, True)
                 elif column_idx == LI_OPERANDS:
                     string = ""
                     last_value = None
                     data = loaderlib.get_segment_data(segments, block.segment_id)
+                    # TODO(rmtew): Make non-architecture specific.  m68k = comma separation?
                     for byte in data[data_idx:data_idx+byte_length]:
                         if byte >= 32 and byte < 127:
                             # Sequential displayable characters get collected into a contiguous string.
@@ -720,7 +713,8 @@ def insert_symbol(program_data, address, symbol_label):
     if not check_known_address(program_data, address):
         return
     program_data.symbols_by_address[address] = symbol_label
-    if program_data.symbol_insert_func: program_data.symbol_insert_func(address, symbol_label)
+    if program_data.symbol_insert_func:
+        program_data.symbol_insert_func(address, symbol_label)
 
 def get_symbol_for_address(program_data, address, absolute_info=None):
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
@@ -1011,51 +1005,50 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
     # At this point we are attempting to change a block from one data type to another.
     program_data.new_block_events = []
     program_data.block_data_type_events = []
-    try:
-        if data_type == disassembly_data.DATA_TYPE_CODE:
-            # Force this, so that the attempt can go ahead.
-            block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
-            # This can fail, so we do not explicitly change the block ourselves.
-            _process_address_as_code(program_data, address, set([ ]), work_state)
+    if data_type == disassembly_data.DATA_TYPE_CODE:
+        # Force this, so that the attempt can go ahead.
+        block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
+        # This can fail, so we do not explicitly change the block ourselves.
+        _process_address_as_code(program_data, address, set([ ]), work_state)
+    else:
+        # 1. Get the pre-change data.
+        line0 = get_block_line_number(program_data, block_idx)
+        old_line_count = get_block_line_count_cached(program_data, block)
+
+        # 2. Apply the change to a temporary block.
+        temp_block = disassembly_data.SegmentBlock(block)
+        disassembly_data.set_block_data_type(temp_block, data_type)
+        program_data.block_data_type_events.append((block, block_data_type, data_type, original_block_length))
+        if data_type == disassembly_data.DATA_TYPE_ASCII:
+            _process_block_as_ascii(program_data, temp_block)
         else:
-            # 1. Get the pre-change data.
-            line0 = get_block_line_number(program_data, block_idx)
-            old_line_count = get_block_line_count_cached(program_data, block)
+            temp_block.line_data = None
+        temp_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
+        temp_block.line_count = get_block_line_count(program_data, temp_block)
 
-            # 2. Apply the change to a temporary block.
-            temp_block = disassembly_data.SegmentBlock(block)
-            disassembly_data.set_block_data_type(temp_block, data_type)
-            program_data.block_data_type_events.append((block, block_data_type, data_type, original_block_length))
-            if data_type == disassembly_data.DATA_TYPE_ASCII:
-                _process_block_as_ascii(program_data, temp_block)
-            else:
-                temp_block.line_data = None
-            temp_block.flags &= ~disassembly_data.BLOCK_FLAG_PROCESSED
-            temp_block.line_count = get_block_line_count(program_data, temp_block)
+        # 3. Notify listeners the change is about to happen (with metadata).
+        line_count_delta = temp_block.line_count - old_line_count
+        if line_count_delta != 0:
+            if program_data.pre_line_change_func:
+                if line_count_delta > 0:
+                    program_data.pre_line_change_func(line0 + old_line_count, line_count_delta)
+                else:
+                    program_data.pre_line_change_func(line0 + old_line_count + line_count_delta, line_count_delta)
 
-            # 3. Notify listeners the change is about to happen (with metadata).
-            line_count_delta = temp_block.line_count - old_line_count
-            if line_count_delta != 0:
-                if program_data.pre_line_change_func:
-                    if line_count_delta > 0:
-                        program_data.pre_line_change_func(line0 + old_line_count, line_count_delta)
-                    else:
-                        program_data.pre_line_change_func(line0 + old_line_count + line_count_delta, line_count_delta)
+        # 4. Make the change.
+        temp_block.copy_to(block)
+        if line_count_delta != 0:
+            # We changed the line count, we need to flag a block line numbering recalculation.
+            if program_data.block_line0s_dirtyidx is None or program_data.block_line0s_dirtyidx > block_idx+1:
+                program_data.block_line0s_dirtyidx = block_idx+1
 
-            # 4. Make the change.
-            temp_block.copy_to(block)
-            if line_count_delta != 0:
-                # We changed the line count, we need to flag a block line numbering recalculation.
-                if program_data.block_line0s_dirtyidx is None or program_data.block_line0s_dirtyidx > block_idx+1:
-                    program_data.block_line0s_dirtyidx = block_idx+1
+        if line_count_delta != 0:
+            if program_data.post_line_change_func:
+                program_data.post_line_change_func(None, line_count_delta)
 
-            if line_count_delta != 0:
-                if program_data.post_line_change_func:
-                    program_data.post_line_change_func(None, line_count_delta)
+        #if program_data.state == disassembly_data.STATE_LOADED:
+        #    print "set_block_data_type -> %d" % data_type, hex(block.address), "->", hex(block.address+block.length), "LC", block.line_count
 
-            #if program_data.state == disassembly_data.STATE_LOADED:
-            #    print "set_block_data_type -> %d" % data_type, hex(block.address), "->", hex(block.address+block.length), "LC", block.line_count
-    finally:
         #if program_data.state == disassembly_data.STATE_LOADED:
         #    print "program_data.new_block_events", program_data.new_block_events
         #    print "program_data.block_data_type_events", program_data.block_data_type_events
@@ -1177,6 +1170,7 @@ def get_auto_label(program_data, address, data_type):
     label = program_data.dis_get_default_symbol_name_func(address, __label_metadata[data_type])
     # For now indicate whether address was relocated, to give a hint why there is a symbol, but no referrers.
     if address in program_data.loader_relocated_addresses:
+        # TODO(rmtew): Make this configurable.
         label += "r"
     return label
 
@@ -1246,7 +1240,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                     line_data.append((disassembly_data.SLD_EQU_LOCATION_RELATIVE, label_address - address))
                     #logger.debug("%06X: mid-instruction label = '%s' %d", match_address, label, label_address-match_address)
             bytes_consumed += bytes_matched
-            preceding_match = find_previous_entry(line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
+            preceding_match = find_previous_entry(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
             found_terminating_instruction = program_data.dis_is_final_instruction_func(match, preceding_match)
             if found_terminating_instruction:
                 break
@@ -1606,8 +1600,6 @@ def cache_segment_data(program_data, f):
     segments = program_data.loader_segments
     for i in range(len(segments)):
         loaderlib.cache_segment_data(f, segments, i)
-    # program_data.loader_file_path = file_path
-    # TODO: reconcile
 
 def is_segment_data_cached(program_data):
     segments = program_data.loader_segments
