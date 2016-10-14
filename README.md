@@ -104,36 +104,37 @@ this disassembler unless you can deal with that.
 
 ## Future Work
 
-This is intended to be a summarised list of points that briefly note intended
-work, or possible future work.
+This is intended to be a summarised list of points that briefly note intended work, or possible future work.
 
 ### Short Term Tasks
 
 #### Bugs
 
 * Metadata: If address lies outside known segment address ranges, only accept last block address + last block length as only valid address of that type.  Others not labeled.  Old entry with unclear meaning.
-* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.  Old entry with unclear meaning.
-* Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* Metadata: If code is being processed and it overruns its block, take the spilt part of the next block.  Ensure mid-match labels are dealt with.
 * UI: There is a period of time between when the loading dialog goes away and when the view is updated with the loaded file data, where the user could use the UI and interfere with things in an unexpected way.  A progress dialog should stay on screen for the duration of this period to prevent this happening through the nature of modal dialogs.
 
 #### Functionality
 
 * UI: The orphaned block window should show entries, including address, length, leading data..?  What are orphaned blocks again?
-* UI: All actions should happen as part of a scriptable system with an accumulator.
-  * Execution of actions should be automatic, interactive (user confirms all), or conditional (user confirms flagged actions, rest are automatic).
-  * Design with an undo/redo functionality.
+* UI: All actions should happen as part of a scriptable system with an accumulator (#0001).
+* UI: Find text options (#0003).
 * UI: Ala Resource, change the numeric base of a value whether code operand or data.
 * UI: Ala Resource, edit/override values.
 * UI: Uncertain references: use context menu to add labels for one or more selected entries (should work in a macro-like fashion / window.toolapiob).
+* UI: Merge uncertain code and data reference panes, have type column, perhaps ability to multi-select and toolbar with option to relocate.
+* Disassembly: Symbol library and the ability to apply symbol names to values (#0004).
 * Disassembly: Enable customised display of upper case or lower case for instructions / operand bits.
 * Disassembly: Display DBRA instead of DBF (is this right?).
 * Disassembly: Customisable display of either A7 or SP.
-* Disassembly: Jump table discovery / processing.
+* Disassembly: Jump table discovery / processing (#0002).
 * Disassembly: Research assembler syntax for different platforms, to generalise custom output.
-* Disassembly: Choose use of new or old style assembly syntax.
+* Disassembly: Choose use of new or old style motorola assembly syntax, e.g. (20, a6) vs 20(a6).
 * File loading: For Amiga, choose use of "DATA, CHIP" or "DATA_C" in section headers.
 * Metadata: File-backed storage space should optionally use aggregate instructions, e.g. "dcb.l 230,0"
 * Metadata: Add leading comments that detail file type, processor, entry point offset.. maybe more.
+* Metadata: Label placement should consider the case where a value happens to match a known address, like how Resource has #START+$50, where that might actually be $50 or whatever.
+* Configuration: Add a configuration file of options that are user-specific, like case of instructions/operands and which assembler syntax to use.
 
 #### Technical Debt
 

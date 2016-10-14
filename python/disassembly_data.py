@@ -173,6 +173,7 @@ class ProgramData(object):
         self.dis_get_match_addresses_func = None
         self.dis_get_instruction_string_func = None
         self.dis_get_operand_string_func = None
+        self.dis_get_operand_values_func = None
         self.dis_disassemble_one_line_func = None
         self.dis_disassemble_as_data_func = None
 

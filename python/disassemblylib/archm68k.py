@@ -104,6 +104,8 @@ class ArchM68k(ArchInterface):
     def function_is_final_instruction(self, match, preceding_match=None):
         return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
 
+    #def function_on_instruction_matched(self, match,
+
     def function_get_match_addresses(self, match):
         # Is it an instruction that exits (RTS, RTR)?
         # Is it an instruction that conditionally branches (Bcc, Dbcc)?
@@ -121,7 +123,7 @@ class ArchM68k(ArchInterface):
                 return match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
             elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
                 return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
-            elif opcode.specification.key == DISPLACEMENT_OKEY: # JMP
+            elif opcode.specification.key == OPERAND_KEY_DISPLACEMENT: # JMP
                 return match.pc + opcode.vars["xxx"], 0
             return None
 
@@ -186,52 +188,60 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
+    def function_get_operand_values(instruction, operand_key, operand_values, lookup_symbol=None):
+        pc = instruction.pc
+        id = self.dict_operand_label_to_index[operand_key]
+        mode_format = self.table_operand_types[id][EAMI_FORMAT]
+        substitutions = []
+        for variable_name in self.dict_operand_format_to_keys[mode_format]:
+            if variable_name == "D16" or variable_name == "D8":
+                value = self._signed_value(operand_values[variable_name], { "D8": 8, "D16": 16, }[k])
+                """
+                This is copied from the table of EA modes.
+                [ "PCid16",     "(D16,PC)",             [ _b2n("111"),       _b2n("010"), ],    [ "D16=I+.W", ],     "Program Counter Indirect with Displacement Mode", ],
+                [ "PCiId8",     "(D8,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
+                [ "PCiIdb",     "(bd,PC,Xn.z*S)",       [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Indirect with Index (Base Displacement) Mode", ],
+                [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Memory Indirect Postindexed Mode", ],
+                [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  [ _b2n("111"),       _b2n("011"), ],    [ "EW",       ],     "Program Counter Memory Indirect Preindexed Mode", ],
+                """
+                value_string = None
+                if operand_key in ("PCid16", "PCiId8"):
+                    value += pc
+                    value_string = lookup_symbol(value)
+                if value_string is None:
+                    value_string = signed_hex_string(self, value)
+                substitutions.append((variable_name, value, value_string))
+            elif variable_name == "An" or variable_name == "Dn":
+                Rn = operand_values["Rn"]
+                if self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG] == "Rn":
+                    substitutions.append((variable_name, Rn, "{0}{1}".format(variable_name[0], Rn)))
+            elif variable_name == "xxx":
+                value = operand_values[variable_name]
+                is_absolute = operand_key in ("Imm", "AbsL", "AbsW")
+                value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
+                if value_string is None:
+                    value_string = "$%x" % value
+                substitutions.append((variable_name, value, value_string))
+            else:
+                value = operand_values[variable_name]
+                value_string = str(value)
+                substitutions.append((variable_name, value, value_string))
+        return substitutions
+
     def function_get_operand_string(self, instruction, operand, vars, lookup_symbol):
         """ Get a printable representation of an instruction operand. """
         def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
-            pc = instruction.pc
-            id = self.dict_operand_label_to_index[key]
-            mode_format = self.table_operand_types[id][EAMI_FORMAT]
-            reg_field = self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG]
-            for k, v in vars.iteritems():
-                if k == "D16" or k == "D8":
-                    value = self._signed_value(vars[k], { "D8": 8, "D16": 16, }[k])
-                    """ [ "PCid16",     "(D16,PC)",             "111",          "010",               "D16=+W",      "Program Counter Indirect with Displacement Mode", ],
-                        [ "PCiId8",     "(D8,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (8-Bit Displacement) Mode", ],
-                        [ "PCiIdb",     "(bd,PC,Xn.z*S)",       "111",          "011",               "EW",          "Program Counter Indirect with Index (Base Displacement) Mode", ],
-                        [ "PCiPost",    "([bd,PC],Xn.s*S,od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Postindexed Mode", ],
-                        [ "PrePCi",     "([bd,PC,Xn.s*S],od)",  "111",          "011",               "EW",          "Program Counter Memory Indirect Preindexed Mode", ], """
-                    value_string = None
-                    if key in ("PCid16", "PCiId8"):
-                        value += pc
-                        value_string = lookup_symbol(value)
-                    if value_string is None:
-                        value_string = signed_hex_string(self, value)
-                    mode_format = mode_format.replace(k, value_string)
-                elif k == "Rn":
-                    Rn = vars["Rn"]
-                    if reg_field == "Rn":
-                        mode_format = mode_format.replace("Dn", "D"+str(Rn))
-                        mode_format = mode_format.replace("An", "A"+str(Rn))
-                    elif reg_field == Rn:
-                        pass # TODO: Use to validate
-                elif k == "xxx":
-                    value = vars["xxx"]
-                    is_absolute = key in ("Imm", "AbsL", "AbsW")
-                    value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
-                    if value_string is None:
-                        value_string = "$%x" % value
-                    mode_format = mode_format.replace("xxx",  value_string)
-                else:
-                    mode_format = mode_format.replace(k, str(v))
+            substitutions = self.function_get_operand_values(instruction, key, vars, lookup_symbol)
+            for (key, value, value_string) in substitutions:
+                mode_format = mode_format.replace(key, value_string)
             return mode_format
 
         pc = instruction.pc
         key = operand.key
         if key is None:
             key = operand.specification.key
-        if key == REGISTER_LIST_OKEY:
-            # D0-D3/D7/A0-A2
+        if key == OPERAND_KEY_REGISTER_LIST:
+            # e.g. D0-D3/D7/A0-A2
             ranges = []
             for ri, mask in enumerate(operand.rl_bits):
                 rsn = -1
@@ -254,9 +264,9 @@ class ArchM68k(ArchInterface):
                 if r0 < rn:
                     s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
             return s
-        elif key == DISPLACEMENT_OKEY:
+        elif key == OPERAND_KEY_DISPLACEMENT:
             value = vars["xxx"]
-            if instruction.specification.key[0:4] == "LINK":
+            if instruction.specification.key.startswith("LINK"):
                 value_string = None
             else:
                 value_string = lookup_symbol(instruction.pc + value)
@@ -391,7 +401,7 @@ class ArchM68k(ArchInterface):
                         continue
                     return line[EAMI_LABEL]
 
-        if O.specification.key == REGISTER_LIST_OKEY:
+        if O.specification.key == OPERAND_KEY_REGISTER_LIST:
             T2 = I.opcodes[1-operand_idx]
             word, size_char = _data_word_lookup(I.data_words, O.vars["xxx"])
             if word is None:
@@ -426,7 +436,7 @@ class ArchM68k(ArchInterface):
             O.rl_bits = dm, am
 
             return data_idx
-        elif O.specification.key == DISPLACEMENT_OKEY:
+        elif O.specification.key == OPERAND_KEY_DISPLACEMENT:
             value = O.vars["xxx"]
             if type(value) is str:
                 value, bits = _data_word_lookup(I.data_words, value)
@@ -559,11 +569,11 @@ FmtTable = [
     [ _b2n("10"), "L" ],
 ]
 
-REGISTER_LIST_OKEY = "RL"
-DISPLACEMENT_OKEY = "DISPLACEMENT"
+OPERAND_KEY_REGISTER_LIST = "RL"
+OPERAND_KEY_DISPLACEMENT = "DISPLACEMENT"
 
 SpecialRegisters = ("CCR", "SR")
-CustomOperandLabels = (REGISTER_LIST_OKEY, DISPLACEMENT_OKEY)
+CustomOperandLabels = (OPERAND_KEY_REGISTER_LIST, OPERAND_KEY_DISPLACEMENT)
 
 # r: index register type (0: Dn, 1: An)
 # R: register number

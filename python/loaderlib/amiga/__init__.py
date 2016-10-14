@@ -12,7 +12,6 @@ from . import hunkfile
 class System(object):
     endian_id = constants.ENDIAN_BIG
 
-
     def get_processor_id(self):
         return constants.PROCESSOR_M680x0
 

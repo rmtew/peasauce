@@ -53,7 +53,7 @@ display_configuration = DisplayConfiguration()
 
 ## disassembly_data.SegmentBlock flag helpers
 
-def realise_instruction_entry(program_data, block, block_offset):
+def create_instruction_entry(program_data, block, block_offset):
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     data_offset_start = block.segment_offset + block_offset
     match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, block.address + block_offset)
@@ -89,7 +89,7 @@ def get_block_line_count(program_data, block):
         for type_id, entry in block.line_data:
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 if type(entry) is int:
-                    entry = realise_instruction_entry(program_data, block, entry)
+                    entry = create_instruction_entry(program_data, block, entry)
                 line_count += get_instruction_line_count(program_data, entry)
             elif type_id in (disassembly_data.SLD_COMMENT_FULL_LINE, disassembly_data.SLD_EQU_LOCATION_RELATIVE):
                 line_count += 1
@@ -129,7 +129,7 @@ def get_code_block_info_for_address(program_data, address):
                 return previous_result
 
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, entry)
+                entry = create_instruction_entry(program_data, block, entry)
             current_result = line_number, entry
 
             # Exactly this instruction.
@@ -165,7 +165,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
                 return previous_result
 
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, entry)
+                entry = create_instruction_entry(program_data, block, entry)
             current_result = base_address + bytes_used, entry
 
             # Exactly this instruction.
@@ -323,7 +323,7 @@ def find_previous_entry(program_data, block, line_data, idx, entry_type):
         if line_data[idx][0] == entry_type:
             entry = line_data[idx][1]
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, entry)
+                entry = create_instruction_entry(program_data, block, entry)
             return entry
 
 def get_block_footer_line_count(program_data, block, block_idx):
@@ -339,7 +339,7 @@ def get_block_footer_line_count(program_data, block, block_idx):
         entry_type_id, entry = block.line_data[-1]
         if entry_type_id == disassembly_data.SLD_INSTRUCTION:
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, entry)
+                entry = create_instruction_entry(program_data, block, entry)
             if display_configuration.trailing_line_exit:
                 preceding_entry = find_previous_entry(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
                 if program_data.dis_is_final_instruction_func(entry, preceding_entry):
@@ -470,7 +470,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
         for type_id, entry in block.line_data:
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 if type(entry) is int:
-                    entry = realise_instruction_entry(program_data, block, entry)
+                    entry = create_instruction_entry(program_data, block, entry)
                 block_offsetN += entry.num_bytes
             if line_count == line_idx:
                 line_type_id = type_id
@@ -841,7 +841,7 @@ def split_block(program_data, address, own_midinstruction=False):
 
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 if type(entry) is int:
-                    entry = realise_instruction_entry(program_data, block, entry)
+                    entry = create_instruction_entry(program_data, block, entry)
                 offsetN += entry.num_bytes
                 if block_length_reduced < offsetN:
                     if own_midinstruction:
@@ -941,7 +941,7 @@ def _locate_uncertain_code_references(program_data, address, is_binary_file, blo
     for i, (type_id, entry) in enumerate(block.line_data):
         if type_id == disassembly_data.SLD_INSTRUCTION:
             if type(entry) is int:
-                entry = realise_instruction_entry(program_data, block, entry)
+                entry = create_instruction_entry(program_data, block, entry)
             address0 = addressN
             addressN += entry.num_bytes
             if addressN >= address:
@@ -1052,23 +1052,24 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
         #if program_data.state == disassembly_data.STATE_LOADED:
         #    print "program_data.new_block_events", program_data.new_block_events
         #    print "program_data.block_data_type_events", program_data.block_data_type_events
-        event_blocks = {}
-        for event_block in program_data.new_block_events:
-            data_type = disassembly_data.get_block_data_type(event_block)
-            data_type_old = None
-            for t in program_data.block_data_type_events:
-                if t[0].address < event_block.address and t[0].address + t[3] > event_block.address:
-                    data_type_old = t[1]
-                    break
-            else:
-                logger.warning("set_block_data_type: unable to identify old block data type for %x", event_block.address)
-                # Assuming there was a simple split in this case.
-                data_type_old = data_type
-            event_blocks[event_block.address] = (event_block, data_type_old, data_type, None)
+
+    event_blocks = {}
+    for event_block in program_data.new_block_events:
+        data_type = disassembly_data.get_block_data_type(event_block)
+        data_type_old = None
         for t in program_data.block_data_type_events:
-            event_blocks[t[0].address] = t
-        program_data.new_block_events = None
-        program_data.block_data_type_events = None
+            if t[0].address < event_block.address and t[0].address + t[3] > event_block.address:
+                data_type_old = t[1]
+                break
+        else:
+            logger.warning("set_block_data_type: unable to identify old block data type for %x", event_block.address)
+            # Assuming there was a simple split in this case.
+            data_type_old = data_type
+        event_blocks[event_block.address] = (event_block, data_type_old, data_type, None)
+    for t in program_data.block_data_type_events:
+        event_blocks[t[0].address] = t
+    program_data.new_block_events = None
+    program_data.block_data_type_events = None
 
     # The type of the block has been changed.  If the new type was code, then that may have cascaded changing the
     # type of other existing blocks, as well as splitting off parts of the original selected block.
@@ -1181,7 +1182,40 @@ def _get_auto_label_for_block(program_data, block=None, address=None, data_type=
         address = block.address
     return get_auto_label(program_data, address, data_type)
 
+# NOTE(rmtew): This should eventually be refactored into the architecture/loader libraries in some way.
+class IntrospectionHelper(object):
+    class BlockState(object):
+        def __init__(self, block, line_data=None, current_idx=None, match=None):
+            self.block = block
+            self.line_data = line_data
+            self.current_idx = current_idx
+            self.match = match
+
+    def __init__(self, program_data):
+        self.program_data = program_data
+
+    def on_instruction_matched(self, block, line_data, current_idx, match):
+        if self.program_data.processor_id != loaderlib.constants.PROCESSOR_M680x0:
+            return
+        # NOTE(rmtew): Is this needed?  We have it in the arguments.
+        initial_block_state = IntrospectionHelper.BlockState(block, line_data, current_idx)
+        if len(match.opcodes) == 1:
+            opcode1 = match.opcodes[0]
+            if match.specification.key == "JSR" and opcode1.key == "ARid16":
+                register_number = opcode1.vars["Rn"]
+                address_offset = opcode1.vars["D16"]
+                pass # print "JSR %d(ARid16)"
+        elif len(match.opcodes) == 2:
+            if match.specification.key == "MOVEA.L" and match.opcodes[0].key == "AbsL" and match.opcodes[1].specification.key == "AR":
+                source_value = match.opcodes[0].vars["xxx"]
+                if source_value == 4:
+                    register_number = match.opcodes[1].vars["Rn"]
+                    if register_number == 6:
+                        pass # print "A6=4.w, %x" % match.pc
+        
+
 def _process_address_as_code(program_data, address, pending_symbol_addresses, work_state=None):
+    helper = IntrospectionHelper(program_data)
     debug_offsets = set()
     disassembly_offsets = set([ address ])
     while len(disassembly_offsets):
@@ -1242,6 +1276,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             bytes_consumed += bytes_matched
             preceding_match = find_previous_entry(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
             found_terminating_instruction = program_data.dis_is_final_instruction_func(match, preceding_match)
+            # Give the architecture/platform a chance to process the instruction.
+            helper.on_instruction_matched(block, line_data, current_idx, match)
             if found_terminating_instruction:
                 break
 
@@ -1564,6 +1600,7 @@ def onload_set_disassemblylib_functions(program_data):
     program_data.dis_get_match_addresses_func = arch.function_get_match_addresses
     program_data.dis_get_instruction_string_func = arch.function_get_instruction_string
     program_data.dis_get_operand_string_func = arch.function_get_operand_string
+    program_data.dis_get_operand_values = arch.function_get_operand_values
     program_data.dis_disassemble_one_line_func = arch.function_disassemble_one_line
     program_data.dis_disassemble_as_data_func = arch.function_disassemble_as_data
     program_data.dis_get_default_symbol_name_func = arch.function_get_default_symbol_name

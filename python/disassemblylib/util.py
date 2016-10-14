@@ -1,4 +1,5 @@
 import logging
+import re
 import struct
 
 logger = logging.getLogger("disassembler-util")
@@ -267,10 +268,13 @@ def process_instruction_list(_A, _list):
     return _list
 
 
+class IntrospectionHelperInterface(object):
+    def __init__(self, api_state):
+        self.api_state = api_state
+
 ## Architecture interface.
 
 def _unimplemented_function(*args, **kwargs): raise NotImplementedError("arch-function-undefined")
-
 
 class ArchInterface(object):
     """ This object allows an interface to define functionality implementations, and default constants. """
@@ -319,8 +323,12 @@ class ArchInterface(object):
     function_get_match_addresses = _unimplemented_function
     """ Function: . """
     function_get_instruction_string = _unimplemented_function
-    """ Function: . """
+    """ Function: Generate the text representation of the operand and it's values. """
     function_get_operand_string = _unimplemented_function
+    """ Function: Generate the values to substitute into the operand. """
+    function_get_operand_values = _unimplemented_function
+    """ Function: Allow plugins to aid in naming operand values and similar things. """
+    function_on_instruction_matched = _unimplemented_function
 
     """ Function: . """
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
@@ -359,13 +367,22 @@ class ArchInterface(object):
 
         idToLabel = {}
         labelToId = {}
-        labelToMask = {}
-        for i, t in enumerate(table_data):
-            idToLabel[i] = t[EAMI_LABEL]
-            labelToId[t[EAMI_LABEL]] = i
+        keysToFormat = {}
+        for i, row in enumerate(table_data):
+            idToLabel[i] = row[EAMI_LABEL]
+            labelToId[row[EAMI_LABEL]] = i
+
+            format_string = row[EAMI_FORMAT]
+            if format_string is not None and format_string not in keysToFormat:
+                keysToFormat[format_string] = [
+                    key
+                    for key in re.findall("[a-zA-Z0-9]+", format_string)
+                    if key not in self.constant_table_size_names # This is really the literal text that is not keys, on Amiga, sizes e.g. W, L from AbsW, AbsL
+                ]
 
         self.dict_operand_label_to_index = labelToId
         self.dict_operand_index_to_label = idToLabel
+        self.dict_operand_format_to_keys = keysToFormat
 
     def create_duplicated_instruction_entries(self, entry, new_name, operands_string):
         """ This expands instructions with parameterised sizes into the individual sized variants. """
