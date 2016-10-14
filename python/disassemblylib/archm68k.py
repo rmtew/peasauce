@@ -188,14 +188,14 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
-    def function_get_operand_values(instruction, operand_key, operand_values, lookup_symbol=None):
+    def function_get_operand_values(self, instruction, operand_key, operand_values, lookup_symbol=None):
         pc = instruction.pc
         id = self.dict_operand_label_to_index[operand_key]
         mode_format = self.table_operand_types[id][EAMI_FORMAT]
         substitutions = []
         for variable_name in self.dict_operand_format_to_keys[mode_format]:
             if variable_name == "D16" or variable_name == "D8":
-                value = self._signed_value(operand_values[variable_name], { "D8": 8, "D16": 16, }[k])
+                value = self._signed_value(operand_values[variable_name], { "D8": 8, "D16": 16, }[variable_name])
                 """
                 This is copied from the table of EA modes.
                 [ "PCid16",     "(D16,PC)",             [ _b2n("111"),       _b2n("010"), ],    [ "D16=I+.W", ],     "Program Counter Indirect with Displacement Mode", ],
@@ -231,6 +231,8 @@ class ArchM68k(ArchInterface):
     def function_get_operand_string(self, instruction, operand, vars, lookup_symbol):
         """ Get a printable representation of an instruction operand. """
         def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
+            id = self.dict_operand_label_to_index[key]
+            mode_format = self.table_operand_types[id][EAMI_FORMAT]
             substitutions = self.function_get_operand_values(instruction, key, vars, lookup_symbol)
             for (key, value, value_string) in substitutions:
                 mode_format = mode_format.replace(key, value_string)

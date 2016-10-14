@@ -324,7 +324,8 @@ def find_previous_entry(program_data, block, line_data, idx, entry_type):
             entry = line_data[idx][1]
             if type(entry) is int:
                 entry = create_instruction_entry(program_data, block, entry)
-            return entry
+            return idx, entry
+    return idx, None
 
 def get_block_footer_line_count(program_data, block, block_idx):
     """ We may be working with a temporary block copy, so the block index
@@ -341,7 +342,7 @@ def get_block_footer_line_count(program_data, block, block_idx):
             if type(entry) is int:
                 entry = create_instruction_entry(program_data, block, entry)
             if display_configuration.trailing_line_exit:
-                preceding_entry = find_previous_entry(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
+                discard, preceding_entry = find_previous_entry(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
                 if program_data.dis_is_final_instruction_func(entry, preceding_entry):
                     line_count += 1
 
@@ -1200,11 +1201,21 @@ class IntrospectionHelper(object):
         # NOTE(rmtew): Is this needed?  We have it in the arguments.
         initial_block_state = IntrospectionHelper.BlockState(block, line_data, current_idx)
         if len(match.opcodes) == 1:
-            opcode1 = match.opcodes[0]
-            if match.specification.key == "JSR" and opcode1.key == "ARid16":
-                register_number = opcode1.vars["Rn"]
-                address_offset = opcode1.vars["D16"]
-                pass # print "JSR %d(ARid16)"
+            operand1 = match.opcodes[0]
+            if match.specification.key == "JSR" and operand1.key == "ARid16":
+                operand_values = self.program_data.dis_get_operand_values_func(match, operand1.key, operand1.vars)
+                # e.g. operand_values = [('D16', -408, '-$198'), ('An', 6, 'A6')]
+                idx = current_idx
+                while 1:
+                    idx, preceding_match = find_previous_entry(self.program_data, block, line_data, idx, disassembly_data.SLD_INSTRUCTION)
+                    if preceding_match is not None:
+                        if len(preceding_match.opcodes):
+                            operand = preceding_match.opcodes[0]
+                            # TODO(rmtew): Check if the desired register is getting a value put in it.
+                            # TODO(rmtew): If we confirm this is a library call, flag the address with the known library usage in the given register.
+                            #              If there are subsequent calls, we can just go back to that point to save backtracking too far.
+                        continue
+                    break
         elif len(match.opcodes) == 2:
             if match.specification.key == "MOVEA.L" and match.opcodes[0].key == "AbsL" and match.opcodes[1].specification.key == "AR":
                 source_value = match.opcodes[0].vars["xxx"]
@@ -1274,7 +1285,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                     line_data.append((disassembly_data.SLD_EQU_LOCATION_RELATIVE, label_address - address))
                     #logger.debug("%06X: mid-instruction label = '%s' %d", match_address, label, label_address-match_address)
             bytes_consumed += bytes_matched
-            preceding_match = find_previous_entry(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
+            discard, preceding_match = find_previous_entry(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
             found_terminating_instruction = program_data.dis_is_final_instruction_func(match, preceding_match)
             # Give the architecture/platform a chance to process the instruction.
             helper.on_instruction_matched(block, line_data, current_idx, match)
@@ -1600,7 +1611,7 @@ def onload_set_disassemblylib_functions(program_data):
     program_data.dis_get_match_addresses_func = arch.function_get_match_addresses
     program_data.dis_get_instruction_string_func = arch.function_get_instruction_string
     program_data.dis_get_operand_string_func = arch.function_get_operand_string
-    program_data.dis_get_operand_values = arch.function_get_operand_values
+    program_data.dis_get_operand_values_func = arch.function_get_operand_values
     program_data.dis_disassemble_one_line_func = arch.function_disassemble_one_line
     program_data.dis_disassemble_as_data_func = arch.function_disassemble_as_data
     program_data.dis_get_default_symbol_name_func = arch.function_get_default_symbol_name

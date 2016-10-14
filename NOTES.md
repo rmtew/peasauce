@@ -45,12 +45,16 @@ amitools imports fds, that would be a simple start.
 4. if present, add `local_binaries\amitools` to path.
 5. then can use it to read fd files and so forth.
 
-So outline of work involved:
-
-1. Work out where process is invoked.
-   - Automatically, when a block is converted to code?
-     - If this approach was taken, then the platform would hook into the disassembly process and monitor it.
-   - Manually, with automatic post-file-load invocation that processes all known code blocks.  And on block converted to code.
+What to do:
+1. Finish disassembly.py code to identify library calls.
+  1. May need to backtrack through caller references, or forward through calls, to find address register value.
+  1. Will need to store/index library handle addresses.
+	1. Special case for open library calls.
+	  * Know library name register and backtrack for the address.
+	  * Automatically rename the address symbol.
+		* Flag that it is automatically renamed.
+	  * Automatically inject the symbol value.
+		* Will need to keep a persisted ProgramState entry. e.g. value_symbols[address] = { "D16": "fd:exec_lib:*"}
 
 #### Technical Debt
 
