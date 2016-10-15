@@ -312,6 +312,7 @@ class ArchInterface(object):
     constant_table_condition_code_names = None
     constant_table_size_names = None
     constant_table_direction_names = None
+    constant_table_format_literals = None
 
     """ Variable: The implicit (or user selected) endian type. """
     variable_endian_type = None
@@ -377,7 +378,7 @@ class ArchInterface(object):
                 keysToFormat[format_string] = [
                     key
                     for key in re.findall("[a-zA-Z0-9]+", format_string)
-                    if key not in self.constant_table_size_names # This is really the literal text that is not keys, on Amiga, sizes e.g. W, L from AbsW, AbsL
+                    if key not in self.constant_table_format_literals
                 ]
 
         self.dict_operand_label_to_index = labelToId

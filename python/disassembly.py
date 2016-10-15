@@ -521,7 +521,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                 for i, operand in enumerate(line_match.opcodes):
                     if i > 0:
                         operand_string += ", "
-                    operand_string += program_data.dis_get_operand_string_func(line_match, operand, operand.vars, lookup_symbol=lookup_symbol)
+                    operand_string += program_data.dis_get_operand_string_func(line_match, operand, lookup_symbol=lookup_symbol)
                 return operand_string
             elif line_type_id == disassembly_data.SLD_EQU_LOCATION_RELATIVE:
                 return "*-%d" % line_num_bytes
@@ -1183,44 +1183,85 @@ def _get_auto_label_for_block(program_data, block=None, address=None, data_type=
         address = block.address
     return get_auto_label(program_data, address, data_type)
 
+def DEBUG_get_instruction_repr(program_data, instruction):
+    result = program_data.dis_get_instruction_string_func(instruction, instruction.vars)
+    lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(program_data, address, absolute_info)
+    # TODO(rmtew): Make non-architecture specific.  m68k = operand seperator, configurable spacing, assembler-specific setting?
+    for operand_index, operand in enumerate(instruction.opcodes):
+        if operand_index > 0:
+            result += ","
+        result += " "+ program_data.dis_get_operand_string_func(instruction, operand, lookup_symbol=lookup_symbol)
+    return result
+
+
 # NOTE(rmtew): This should eventually be refactored into the architecture/loader libraries in some way.
 class IntrospectionHelper(object):
     class BlockState(object):
-        def __init__(self, block, line_data=None, current_idx=None, match=None):
+        def __init__(self, block, line_data=None, initial_instruction_idx=None, initial_instruction=None):
             self.block = block
             self.line_data = line_data
-            self.current_idx = current_idx
-            self.match = match
+            self.initial_instruction_idx = initial_instruction_idx
+            self.initial_instruction = initial_instruction
 
     def __init__(self, program_data):
         self.program_data = program_data
+        self.library_handle_fetches = {} # type: Dict[Tuple[int, int], None]
+        self.library_handle_usage = {} # type: Dict[Tuple[int, int], None]
 
-    def on_instruction_matched(self, block, line_data, current_idx, match):
+    def on_instruction_matched(self, block, line_data, initial_instruction_idx, initial_instruction):
         if self.program_data.processor_id != loaderlib.constants.PROCESSOR_M680x0:
             return
-        # NOTE(rmtew): Is this needed?  We have it in the arguments.
-        initial_block_state = IntrospectionHelper.BlockState(block, line_data, current_idx)
-        if len(match.opcodes) == 1:
-            operand1 = match.opcodes[0]
-            if match.specification.key == "JSR" and operand1.key == "ARid16":
-                operand_values = self.program_data.dis_get_operand_values_func(match, operand1.key, operand1.vars)
+        lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(self.program_data, address, absolute_info)
+        initial_s = DEBUG_get_instruction_repr(self.program_data, initial_instruction)
+
+        # NOTE(rmtew): Is this needed?  We have it in the local scope from the arguments.
+        initial_block_state = IntrospectionHelper.BlockState(block, line_data, initial_instruction_idx)
+        if len(initial_instruction.opcodes) == 1:
+            initial_instruction_operand1 = initial_instruction.opcodes[0]
+            if initial_instruction.specification.key == "JSR" and initial_instruction_operand1.key == "ARid16":
+                initial_instruction_operand1_values = self.program_data.dis_get_operand_values_func(initial_instruction, initial_instruction_operand1, lookup_symbol)
+                usage_register = initial_instruction_operand1_values["An"][0]
                 # e.g. operand_values = [('D16', -408, '-$198'), ('An', 6, 'A6')]
-                idx = current_idx
+                current_instruction_idx = initial_instruction_idx
                 while 1:
-                    idx, preceding_match = find_previous_entry(self.program_data, block, line_data, idx, disassembly_data.SLD_INSTRUCTION)
-                    if preceding_match is not None:
-                        if len(preceding_match.opcodes):
-                            operand = preceding_match.opcodes[0]
+                    current_instruction_idx, current_instruction = find_previous_entry(self.program_data, block, line_data, current_instruction_idx, disassembly_data.SLD_INSTRUCTION)
+                    if current_instruction is not None:
+                        current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction)
+
+                        if len(current_instruction.opcodes) >= 1:
+                            current_dest_operand = current_instruction.opcodes[-1]
+                            current_dest_operand_values = self.program_data.dis_get_operand_values_func(current_instruction, current_dest_operand, lookup_symbol)
+                            if "An" in current_dest_operand_values:
+                                current_dest_register_number = current_dest_operand_values["An"][0]
+                                if current_dest_register_number != usage_register:
+                                    continue
+                                usage_entry = self.library_handle_usage.get((block.address, current_instruction_idx), None)
+                                if usage_entry is not None:
+                                    if usage_entry[0] == current_dest_register_number:
+                                        self.library_handle_usage[(block.address, initial_instruction_idx)] = usage_entry
+                                        break
+                                elif current_instruction.specification.key == "MOVEA.L" and current_instruction.opcodes[0].key == "AbsL" and current_instruction.opcodes[1].specification.key == "AR":
+                                    current_source_operand_values = self.program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0], lookup_symbol)
+                                    handle_address = current_source_operand_values["xxx"]
+                                    if handle_address == 4:
+                                        handle_address = None
+                                    usage_entry = (current_dest_register_number, handle_address)
+                                    self.library_handle_fetches[(block.address, current_instruction_idx)] = usage_entry
+                                    self.library_handle_usage[(block.address, initial_instruction_idx)] = usage_entry
+                                    current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction)
+                                    break
+                                break
+
                             # TODO(rmtew): Check if the desired register is getting a value put in it.
                             # TODO(rmtew): If we confirm this is a library call, flag the address with the known library usage in the given register.
                             #              If there are subsequent calls, we can just go back to that point to save backtracking too far.
                         continue
                     break
-        elif len(match.opcodes) == 2:
-            if match.specification.key == "MOVEA.L" and match.opcodes[0].key == "AbsL" and match.opcodes[1].specification.key == "AR":
-                source_value = match.opcodes[0].vars["xxx"]
+        elif len(initial_instruction.opcodes) == 2:
+            if initial_instruction.specification.key == "MOVEA.L" and initial_instruction.opcodes[0].key == "AbsL" and initial_instruction.opcodes[1].specification.key == "AR":
+                source_value = initial_instruction.opcodes[0].vars["xxx"]
                 if source_value == 4:
-                    register_number = match.opcodes[1].vars["Rn"]
+                    register_number = initial_instruction.opcodes[1].vars["Rn"]
                     if register_number == 6:
                         pass # print "A6=4.w, %x" % match.pc
         

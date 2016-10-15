@@ -98,6 +98,7 @@ class ArchM68k(ArchInterface):
 
     constant_table_size_names = [ "B", "W", "L" ]
     constant_table_direction_names = [ "R", "L" ]
+    constant_table_format_literals = [ "W", "L", "PC", "SR", "CCR" ]
 
     variable_endian_type = ">"
 
@@ -188,11 +189,54 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
-    def function_get_operand_values(self, instruction, operand_key, operand_values, lookup_symbol=None):
+    def function_get_operand_values(self, instruction, operand, lookup_symbol=None):
+        operand_key = operand.key
+        if operand_key is None:
+            operand_key = operand.specification.key
+        operand_values = operand.vars
+
+        if operand_key == OPERAND_KEY_REGISTER_LIST:
+            # e.g. D0-D3/D7/A0-A2
+            value = operand.register_list_masks
+
+            ranges = []
+            for ri, mask in enumerate(value):
+                rsn = -1
+                for rn in range(8):
+                    if mask & (1 << rn):
+                        # Note the start of a range.
+                        if rsn == -1:
+                            rsn = rn
+                    elif rsn > -1:
+                        ranges.append((ri, (rsn, rn-1)))
+                        rsn = -1
+                if rsn > -1:
+                    ranges.append((ri, (rsn, rn)))
+
+            value_string = ""
+            for (i, (r0, rn)) in ranges:
+                key = [ "DR", "AR" ][i]
+                if len(value_string):
+                    value_string += "/"
+                value_string += "%s%d" % (key[0], r0)
+                if r0 < rn:
+                    value_string += "-"+ "%s%d" % (key[0], rn)
+            return { "RegisterList": (value, value_string) }
+        elif operand_key == OPERAND_KEY_DISPLACEMENT:
+            value = operand_values["xxx"]
+            if instruction.specification.key.startswith("LINK"):
+                value_string = None
+            elif lookup_symbol is not None:
+                value_string = lookup_symbol(instruction.pc + value)
+            if value_string is None:
+                value_string = signed_hex_string(self, value)
+            return { "xxx": (value, value_string) }
+
         pc = instruction.pc
         id = self.dict_operand_label_to_index[operand_key]
         mode_format = self.table_operand_types[id][EAMI_FORMAT]
-        substitutions = []
+
+        substitutions = {}
         for variable_name in self.dict_operand_format_to_keys[mode_format]:
             if variable_name == "D16" or variable_name == "D8":
                 value = self._signed_value(operand_values[variable_name], { "D8": 8, "D16": 16, }[variable_name])
@@ -210,75 +254,37 @@ class ArchM68k(ArchInterface):
                     value_string = lookup_symbol(value)
                 if value_string is None:
                     value_string = signed_hex_string(self, value)
-                substitutions.append((variable_name, value, value_string))
+                substitutions[variable_name] = (value, value_string)
             elif variable_name == "An" or variable_name == "Dn":
-                Rn = operand_values["Rn"]
+                value = operand_values["Rn"]
                 if self.table_operand_types[id][EAMI_MATCH_FIELDS][EAMI_MATCH_REG] == "Rn":
-                    substitutions.append((variable_name, Rn, "{0}{1}".format(variable_name[0], Rn)))
+                    substitutions[variable_name] = (value, "{0}{1}".format(variable_name[0], value))
             elif variable_name == "xxx":
                 value = operand_values[variable_name]
                 is_absolute = operand_key in ("Imm", "AbsL", "AbsW")
                 value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
                 if value_string is None:
                     value_string = "$%x" % value
-                substitutions.append((variable_name, value, value_string))
+                substitutions[variable_name] = (value, value_string)
             else:
                 value = operand_values[variable_name]
                 value_string = str(value)
-                substitutions.append((variable_name, value, value_string))
+                substitutions[variable_name] = (value, value_string)
         return substitutions
 
-    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol):
+    def function_get_operand_string(self, instruction, operand, lookup_symbol):
         """ Get a printable representation of an instruction operand. """
-        def _get_formatted_ea_description(instruction, key, vars, lookup_symbol=None):
-            id = self.dict_operand_label_to_index[key]
-            mode_format = self.table_operand_types[id][EAMI_FORMAT]
-            substitutions = self.function_get_operand_values(instruction, key, vars, lookup_symbol)
-            for (key, value, value_string) in substitutions:
-                mode_format = mode_format.replace(key, value_string)
-            return mode_format
-
         pc = instruction.pc
         key = operand.key
         if key is None:
             key = operand.specification.key
-        if key == OPERAND_KEY_REGISTER_LIST:
-            # e.g. D0-D3/D7/A0-A2
-            ranges = []
-            for ri, mask in enumerate(operand.rl_bits):
-                rsn = -1
-                for rn in range(8):
-                    if mask & (1 << rn):
-                        # Note the start of a range.
-                        if rsn == -1:
-                            rsn = rn
-                    elif rsn > -1:
-                        ranges.append((ri, (rsn, rn-1)))
-                        rsn = -1
-                if rsn > -1:
-                    ranges.append((ri, (rsn, rn)))
-            s = ""
-            for (i, (r0, rn)) in ranges:
-                key = [ "DR", "AR" ][i]
-                if len(s):
-                    s += "/"
-                s += _get_formatted_ea_description(instruction, key, {"Rn":r0})
-                if r0 < rn:
-                    s += "-"+ _get_formatted_ea_description(instruction, key, {"Rn":rn})
-            return s
-        elif key == OPERAND_KEY_DISPLACEMENT:
-            value = vars["xxx"]
-            if instruction.specification.key.startswith("LINK"):
-                value_string = None
-            else:
-                value_string = lookup_symbol(instruction.pc + value)
-            if value_string is None:
-                value_string = signed_hex_string(self, value)
-            return value_string
-        elif key in SpecialRegisters:
-            return key
-        else:
-            return _get_formatted_ea_description(instruction, key, vars, lookup_symbol=lookup_symbol)
+
+        id = self.dict_operand_label_to_index[key]
+        mode_format = self.table_operand_types[id][EAMI_FORMAT]
+        substitutions = self.function_get_operand_values(instruction, operand, lookup_symbol)
+        for key, (value, value_string) in substitutions.iteritems():
+            mode_format = mode_format.replace(key, value_string)
+        return mode_format
 
     def function_disassemble_one_line(self, data, data_idx, data_abs_idx):
         return super(self.__class__, self).function_disassemble_one_line(data, data_idx, data_abs_idx)
@@ -435,7 +441,7 @@ class ArchM68k(ArchInterface):
                     word >>= 1
                 else:
                     word <<= 1
-            O.rl_bits = dm, am
+            O.register_list_masks = dm, am
 
             return data_idx
         elif O.specification.key == OPERAND_KEY_DISPLACEMENT:
@@ -575,7 +581,10 @@ OPERAND_KEY_REGISTER_LIST = "RL"
 OPERAND_KEY_DISPLACEMENT = "DISPLACEMENT"
 
 SpecialRegisters = ("CCR", "SR")
-CustomOperandLabels = (OPERAND_KEY_REGISTER_LIST, OPERAND_KEY_DISPLACEMENT)
+CustomOperandLabels = (
+    (OPERAND_KEY_REGISTER_LIST, "RegisterList"),
+    (OPERAND_KEY_DISPLACEMENT, "xxx"),
+)
 
 # r: index register type (0: Dn, 1: An)
 # R: register number
@@ -625,15 +634,17 @@ operand_type_table = [
 def extend_operand_type_table():
     dummy_operand_line = [ None ] * len(operand_type_table[0])
 
-    for label in SpecialRegisters:
+    for register_name in SpecialRegisters:
         l = dummy_operand_line[:]
-        l[EAMI_LABEL] = label
-        l[EAMI_DESCRIPTION] = "Special Register "+ label
+        l[EAMI_LABEL] = register_name
+        l[EAMI_FORMAT] = register_name
+        l[EAMI_DESCRIPTION] = "Special Register "+ register_name
         operand_type_table.append(l)
 
-    for label in CustomOperandLabels:
+    for (label, format) in CustomOperandLabels:
         l = dummy_operand_line[:]
         l[EAMI_LABEL] = label
+        l[EAMI_FORMAT] = format
         l[EAMI_DESCRIPTION] = "Special Operand Type "+ label
         operand_type_table.append(l)
 

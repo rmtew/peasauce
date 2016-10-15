@@ -40,9 +40,9 @@ class ArchmipsTestCase(BaseArchTestCase):
         # Check that the right number of operands are present.
         self.assertEquals(len(match.opcodes), 3)
 
-        self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars)
-        self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars)
-        self.arch.function_get_operand_string(match, match.opcodes[2], match.opcodes[2].vars)
+        self.arch.function_get_operand_string(match, match.opcodes[0])
+        self.arch.function_get_operand_string(match, match.opcodes[1])
+        self.arch.function_get_operand_string(match, match.opcodes[2])
 
 
 class Archm68kTestCase(BaseArchTestCase):
@@ -66,9 +66,9 @@ class Archm68kTestCase(BaseArchTestCase):
             self.assertEquals("MOVEQ", self.arch.function_get_instruction_string(match, match.vars))
             self.assertEquals(len(match.opcodes), 2)
             def lookup_symbol(address, absolute_info=None): return str(address)
-            value = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+            value = self.arch.function_get_operand_string(match, match.opcodes[0], lookup_symbol)
             self.assertEquals(value, "#%d" % op1value)
-            register_name = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+            register_name = self.arch.function_get_operand_string(match, match.opcodes[1], lookup_symbol)
             self.assertEquals(register_name, "D0")
 
         # movem.w d0-d3/a1/a6,-(a7)
@@ -76,9 +76,9 @@ class Archm68kTestCase(BaseArchTestCase):
         match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
         self.assertEquals("MOVEM.W", self.arch.function_get_instruction_string(match, match.vars))
         self.assertEquals(len(match.opcodes), 2)
-        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], lookup_symbol)
         self.assertEquals(operand1, "D0-D3/A1/A6")
-        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], lookup_symbol)
         self.assertEquals(operand2, "-(A7)")
 
         # movem.w (a4)+, a0-a3/a5/d1-d4
@@ -86,9 +86,9 @@ class Archm68kTestCase(BaseArchTestCase):
         match, next_data_idx = self.arch.function_disassemble_one_line(binary_data, 0, 0)
         self.assertEquals("MOVEM.W", self.arch.function_get_instruction_string(match, match.vars))
         self.assertEquals(len(match.opcodes), 2)
-        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], match.opcodes[0].vars, lookup_symbol)
+        operand1 = self.arch.function_get_operand_string(match, match.opcodes[0], lookup_symbol)
         self.assertEquals(operand1, "(A4)+")
-        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], match.opcodes[1].vars, lookup_symbol)
+        operand2 = self.arch.function_get_operand_string(match, match.opcodes[1], lookup_symbol)
         self.assertEquals(operand2, "D1-D4/A0-A3/A5")
 
 

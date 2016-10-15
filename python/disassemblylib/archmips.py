@@ -67,6 +67,7 @@ class ArchMIPS(ArchInterface):
 
     constant_table_size_names = []
     constant_table_direction_names = []
+    constant_table_format_literals = []
 
     variable_endian_type = ">"
 
@@ -98,13 +99,13 @@ class ArchMIPS(ArchInterface):
     def function_get_instruction_string(self, instruction, vars):
         return instruction.specification.key
 
-    def function_get_operand_string(self, instruction, operand, vars, lookup_symbol=None):
+    def function_get_operand_string(self, instruction, operand, lookup_symbol=None):
         key = operand.key
         if key is None:
             key = operand.specification.key
         operand_idx = self.dict_operand_label_to_index[key]
         mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
-        for subst_name, subst_value in vars.iteritems():
+        for subst_name, subst_value in operand.vars.iteritems():
             if subst_name == "Rn":
                 value_string = self.constant_register_prefix + str(subst_value)
             elif key == "CC" and subst_name == "v":
