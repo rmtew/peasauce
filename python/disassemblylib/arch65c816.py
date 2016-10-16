@@ -6,13 +6,15 @@
 
 import logging
 
-from .util import *
+from . import util
 
 logger = logging.getLogger("disassembler-65c816")
 
 def IB(v):
     """ Convert value to 8 digit binary string. """
-    return _n2b(v, padded_length=8)
+    return util._n2b(v, padded_length=8)
+
+IF_65c816 = 1 << 0
 
 instruction_table = [
     [ IB(0x00), "BRK s", IF_65c816, "DESC" ],
@@ -289,6 +291,6 @@ instruction_table = [
 ]
 
 
-class Arch65c816(ArchInterface):
+class Arch65c816(util.ArchInterface):
     pass
 

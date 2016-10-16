@@ -1,6 +1,7 @@
 import logging
 import re
 import struct
+from typing import Union, List, Dict
 
 logger = logging.getLogger("disassembler-util")
 
@@ -65,30 +66,30 @@ def make_operand_mask(mask_string):
 
 
 class Match(object):
-    table_mask = None
-    table_text = None
-    table_extra_words = None
-    format = None
-    specification = None
-    description = None
-    data_words = None
-    opcodes = None
-    vars = None
-    num_bytes = None
+    table_mask = None # type: str
+    table_text = None # type: str
+    table_extra_words = None # type: int
+    format = None # type: str
+    specification = None # type: Specification
+    description = None # type: str
+    data_words = None # type: List[int]
+    opcodes = None # type: List[MatchOpcode]
+    vars = None # type: Dict[str, Union[int, str]]
+    num_bytes = None # type: int
 
 class MatchOpcode(object):
-    key = None # Overrides the one in the spec
-    format = None
-    specification = None
-    description = None
-    vars = None
-    rl_bits = None
+    # Overrides the one in the specification
+    key = None # type: str
+    format = None # type: str
+    specification = None # type: Specification
+    description = None # type: str
+    vars = None # type: Dict[str, Union[int, str]]
+    rl_bits = None # type: Union[None, int]
 
 class Specification(object):
-    key = None
-    mask_char_vars = None
-    filter_keys = None
-    ea_args = None
+    key = None # type: str
+    mask_char_vars = None # type: Dict[str, str]
+    filter_keys = None # type: Union[None, List[str]]
 
 
 @memoize
@@ -301,21 +302,21 @@ class ArchInterface(object):
     """ Constant: Core architecture bit mask. """
     constant_core_architecture_mask = 0
     """ Constant: The architecture supported endian types.  little endian '<' big endian '>'."""
-    constant_endian_types = None
+    constant_endian_types = None # type: str
     """ Constant: How many bits an architectural word is comprised of. """
-    constant_word_size = None
+    constant_word_size = None # type: int
     """ Constant: How far from the start of the current instruction PC is offset while it is executing. """
     constant_pc_offset = 0
     """ Constant: Method of filtered selection of multiple valid operand types. """
-    constant_operand_type_general_label = None
+    constant_operand_type_general_label = None # type: Union[None, str]
 
-    constant_table_condition_code_names = None
-    constant_table_size_names = None
-    constant_table_direction_names = None
-    constant_table_format_literals = None
+    constant_table_condition_code_names = None # type: Union[List[str], Dict[int, str]]
+    constant_table_size_names = None # type: List[str]
+    constant_table_direction_names = None # type: List[str]
+    constant_table_format_literals = None # type: List[str]
 
     """ Variable: The implicit (or user selected) endian type. """
-    variable_endian_type = None
+    variable_endian_type = None # type: str
 
     # API: External use.
     """ Function: Identify if the given instruction alters the program counter. """

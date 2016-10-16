@@ -15,7 +15,7 @@ entries were added.
 ##### 0002: Disassembly: Jump table discovery / processing
 
 Sample: NEURO
-* Search for "JSR ARi" (not so easy as it matches ARid16)
+* Search for "JSR ARi" which is not so easy as it matches ARid16 with the naive case insensitive searching.
   * 0x1E6E, 0xA4B6, 0xA4EC, 0xACB8, 0xAE26
 
 Implementing this would drive operand introspection, and dataflow analysis.  A related use of operand introspection is the ability to follow references in operand values, or to alow the user to edit operands (replace values with symbols, change numeric base).

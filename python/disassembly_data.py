@@ -4,6 +4,8 @@
     Licensed using the MIT license.
 """
 
+from typing import List, Any, Tuple
+
 ## ProgramData related.
 
 STATE_LOADING = 1
@@ -79,7 +81,7 @@ def get_block_data_type(block):
 
 def set_block_data_type(block, data_type):
     """
-    NOTE: If this function is called after loading of an input file is complete, then it is 
+    NOTE: If this function is called after loading of an input file is complete, then it is
           the responsibility of the caller to update the uncertain reference lists.
     """
     block.flags &= ~(DATA_TYPE_BITMASK << DATA_TYPE_BIT0)
@@ -187,27 +189,27 @@ class ProgramData(object):
 
 class SegmentBlock(object):
     """ Sequential numbering in order of creation. """
-    sequence_id = None
+    sequence_id = None # type: int
     last_sequence_id = 0
     """ The number of this segment in the file. """
-    segment_id = None
+    segment_id = None # type: int
     """ The offset of this block in its segment. """
-    segment_offset = None
+    segment_offset = None # type: int
     """ All segments appear as one contiguous address space.  This is the offset of this block in that space. """
-    address = None
+    address = None # type: int
     """ The number of bytes data that this block contains. """
-    length = None
+    length = None # type: int
     """ The data type of this block (DATA_TYPE_*) and more """
     flags = 0
-    """ DATA_TYPE_CODE: [ line0_match, ... lineN_match ]. 
+    """ DATA_TYPE_CODE: [ line0_match, ... lineN_match ].
         DATA_TYPE_ASCII: [ (offset, length), ... ]. """
-    line_data = None
+    line_data = None # type: List[Any]
     """ Calculated number of lines. """
     line_count = 0
     """ Cached potential address references. """
-    references = None
+    references = None # type: List[Tuple[int, int, str]]
 
-    def __init__(self, copy_block=None):        
+    def __init__(self, copy_block=None):
         if copy_block is not None:
             copy_block.copy_to(self)
 
@@ -232,14 +234,14 @@ class SegmentBlock(object):
 
 class NewProjectOptions:
     # Binary file options.
-    dis_name = None
-    loader_load_address = None
-    loader_entrypoint_offset = None
+    dis_name = None # type: str
+    loader_load_address = None # type: int
+    loader_entrypoint_offset = None # type: int
 
 class LoadProjectOptions:
     valid_file_size = False
-    valid_file_checksum = False
+    valid_file_checksum = False # Unused.
 
 class SaveProjectOptions:
-    input_file = None
-    save_file_path = None
+    input_file = None # type: file
+    save_file_path = None # type: str

@@ -35,7 +35,7 @@ class File(object):
     EXPECTED_SUFFIX = "smc"
 
     # header field values.
-    _header_page_count_8kb = None
+    _header_page_count_8kb = None # type: int
 
 
 def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=None):

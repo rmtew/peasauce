@@ -8,8 +8,9 @@
 # TODO: is_final_instruction() - Work out if there are any instructions other than branches and jumps, where PC or LR or whatever is changed directly.  ra?
 
 import logging
+from typing import List
 
-from .util import *
+from .util import ArchInterface, _b2n, IFX_ENDSEQ_BD, IFX_BRANCH, IFX_ENDSEQ
 
 logger = logging.getLogger("disassembler-mips")
 
@@ -65,9 +66,9 @@ class ArchMIPS(ArchInterface):
         _b2n("10111"): "NGT",
     }
 
-    constant_table_size_names = []
-    constant_table_direction_names = []
-    constant_table_format_literals = []
+    constant_table_size_names = [] # type: List[str]
+    constant_table_direction_names = [] # type: List[str]
+    constant_table_format_literals = [] # type: List[str]
 
     variable_endian_type = ">"
 

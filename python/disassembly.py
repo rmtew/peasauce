@@ -17,11 +17,12 @@ import bisect
 import logging
 import operator
 import os
+import typing
 #import traceback
 
-#from disassembly_data import *
 import loaderlib
 import disassemblylib
+import disassemblylib.util
 import disassembly_data
 import disassembly_persistence
 import persistence
@@ -49,11 +50,20 @@ class DisplayConfiguration(object):
 
 display_configuration = DisplayConfiguration()
 
-
+## Typing aliases
+Instruction = disassemblylib.util.Match
+InstructionEntryLite = typing.Tuple[int, typing.Union[int, Instruction]]
+InstructionEntry = typing.Tuple[int, Instruction]
+Address = int
+LineNumber = int
 
 ## disassembly_data.SegmentBlock flag helpers
 
 def create_instruction_entry(program_data, block, block_offset):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> Instruction
+    """
+    Disassemble the data at the given block offset to get the instruction located there.
+    """
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     data_offset_start = block.segment_offset + block_offset
     match, data_offset_end = program_data.dis_disassemble_one_line_func(data, data_offset_start, block.address + block_offset)
@@ -61,16 +71,33 @@ def create_instruction_entry(program_data, block, block_offset):
         raise RuntimeError("Catastrophic failure. data_ofs=%d block/seg_ofs=%d mem_addr=%x data_len=%d" % (data_offset_start, block.segment_offset, block.address + block_offset, len(data)))
     return match
 
+def find_previous_instruction(program_data, block, line_data, idx, entry_type):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, typing.List[InstructionEntryLite], int, int) -> typing.Tuple[int, typing.Union[None, Instruction]]
+    """
+    Get the preceding instruction of the given type and it's line index within the block.
+    This will generate the instruction entry if it does not exist.
+    """
+    while idx > 0:
+        idx -= 1
+        if line_data[idx][0] == entry_type:
+            entry = line_data[idx][1]
+            if isinstance(entry, int): # Offset of the instruction data in the block data.
+                entry = create_instruction_entry(program_data, block, entry)
+            return idx, entry
+    return idx, None
+
 
 SEGMENT_HEADER_LINE_COUNT = 2
 
 def get_block_header_line_count(program_data, block):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock) -> int
     if block.segment_offset == 0 and loaderlib.has_segment_headers(program_data.loader_system_name):
         return SEGMENT_HEADER_LINE_COUNT
     return 0
 
 
 def get_instruction_line_count(program_data, match):
+    # type: (disassembly_data.ProgramData, Instruction) -> int
     line_count = 1
     # TODO(rmtew): Make non-architecture specific.  m68k = should be a per-instruction configuration?
     if display_configuration.trailing_line_trap and match.specification.key == "TRAP":
@@ -81,6 +108,7 @@ def get_instruction_line_count(program_data, match):
 
 
 def get_block_line_count(program_data, block):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock) -> int
     # Overwrite the old line count, it's OK, we've notified any removal if necessary.
     line_count = get_block_header_line_count(program_data, block)
 
@@ -101,7 +129,7 @@ def get_block_line_count(program_data, block):
         line_count = len(block.line_data)
     else:
         # This will cause an error, but if it is happening, there are larger problems.
-        return
+        raise Exception("unexpected code path")
 
     segments = program_data.loader_segments
     if block.segment_offset + block.length == loaderlib.get_segment_length(segments, block.segment_id):
@@ -116,6 +144,7 @@ def get_block_line_count(program_data, block):
     return line_count
 
 def get_code_block_info_for_address(program_data, address):
+    # type: (disassembly_data.ProgramData, int) -> typing.Union[None, InstructionEntry]
     block, block_idx = lookup_block_by_address(program_data, address)
     base_address = program_data.block_addresses[block_idx]
 
@@ -145,23 +174,26 @@ def get_code_block_info_for_address(program_data, address):
     # Within but not at the start of the previous instruction.
     if address < base_address + bytes_used:
         return previous_result
-    # return None, previous_result
 
 
 def get_code_block_info_for_line_number(program_data, line_number):
+    # type: (disassembly_data.ProgramData, int) -> typing.Union[None, InstructionEntry]
     block, block_idx = lookup_block_by_line_count(program_data, line_number)
     if disassembly_data.get_block_data_type(block) != disassembly_data.DATA_TYPE_CODE:
-        return
+        return None
     base_address = program_data.block_addresses[block_idx]
 
     bytes_used = 0
     line_count = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
-    previous_result = None
+    previous_result = None # type: typing.Union[None, InstructionEntry]
     for type_id, entry in block.line_data:
         if type_id == disassembly_data.SLD_INSTRUCTION:
             # Within but not at the start of the previous instruction.
             if line_number < line_count:
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, None if previous_result is None else hex(previous_result[0]))
+                line_type = None
+                if previous_result is not None:
+                    line_type = hex(previous_result[0])
+                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, line_type)
                 return previous_result
 
             if type(entry) is int:
@@ -190,10 +222,12 @@ def get_code_block_info_for_line_number(program_data, line_number):
     # return None, previous_result
 
 def get_data_type_for_address(program_data, address):
+    # type: (disassembly_data.ProgramData, int) -> int
     block, block_idx = lookup_block_by_address(program_data, address)
     return disassembly_data.get_block_data_type(block)
 
 def get_line_number_for_address(program_data, address):
+    # type: (disassembly_data.ProgramData, int) -> typing.Union[None, int]
     block, block_idx = lookup_block_by_address(program_data, address)
     data_type = disassembly_data.get_block_data_type(block)
     if data_type == disassembly_data.DATA_TYPE_CODE:
@@ -225,6 +259,7 @@ def get_line_number_for_address(program_data, address):
 
 
 def get_address_for_line_number(program_data, line_number):
+    # type: (disassembly_data.ProgramData, int) -> typing.Union[int, None]
     block, block_idx = lookup_block_by_line_count(program_data, line_number)
 
     data_type = disassembly_data.get_block_data_type(block)
@@ -262,6 +297,7 @@ def get_address_for_line_number(program_data, line_number):
 
 
 def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
+    # type: (disassembly_data.ProgramData, int) -> typing.List[int]
     result = get_code_block_info_for_line_number(program_data, line_number)
     if result is not None:
         address, match = result
@@ -300,6 +336,7 @@ def get_all_references(program_data):
 """
 
 def get_data_type_sizes(block):
+    # type: (disassembly_data.SegmentBlock) -> typing.List[typing.Tuple[int, int, int, int]]
     block_data_size = disassembly_data.get_block_data_type(block)
     size_types = disassembly_data.DESCENDING_DATA_TYPE_SIZES[block_data_size]
 
@@ -317,17 +354,8 @@ def get_data_type_sizes(block):
         unconsumed_byte_count -= size_count * num_bytes
     return sizes
 
-def find_previous_entry(program_data, block, line_data, idx, entry_type):
-    while idx > 0:
-        idx -= 1
-        if line_data[idx][0] == entry_type:
-            entry = line_data[idx][1]
-            if type(entry) is int:
-                entry = create_instruction_entry(program_data, block, entry)
-            return idx, entry
-    return idx, None
-
 def get_block_footer_line_count(program_data, block, block_idx):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> int
     """ We may be working with a temporary block copy, so the block index
         should only be used for the purpose of comparing neighbouring
         blocks. """
@@ -342,7 +370,7 @@ def get_block_footer_line_count(program_data, block, block_idx):
             if type(entry) is int:
                 entry = create_instruction_entry(program_data, block, entry)
             if display_configuration.trailing_line_exit:
-                discard, preceding_entry = find_previous_entry(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
+                discard, preceding_entry = find_previous_instruction(program_data, block, block.line_data, len(block.line_data)-1, disassembly_data.SLD_INSTRUCTION)
                 if program_data.dis_is_final_instruction_func(entry, preceding_entry):
                     line_count += 1
 
@@ -364,6 +392,7 @@ def get_block_footer_line_count(program_data, block, block_idx):
     return line_count
 
 def get_file_footer_line_count(program_data):
+    # type: (disassembly_data.ProgramData) -> int
     last_block_idx = len(program_data.blocks)-1
     last_block = program_data.blocks[last_block_idx]
     if get_block_footer_line_count(program_data, last_block, last_block_idx) > 0:
@@ -371,6 +400,7 @@ def get_file_footer_line_count(program_data):
     return 2
 
 def get_file_line_count(program_data):
+    # type: (disassembly_data.ProgramData) -> int
     """ Get the total number of lines (with 0 being the first) in the 'file'. """
     if program_data.block_line0s is None:
         return 0
@@ -379,6 +409,7 @@ def get_file_line_count(program_data):
     return get_block_line_number(program_data, last_block_idx) + get_block_line_count_cached(program_data, last_block) + get_file_footer_line_count(program_data)
 
 def DEBUG_check_file_line_count(program_data):
+    # type: (disassembly_data.ProgramData) -> None
     result = get_file_line_count(program_data)
     line_count0 = line_count1 = get_file_footer_line_count(program_data)
     for block in program_data.blocks:
@@ -388,6 +419,7 @@ def DEBUG_check_file_line_count(program_data):
     #print "LINE COUNTS", result, line_count0, line_count1
 
 def get_file_line(program_data, line_idx, column_idx): # Zero-based
+    # type: (disassembly_data.ProgramData, int, int) -> [disassembly_data.SegmentBlock
     if line_idx is None:
         return "BAD ROW"
     if column_idx is None:
@@ -634,9 +666,10 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     return string
                 elif DEBUG_ANNOTATE_DISASSEMBLY and column_idx == LI_ANNOTATIONS:
                     return "-"
-
+    raise Exception("unhandled case")
 
 def check_known_address(program_data, address):
+    # type: (disassembly_data.ProgramData, int) -> bool
     """
     Returns True if the address is valid.  Valid addresses are of two kinds, addresses that
     fall within the known address ranges for segments, and specific addresses the lie outside
@@ -645,7 +678,7 @@ def check_known_address(program_data, address):
     NOTE(rmtew): I'm not sure how well this works, given we only accept post segment addresses
     at 1 byte higher than the end of the any segment that precedes it.
     """
-    pre_ids = set()
+    pre_ids = set() # type: typing.Set[int]
     for address0, addressN, segment_ids in program_data.address_ranges:
         if address < address0:
             pass
@@ -672,6 +705,7 @@ def check_known_address(program_data, address):
     return False
 
 def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_addresses):
+    # type: (disassembly_data.ProgramData, int, int, typing.Set[int]) -> bool
     if not check_known_address(program_data, address):
         return False
     # These get split as their turn to be disassembled comes up.
@@ -680,6 +714,7 @@ def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_add
     return True
 
 def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_addresses):
+    # type: (disassembly_data.ProgramData, int, int, typing.Set[int]) -> bool
     if not check_known_address(program_data, address):
         return False
     program_data.reference_addresses.setdefault(address, set()).add(src_abs_idx)
@@ -687,7 +722,8 @@ def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_
     return True
 
 def get_referring_addresses(program_data, address):
-    referring_addresses = set()
+    # type: (disassembly_data.ProgramData, int) -> typing.Set[int]
+    referring_addresses = set() # type: typing.Set[int]
     referring_addresses.update(program_data.branch_addresses.get(address, set()))
     referring_addresses.update(program_data.reference_addresses.get(address, set()))
     other_addresses = program_data.loader_relocated_addresses.get(address, None)
@@ -696,21 +732,26 @@ def get_referring_addresses(program_data, address):
     return referring_addresses
 
 def get_entrypoint_address(program_data):
+    # type: (disassembly_data.ProgramData) -> int
     return loaderlib.get_segment_address(program_data.loader_segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
 
 def get_address_for_symbol(program_data, symbol_name):
+    # type: (disassembly_data.ProgramData, str) -> int
     symbol_name = symbol_name.lower()
     for k, v in program_data.symbols_by_address.iteritems():
         if v.lower() == symbol_name:
             return k
 
 def set_symbol_insert_func(program_data, f):
+    # type: (disassembly_data.ProgramData, typing.Callable[[int, str], None]) -> None
     program_data.symbol_insert_func = f
 
 def set_symbol_delete_func(program_data, f):
+    # type: (disassembly_data.ProgramData, typing.Callable[[int, str], None]) -> None
     program_data.symbol_delete_func = f
 
 def insert_symbol(program_data, address, symbol_label):
+    # type: (disassembly_data.ProgramData, int, str) -> None
     if not check_known_address(program_data, address):
         return
     program_data.symbols_by_address[address] = symbol_label
@@ -718,6 +759,7 @@ def insert_symbol(program_data, address, symbol_label):
         program_data.symbol_insert_func(address, symbol_label)
 
 def get_symbol_for_address(program_data, address, absolute_info=None):
+    # type: (disassembly_data.ProgramData, int, typing.Tuple[int, int]) -> str
     # If the address we want a symbol was relocated somewhere, verify the instruction got relocated.
     if absolute_info is not None:
         valid_address = False
@@ -741,9 +783,11 @@ def get_symbol_for_address(program_data, address, absolute_info=None):
         return program_data.symbols_by_address.get(address)
 
 def set_symbol_for_address(program_data, address, symbol):
+    # type: (disassembly_data.ProgramData, int, str) -> None
     program_data.symbols_by_address[address] = symbol
 
 def _recalculate_line_count_index(program_data, dirtyidx=None):
+    # type: (disassembly_data.ProgramData, int) -> None
     if dirtyidx is None:
         dirtyidx = program_data.block_line0s_dirtyidx
     elif program_data.block_line0s_dirtyidx is not None:
@@ -760,10 +804,12 @@ def _recalculate_line_count_index(program_data, dirtyidx=None):
         program_data.block_line0s_dirtyidx = None
 
 def get_block_line_number(program_data, block_idx):
+    # type: (disassembly_data.ProgramData, int) -> int
     _recalculate_line_count_index(program_data)
     return program_data.block_line0s[block_idx]
 
 def clear_block_line_count(program_data, block, block_idx=None):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> None
     if block_idx is None:
         discard, block_idx = lookup_block_by_address(program_data, block.address)
     if program_data.block_line0s_dirtyidx is None or block_idx < program_data.block_line0s_dirtyidx:
@@ -771,20 +817,24 @@ def clear_block_line_count(program_data, block, block_idx=None):
     block.line_count = 0
 
 def get_block_line_count_cached(program_data, block):
+    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock) -> int
     if block.line_count == 0:
         block.line_count = get_block_line_count(program_data, block)
     return block.line_count
 
 def lookup_block_by_line_count(program_data, lookup_key):
+    # type: (disassembly_data.ProgramData, int) -> typing.Tuple[disassembly_data.SegmentBlock, int]
     _recalculate_line_count_index(program_data)
     lookup_index = bisect.bisect_right(program_data.block_line0s, lookup_key)
     return program_data.blocks[lookup_index-1], lookup_index-1
 
 def lookup_block_by_address(program_data, lookup_key):
+    # type: (disassembly_data.ProgramData, int) -> typing.Tuple[disassembly_data.SegmentBlock, int]
     lookup_index = bisect.bisect_right(program_data.block_addresses, lookup_key)
     return program_data.blocks[lookup_index-1], lookup_index-1
 
 def get_next_block_line_number(program_data, data_type, line_idx, direction_offset=1, op_func=operator.eq):
+    # type: (disassembly_data.ProgramData, int, int, int, typing.Callable[[typing.Any, typing.Any], int]) -> int
     block, block_idx = lookup_block_by_line_count(program_data, line_idx)
     block_idx += direction_offset
     while block_idx < len(program_data.blocks) and block_idx >= 0:
@@ -793,6 +843,7 @@ def get_next_block_line_number(program_data, data_type, line_idx, direction_offs
         block_idx += direction_offset
 
 def insert_block(program_data, insert_idx, block):
+    # type: (disassembly_data.ProgramData, int, disassembly_data.SegmentBlock) -> None
     program_data.block_addresses.insert(insert_idx, block.address)
     program_data.block_line0s.insert(insert_idx, None)
     program_data.blocks.insert(insert_idx, block)
@@ -804,9 +855,12 @@ ERR_SPLIT_EXISTING = -1
 ERR_SPLIT_BOUNDS = -2
 ERR_SPLIT_MIDINSTRUCTION = -3
 
-def IS_SPLIT_ERR(value): return value < 0
+def IS_SPLIT_ERR(value):
+    # type: (int) -> bool
+    return value < 0
 
 def split_block(program_data, address, own_midinstruction=False):
+    # type: (disassembly_data.ProgramData, int, bool) -> typing.Tuple[disassembly_data.SegmentBlock, int]
     """
     Locate the block at `address` and split it if possible.
     own_midinstruction: Where something refers to an address mid-instruction in a code block, split it and add a relative EQU to deal with it.
@@ -904,6 +958,7 @@ def split_block(program_data, address, own_midinstruction=False):
     return new_block, block_idx + 1
 
 def _locate_uncertain_data_references(program_data, address, block=None):
+    # type: (disassembly_data.ProgramData, int, disassembly_data.SegmentBlock) -> typing.List[typing.Tuple[int, int, str]]
     """ Check for valid 32 bit addresses at all 16 bit aligned offsets within the data block from address onwards. """
     if block is None:
         block, block_idx = lookup_block_by_address(program_data, address)
@@ -934,6 +989,7 @@ def get_uncertain_data_references(program_data):
     return results
 
 def _locate_uncertain_code_references(program_data, address, is_binary_file, block=None):
+    # type: (disassembly_data.ProgramData, int, bool, disassembly_data.SegmentBlock) -> List[typing.Tuple[int, int, str]]
     """ Check for candidate operand values in instructions within the code block from address onwards. """
     if block is None:
         block, block_idx = lookup_block_by_address(program_data, address)
@@ -1196,75 +1252,107 @@ def DEBUG_get_instruction_repr(program_data, instruction):
 
 # NOTE(rmtew): This should eventually be refactored into the architecture/loader libraries in some way.
 class IntrospectionHelper(object):
+    """
     class BlockState(object):
         def __init__(self, block, line_data=None, initial_instruction_idx=None, initial_instruction=None):
             self.block = block
             self.line_data = line_data
             self.initial_instruction_idx = initial_instruction_idx
             self.initial_instruction = initial_instruction
+    """
 
     def __init__(self, program_data):
         self.program_data = program_data
-        self.library_handle_fetches = {} # type: Dict[Tuple[int, int], None]
-        self.library_handle_usage = {} # type: Dict[Tuple[int, int], None]
+        self.library_handle_fetches = {} # type: Dict[typing.Tuple[int, int], None]
+        self.library_handle_usage = {} # type: Dict[typing.Tuple[int, int], None]
 
-    def on_instruction_matched(self, block, line_data, initial_instruction_idx, initial_instruction):
+    def on_instruction_matched(self, initial_block, initial_line_data, initial_instruction_idx, initial_instruction):
+        """
+        This function has the following responsibilities:
+        1. Identify open library calls and library handle storage.
+        2. Identify any library calls and record what library handle they use.
+        3. Identify any exec base storage.
+        4. Nothing else that can be done as a post-processing step.
+        """
         if self.program_data.processor_id != loaderlib.constants.PROCESSOR_M680x0:
             return
-        lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(self.program_data, address, absolute_info)
-        initial_s = DEBUG_get_instruction_repr(self.program_data, initial_instruction)
 
-        # NOTE(rmtew): Is this needed?  We have it in the local scope from the arguments.
-        initial_block_state = IntrospectionHelper.BlockState(block, line_data, initial_instruction_idx)
-        if len(initial_instruction.opcodes) == 1:
+        lookup_symbol = lambda address, absolute_info=None: get_symbol_for_address(self.program_data, address, absolute_info)
+        initial_s = DEBUG_get_instruction_repr(self.program_data, initial_instruction) # TODO(rmtew): Remove when no longer needed for debugging.
+
+        # TODO(rmtew): consider doing all the reactive parts of this in a post-processing pass.
+        # - Resolving library usage.
+        #   1. Given known library handle references.
+        #   2. Follow each reference and process the usage.
+        # -
+
+        # TODO(rmtew): if exec call, and D16 is -0x198, then recognise it as open library.
+        #   1. Search before initial instruction for last time A1 was set via lea (LEA AbsL, AR) and get AbsL address.
+        #   2. Detect if we have processed it before.
+        #   3. Change data type to ASCII.
+        #   4. Rename it to standard pattern.
+        #   5. Search after the initial instruction for whether D0 is stored somewhere.
+        #   6. Detect if we have processed it before.
+        #   7. Rename it to standard pattern (based on library name).
+        #   8. Index it so we can map it to usages in a post-processing pass.
+
+        # TODO(rmtew): Detect if exec library base address is copied.
+        #   1. Match "MOVE.L AbsW, AbsL"
+
+        # TODO(rmtew): Indexing by the instruction index should be by instruction address?
+
+        if len(initial_instruction.opcodes) == 2:
+            if initial_instruction.specification.key == "MOVE.L" and initial_instruction.opcodes[0].key == "AbsL":
+                pass
+        elif len(initial_instruction.opcodes) == 1:
             initial_instruction_operand1 = initial_instruction.opcodes[0]
             if initial_instruction.specification.key == "JSR" and initial_instruction_operand1.key == "ARid16":
                 initial_instruction_operand1_values = self.program_data.dis_get_operand_values_func(initial_instruction, initial_instruction_operand1, lookup_symbol)
-                usage_register = initial_instruction_operand1_values["An"][0]
-                # e.g. operand_values = [('D16', -408, '-$198'), ('An', 6, 'A6')]
+                # e.g. operand_values = { 'D16': (-408, '-$198'), 'An': (6, 'A6') }
+                called_address_register = initial_instruction_operand1_values["An"][0]
+
+                # We go backwards to try and find an instruction that sets this address register.
+                current_block = initial_block
+                current_line_data = initial_line_data
                 current_instruction_idx = initial_instruction_idx
                 while 1:
-                    current_instruction_idx, current_instruction = find_previous_entry(self.program_data, block, line_data, current_instruction_idx, disassembly_data.SLD_INSTRUCTION)
+                    current_instruction_idx, current_instruction = find_previous_instruction(self.program_data, current_block, current_line_data, current_instruction_idx, disassembly_data.SLD_INSTRUCTION)
                     if current_instruction is not None:
-                        current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction)
+                        current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction) # TODO(rmtew): Remove when no longer needed for debugging.
 
+                        # We handle the one operand case, in case there are instructions with one operand that modify a register we are interested in.
                         if len(current_instruction.opcodes) >= 1:
                             current_dest_operand = current_instruction.opcodes[-1]
                             current_dest_operand_values = self.program_data.dis_get_operand_values_func(current_instruction, current_dest_operand, lookup_symbol)
+                            # Library calls will be done using an address register
                             if "An" in current_dest_operand_values:
                                 current_dest_register_number = current_dest_operand_values["An"][0]
-                                if current_dest_register_number != usage_register:
+                                if current_dest_register_number != called_address_register:
                                     continue
-                                usage_entry = self.library_handle_usage.get((block.address, current_instruction_idx), None)
+                                # Have we reached an instruction which makes a known usage of this address register?
+                                usage_entry = self.library_handle_usage.get((current_block.address, current_instruction_idx), None)
                                 if usage_entry is not None:
                                     if usage_entry[0] == current_dest_register_number:
-                                        self.library_handle_usage[(block.address, initial_instruction_idx)] = usage_entry
+                                        # If so, copy the usage for the initial instruction and we're done.
+                                        self.library_handle_usage[(initial_block.address, initial_instruction_idx)] = usage_entry
                                         break
+                                    # This is actually an error.  The register should be the same.
                                 elif current_instruction.specification.key == "MOVEA.L" and current_instruction.opcodes[0].key == "AbsL" and current_instruction.opcodes[1].specification.key == "AR":
                                     current_source_operand_values = self.program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0], lookup_symbol)
                                     handle_address = current_source_operand_values["xxx"]
+                                    # Amiga exec library base address.  Note that if the program has data at address 4, there may be a clash here..  Hmm.
                                     if handle_address == 4:
                                         handle_address = None
                                     usage_entry = (current_dest_register_number, handle_address)
-                                    self.library_handle_fetches[(block.address, current_instruction_idx)] = usage_entry
-                                    self.library_handle_usage[(block.address, initial_instruction_idx)] = usage_entry
-                                    current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction)
+                                    self.library_handle_fetches[(current_block.address, current_instruction_idx)] = usage_entry
+                                    self.library_handle_usage[(initial_block.address, initial_instruction_idx)] = usage_entry
+                                    current_s = DEBUG_get_instruction_repr(self.program_data, current_instruction) # TODO(rmtew): Remove when no longer needed for debugging.
                                     break
-                                break
+                                break # We give up as we have not handled this case yet.  Or it's an error.
+                        continue # Look at next preceding instruction.
 
-                            # TODO(rmtew): Check if the desired register is getting a value put in it.
-                            # TODO(rmtew): If we confirm this is a library call, flag the address with the known library usage in the given register.
-                            #              If there are subsequent calls, we can just go back to that point to save backtracking too far.
-                        continue
-                    break
-        elif len(initial_instruction.opcodes) == 2:
-            if initial_instruction.specification.key == "MOVEA.L" and initial_instruction.opcodes[0].key == "AbsL" and initial_instruction.opcodes[1].specification.key == "AR":
-                source_value = initial_instruction.opcodes[0].vars["xxx"]
-                if source_value == 4:
-                    register_number = initial_instruction.opcodes[1].vars["Rn"]
-                    if register_number == 6:
-                        pass # print "A6=4.w, %x" % match.pc
-        
+                    break # No more instructions.  TODO(rmtew): we should follow back references from here to more blocks.
+
 
 def _process_address_as_code(program_data, address, pending_symbol_addresses, work_state=None):
     helper = IntrospectionHelper(program_data)
@@ -1326,7 +1414,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                     line_data.append((disassembly_data.SLD_EQU_LOCATION_RELATIVE, label_address - address))
                     #logger.debug("%06X: mid-instruction label = '%s' %d", match_address, label, label_address-match_address)
             bytes_consumed += bytes_matched
-            discard, preceding_match = find_previous_entry(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
+            discard, preceding_match = find_previous_instruction(program_data, block, line_data, current_idx, disassembly_data.SLD_INSTRUCTION)
             found_terminating_instruction = program_data.dis_is_final_instruction_func(match, preceding_match)
             # Give the architecture/platform a chance to process the instruction.
             helper.on_instruction_matched(block, line_data, current_idx, match)

@@ -38,7 +38,7 @@ import sys
 import struct
 
 from . import constants
-from .util import *
+from .util import IFX_BRANCH, ArchInterface, _b2n
 
 
 logger = logging.getLogger("disassembler-m68k")

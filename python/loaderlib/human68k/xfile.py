@@ -24,6 +24,7 @@ import os
 import struct
 import sys
 import logging
+from typing import List, Tuple
 
 from .. import constants
 
@@ -49,26 +50,26 @@ LOADMODE_HIGH_ADDRESS = 2
 
 class XFile(object):
     # Executable file header field values.
-    _reserved1 = None
-    _loadmode = None
-    _base_address = None # Normally 0
-    _entry_offset = None
-    _text_segment_size = None
-    _data_segment_size = None
-    _bss_segment_size = None
-    _relocation_table_size = None
-    _symbol_table_size = None
-    _debug_line_size = None
-    _debug_symbol_size = None
-    _debug_string_size = None
-    _reserved2 = None
-    _reserved3 = None
-    _reserved4 = None
-    _reserved5 = None
-    _bindlist_offset = None
+    _reserved1 = None # type: int
+    _loadmode = None # type: int
+    _base_address = None # type: int ## Normally 0
+    _entry_offset = None # type: int
+    _text_segment_size = None # type: int
+    _data_segment_size = None # type: int
+    _bss_segment_size = None # type: int
+    _relocation_table_size = None # type: int
+    _symbol_table_size = None # type: int
+    _debug_line_size = None # type: int
+    _debug_symbol_size = None # type: int
+    _debug_string_size = None # type: int
+    _reserved2 = None # type: int
+    _reserved3 = None # type: int
+    _reserved4 = None # type: int
+    _reserved5 = None # type: int
+    _bindlist_offset = None # type: int
 
-    _relocation_table_entries = None
-    _symbol_table_entries = None
+    _relocation_table_entries = None # type: List[Tuple[int, List[int]]]
+    _symbol_table_entries = None # type: List[Tuple[str, int, int]]
 
 EXPECTED_SUFFIX = "x"
 

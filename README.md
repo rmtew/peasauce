@@ -33,7 +33,7 @@ Peasauce can currently do the following:
 * Load and attempt to disassemble X68000 m68k executable files.
 * Load and attempt to disassemble m68k binary files, with specified load and entrypoint addresses.
 
-While there is comprehensive m68k support, it is not currently complete. 
+While there is comprehensive m68k support, it is not currently complete.
 There are also cases where special features of certain executable file formats
 are not currently supported.
 
@@ -138,6 +138,7 @@ This is intended to be a summarised list of points that briefly note intended wo
 
 #### Technical Debt
 
+* Type checking: Support mypy static typing via Python 2 comments specifying types.
 * Binary files: Separate platform and file loading.  Then binary files can be assigned a platform.
 * Disassembly: Do an automated check on the instruction table II_NAME column for correct formatting.
 * Disassembly: Move the renaming symbol validation regular expression into the platform or architecture level.

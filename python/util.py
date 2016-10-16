@@ -27,4 +27,3 @@ def str_to_int(s):
         return int(s[2:], 16)
     else:
         return int(s)
- 

@@ -11,7 +11,7 @@ from .. import constants
 class System(object):
     endian_id = constants.ENDIAN_BIG
 
-    processor_id = None
+    processor_id = None # type: int
 
     def get_processor_id(self):
         return self.processor_id

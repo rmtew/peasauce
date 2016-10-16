@@ -7,6 +7,7 @@
 import os
 import logging
 import struct
+from typing import Any
 
 from . import amiga
 from . import atarist
@@ -227,8 +228,8 @@ class DataTypes(object):
 
 class FileInfo(object):
     """ The custom system data for the loaded file. """
-    internal_data = None
-    savefile_data = None
+    internal_data = None # type: Any
+    savefile_data = None # type: Any
 
     def __init__(self, system, file_name, loader_options=None):
         self.system = system
@@ -314,7 +315,7 @@ class FileInfo(object):
 
 class BinaryFileOptions(object):
     is_binary_file = True
-    processor_id = None
-    load_address = None
+    processor_id = None # type: int
+    load_address = None # type: int
     entrypoint_segment_id = 0
-    entrypoint_offset = None
+    entrypoint_offset = None # type: int
