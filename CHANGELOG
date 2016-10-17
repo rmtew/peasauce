@@ -1,4 +1,10 @@
-2016-10-06
+2016-10-17
+	- Remove hard-coded m68k pc offset references, used to get the address of the
+	  instruction data.
+2016-10-16
+	- Add typing/mypy support, so that static typing checks can be run over most
+	  of the source code.
+2016-10-10
 	- Remove hard-coded m68k references from core disassembly logic.
 2016-10-06
 	- In data blocks, a value that is known to be a relocated address where

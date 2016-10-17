@@ -38,7 +38,8 @@ import sys
 import struct
 
 from . import constants
-from .util import IFX_BRANCH, ArchInterface, _b2n
+# typing does not understand __all__ if it is dynamically created, apparently.
+from .util import ArchInterface, _b2n, _n2b, IFX_BRANCH, EAMI_FORMAT, EAMI_LABEL, EAMI_MATCH_FIELDS, EAMI_DATA_FIELDS, EAMI_DESCRIPTION, II_MASK, II_NAME, MAF_ABSOLUTE_ADDRESS, MAF_CERTAIN, MAF_UNCERTAIN, MAF_CONSTANT_VALUE, MAF_CODE, signed_hex_string, get_masked_value_for_variable
 
 
 logger = logging.getLogger("disassembler-m68k")
@@ -262,7 +263,7 @@ class ArchM68k(ArchInterface):
             elif variable_name == "xxx":
                 value = operand_values[variable_name]
                 is_absolute = operand_key in ("Imm", "AbsL", "AbsW")
-                value_string = lookup_symbol(value, absolute_info=(pc-2, instruction.num_bytes))
+                value_string = lookup_symbol(value, absolute_info=(pc-self.constant_pc_offset, instruction.num_bytes))
                 if value_string is None:
                     value_string = "$%x" % value
                 substitutions[variable_name] = (value, value_string)
@@ -546,7 +547,7 @@ class ArchM68k(ArchInterface):
                     if base_displacement is None: # Disassembly failure.
                         return None
                     # TODO: Finish implementation.
-                    logger.debug("%X: Skipping full extension word for instruction '%s'", I.pc-2, I.specification.key)
+                    logger.debug("%X: Skipping full extension word for instruction '%s'", I.pc-self.constant_pc_offset, I.specification.key)
                     return None
                     # raise RuntimeError("Full displacement incomplete", I.specification.key)
                 else:

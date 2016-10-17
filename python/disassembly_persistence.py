@@ -20,7 +20,7 @@ logger = logging.getLogger("disassembly-persistence")
 SEGMENTBLOCK_PACK_FORMAT = "<HIIIIHH"
 
 
-def write_SegmentBlock(f, block):
+def write_SegmentBlock(f, block, pc_offset):
     if block.line_data is None:
         line_data_count = 0
     else:
@@ -45,7 +45,7 @@ def write_SegmentBlock(f, block):
                                 if type(next_entry) is int:
                                     block_offset = next_entry
                                 else:
-                                    block_offset = next_entry.pc-2
+                                    block_offset = next_entry.pc - pc_offset
                                 break
                             j += 1
                     else:
@@ -202,7 +202,7 @@ def save_disassembly_hunk(f, program_data):
 
     persistence.write_uint32(f, len(program_data.blocks))
     for block in program_data.blocks:
-        write_SegmentBlock(f, block)
+        write_SegmentBlock(f, block, program_data.dis_constant_pc_offset)
 
 def save_loader_hunk(f, program_data):
     persistence.write_string(f, program_data.loader_system_name)
@@ -387,7 +387,7 @@ def convert_project_format_3_to_4(input_file):
         persistence.write_uint32(output_file, num_blocks)
         output_file_offset = output_file.tell()
         #for block in blocks:
-        #    write_SegmentBlock(output_file, block)
+        #    write_SegmentBlock(output_file, block, program_data.dis_constant_pc_offset)
         output_file.write(block_data_string)
         if output_file.tell() - output_file_offset != block_data_length:
             logger.error("convert_project_format_3_to_4: block length mismatch %d != %d", output_file.tell() - output_file_offset, block_data_length)

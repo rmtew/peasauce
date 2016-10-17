@@ -178,6 +178,7 @@ class ProgramData(object):
         self.dis_get_operand_values_func = None
         self.dis_disassemble_one_line_func = None
         self.dis_disassemble_as_data_func = None
+        self.dis_constant_pc_offset = None
 
         # loaderlib:
         self.loader_data_types = None
