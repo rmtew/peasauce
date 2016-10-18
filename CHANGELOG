@@ -1,4 +1,8 @@
 2016-10-17
+	- Detect library calls.  For exec open library calls, rename the library name
+	  symbol, and change it's data type to ASCII.  This adds some initial support 
+	  for processing all m68k Amiga library calls.
+2016-10-17
 	- Remove hard-coded m68k pc offset references, used to get the address of the
 	  instruction data.
 2016-10-16

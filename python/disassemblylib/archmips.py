@@ -76,11 +76,11 @@ class ArchMIPS(ArchInterface):
         """ Indicate if the current instruction is the last in a sequence. """
         # MIPS cases which need to work:
         # - If the current instruction is an end of sequence that does not execute the branch delay slot (the next instruction).
-        if (match.table_iflags & IFX_ENDSEQ) == IFX_ENDSEQ:
+        if (match.table_flags & IFX_ENDSEQ) == IFX_ENDSEQ:
             return True
         # - If the preceding instruction is an end of sequence, and the current instruction is the branch delay slot.
         if preceding_match is not None:
-            if (preceding_match.table_iflags & IFX_ENDSEQ_BD) == IFX_ENDSEQ_BD:
+            if (preceding_match.table_flags & IFX_ENDSEQ_BD) == IFX_ENDSEQ_BD:
                 return True
         # - Cases where the PC register is altered directly?
         return False
@@ -92,7 +92,7 @@ class ArchMIPS(ArchInterface):
             for subst_name, subst_value in operand.vars.items():
                 flags = MAF_CERTAIN
                 if operand_key in ("PCRegion", "PCRelative") and subst_name == "xxx":
-                    if (M.table_iflags & IFX_BRANCH) == IFX_BRANCH:
+                    if (M.table_flags & IFX_BRANCH) == IFX_BRANCH:
                         flags |= MAF_CODE
                     ret[subst_value] = operand_idx, flags
         return ret

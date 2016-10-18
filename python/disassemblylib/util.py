@@ -67,7 +67,6 @@ def make_operand_mask(mask_string):
 
 class Match(object):
     table_mask = None # type: str
-    table_text = None # type: str
     table_extra_words = None # type: int
     format = None # type: str
     specification = None # type: Specification
@@ -329,6 +328,8 @@ class ArchInterface(object):
     function_get_operand_string = _unimplemented_function
     """ Function: Generate the values to substitute into the operand. """
     function_get_operand_values = _unimplemented_function
+    """ Function: Generate the values to substitute into the operand. """
+    function_get_operand_value = _unimplemented_function
     """ Function: Allow plugins to aid in naming operand values and similar things. """
     function_on_instruction_matched = _unimplemented_function
 
@@ -337,11 +338,10 @@ class ArchInterface(object):
         """ Tokenise one disassembled instruction with its operands. """
 
         idx0 = data_idx
-        matches, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
-        if not len(matches):
+        M, data_idx = self._match_instructions(data, data_idx, data_abs_idx)
+        if M is None:
             return None, idx0
 
-        M = matches[0]
         # An instruction may have multiple words to it, before operand data..  e.g. MOVEM
         for i in range(M.table_extra_words):
             data_word, data_idx = self._get_word(data, data_idx)
@@ -437,9 +437,9 @@ class ArchInterface(object):
         word1, data_idx = self._get_word(data, data_idx)
         if word1 is None: # Disassembly failure
             logger.error("Data out of bounds: data_offset=%d data_length=%d", data_idx, len(data))
-            return [], data_idx
+            return None, data_idx
 
-        matches = []
+        M = None
         for i, t in enumerate(self.table_instructions):
             mask_string = t[II_MASK]
             and_mask, cmp_mask = t[II_ANDMASK], t[II_CMPMASK]
@@ -450,11 +450,10 @@ class ArchInterface(object):
                 M.pc = data_abs_idx + self.constant_pc_offset
                 M.data_words = [ word1 ]
 
-                M.table_text = t[II_TEXT]
                 M.table_mask = mask_string
                 M.table_extra_words = t[II_EXTRAWORDS]
                 M.table_ea_masks = t[II_OPERANDMASKS]
-                M.table_iflags = t[II_FLAGS]
+                M.table_flags = t[II_FLAGS]
 
                 M.format = instruction_parts[0]
                 M.specification = _make_specification(M.format)
@@ -464,9 +463,9 @@ class ArchInterface(object):
                     T.format = opcode_format
                     T.specification = _make_specification(T.format)
                     M.opcodes.append(T)
-                matches.append(M)
+                break
 
-        return matches, data_idx
+        return M, data_idx
 
     def _disassemble_vars_pass(self, I):
         def copy_values(mask_char_vars, char_vars):

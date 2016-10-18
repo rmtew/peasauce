@@ -39,7 +39,7 @@ import struct
 
 from . import constants
 # typing does not understand __all__ if it is dynamically created, apparently.
-from .util import ArchInterface, _b2n, _n2b, IFX_BRANCH, EAMI_FORMAT, EAMI_LABEL, EAMI_MATCH_FIELDS, EAMI_DATA_FIELDS, EAMI_DESCRIPTION, II_MASK, II_NAME, MAF_ABSOLUTE_ADDRESS, MAF_CERTAIN, MAF_UNCERTAIN, MAF_CONSTANT_VALUE, MAF_CODE, signed_hex_string, get_masked_value_for_variable
+from .util import ArchInterface, _b2n, _n2b, IFX_BRANCH, IFX_ENDSEQ, EAMI_FORMAT, EAMI_LABEL, EAMI_MATCH_FIELDS, EAMI_DATA_FIELDS, EAMI_DESCRIPTION, II_MASK, II_NAME, MAF_ABSOLUTE_ADDRESS, MAF_CERTAIN, MAF_UNCERTAIN, MAF_CONSTANT_VALUE, MAF_CODE, signed_hex_string, get_masked_value_for_variable
 
 
 logger = logging.getLogger("disassembler-m68k")
@@ -104,9 +104,9 @@ class ArchM68k(ArchInterface):
     variable_endian_type = ">"
 
     def function_is_final_instruction(self, match, preceding_match=None):
-        return match.specification.key in ("RTS", "RTR", "JMP", "BRA", "RTE")
+        return (match.table_flags & IFX_ENDSEQ) == IFX_ENDSEQ
 
-    #def function_on_instruction_matched(self, match,
+    jump_address_opcode_types = set(["PCid16","PCiId8","AbsL","AbsW"])
 
     def function_get_match_addresses(self, match):
         # Is it an instruction that exits (RTS, RTR)?
@@ -116,28 +116,14 @@ class ArchM68k(ArchInterface):
         # Given a branch/jump address, have we seen it before?
         # Given a branch/jump address, should it be queued?
         # Given a branch/jump address, should it be done next?
-        def _extract_address(match, opcode_idx):
-            opcode = match.opcodes[opcode_idx]
-            # Note that PC relative jumps are ignored, as the address may refer to leading offsets before referenced code.
-            if opcode.key == "PCid16":
-                return match.pc + self._signed_value(opcode.vars["D16"], 16), MAF_CERTAIN # JSR, JMP?
-            elif opcode.key == "PCiId8":
-                return match.pc + self._signed_value(opcode.vars["D8"], 16), MAF_CERTAIN # JSR, JMP?
-            elif opcode.key in ("AbsL", "AbsW"): # JMP, JSR
-                return opcode.vars["xxx"], MAF_ABSOLUTE_ADDRESS
-            elif opcode.specification.key == OPERAND_KEY_DISPLACEMENT: # JMP
-                return match.pc + opcode.vars["xxx"], 0
-            return None
-
         address = None
         flags = 0
         instruction_key = match.specification.key
-        if instruction_key in ("RTS", "RTR"):
-            pass
-        elif instruction_key in ("JSR", "JMP"):
-            result = _extract_address(match, 0)
-            if result is not None:
-                address, flags = result
+        if instruction_key in ("JSR", "JMP"):
+            operand = match.opcodes[0]
+            if operand.key in self.jump_address_opcode_types:
+                address = self.function_get_operand_value(match, operand.key, operand.vars)
+                flags = MAF_ABSOLUTE_ADDRESS if operand.key.startswith("Abs") else MAF_CERTAIN
         elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
             address = match.pc + match.opcodes[0].vars["xxx"]
         elif instruction_key == "DBcc":
@@ -168,12 +154,12 @@ class ArchM68k(ArchInterface):
                 # Is the destination an address register?
                 # Imm, AbsL; Imm, DR; Imm, AR
                 address = opcode.vars["xxx"]
-                bits = ret.get(address, (i, 0))
-                bits = (bits[0], bits[1] | MAF_CONSTANT_VALUE)
-                if True or match.specification.key != "MOVE.L":
-                    if bits[1] & MAF_CODE != MAF_CODE:
-                        bits = (bits[0], bits[1] | MAF_UNCERTAIN)
-                ret[address] = bits
+                opcode_idx, flags = ret.get(address, (i, 0))
+                if flags & MAF_CODE != MAF_CODE:
+                    entry = (opcode_idx, flags | MAF_UNCERTAIN | MAF_CONSTANT_VALUE)
+                else:
+                    entry = (opcode_idx, flags | MAF_CONSTANT_VALUE)
+                ret[address] = entry
             elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
                 logger.error("Unhandled opcode EA mode (680x0?): %s", opcode.key)
 
@@ -190,6 +176,23 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
+    def function_get_operand_value(self, instruction, variable_type, variables):
+        if variable_type == "ARid16":
+            return self._signed_value(variables["D16"], 16)
+        elif variable_type == "ARid8":
+            return self._signed_value(variables["D8"], 16)
+        elif variable_type == "PCid16":
+            return instruction.pc + self._signed_value(variables["D16"], 16)
+        elif variable_type == "PCiId8":
+            return instruction.pc + self._signed_value(variables["D8"], 16)
+        elif variable_type == "AbsL" or variable_type == "AbsW":
+            return variables["xxx"]
+        elif variable_type == "An" or variable_type == "Dn":
+            return variables["Rn"]
+        else:
+            return variables[variable_type]
+
+    # TODO(rmtew): It seems like a good idea to separate out the value and value string.
     def function_get_operand_values(self, instruction, operand, lookup_symbol=None):
         operand_key = operand.key
         if operand_key is None:
@@ -225,9 +228,8 @@ class ArchM68k(ArchInterface):
             return { "RegisterList": (value, value_string) }
         elif operand_key == OPERAND_KEY_DISPLACEMENT:
             value = operand_values["xxx"]
-            if instruction.specification.key.startswith("LINK"):
-                value_string = None
-            elif lookup_symbol is not None:
+            value_string = None
+            if not instruction.specification.key.startswith("LINK") and lookup_symbol is not None:
                 value_string = lookup_symbol(instruction.pc + value)
             if value_string is None:
                 value_string = signed_hex_string(self, value)
@@ -252,7 +254,8 @@ class ArchM68k(ArchInterface):
                 value_string = None
                 if operand_key in ("PCid16", "PCiId8"):
                     value += pc
-                    value_string = lookup_symbol(value)
+                    if lookup_symbol is not None:
+                        value_string = lookup_symbol(value)
                 if value_string is None:
                     value_string = signed_hex_string(self, value)
                 substitutions[variable_name] = (value, value_string)
@@ -262,8 +265,10 @@ class ArchM68k(ArchInterface):
                     substitutions[variable_name] = (value, "{0}{1}".format(variable_name[0], value))
             elif variable_name == "xxx":
                 value = operand_values[variable_name]
+                value_string = None
                 is_absolute = operand_key in ("Imm", "AbsL", "AbsW")
-                value_string = lookup_symbol(value, absolute_info=(pc-self.constant_pc_offset, instruction.num_bytes))
+                if lookup_symbol is not None:
+                    value_string = lookup_symbol(value, absolute_info=(pc-self.constant_pc_offset, instruction.num_bytes))
                 if value_string is None:
                     value_string = "$%x" % value
                 substitutions[variable_name] = (value, value_string)
@@ -680,7 +685,7 @@ instruction_table = [
     [ "0000DDD110sssSSS", "BCLR DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (register bit number)", ],
     [ "0000100010sssSSS", "BCLR Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Clear (static bit number)", ],
     [ "0100100001001vvv", "BKPT Imm:(xxx=v)",  IF_010|IF_020|IF_030|IF_040, "Breakpoint", ],
-    [ "01100000vvvvvvvv", "BRA DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch Always", ],
+    [ "01100000vvvvvvvv", "BRA DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH|IFX_ENDSEQ, "Branch Always", ],
     [ "0000DDD111sssSSS", "BSET DR:(Rn=D), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (register bit number)", ],
     [ "0000100011sssSSS", "BSET Imm:(z=I+.B), EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Test a Bit and Set (static bit number)", ],
     [ "01100001vvvvvvvv", "BSR DISPLACEMENT:(xxx=v)",       IF_000|IFX_BRANCH, "Branch to Subroutine", ],
@@ -706,8 +711,8 @@ instruction_table = [
     [ "0100100010000DDD", "EXT.W DR:(Rn=D)",       IF_000, "Sign-Extend", ],
     [ "0100100011000DDD", "EXT.L DR:(Rn=D)",       IF_000, "Sign-Extend", ],
     [ "0100101011111100", "ILLEGAL",   IF_000, "Take Illegal Instruction Trap", ],
-    [ "0100111011sssSSS", "JMP EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Jump", ],
-    [ "0100111010sssSSS", "JSR EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000, "Jump to Subroutine", ],
+    [ "0100111011sssSSS", "JMP EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000|IFX_BRANCH|IFX_ENDSEQ, "Jump", ],
+    [ "0100111010sssSSS", "JSR EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}",       IF_000|IFX_BRANCH, "Jump to Subroutine", ],
     [ "0100DDD111sssSSS", "LEA EA:(mode=s&register=S){ARi|ARid16|ARiId8|AbsW|AbsL|PCid16|PCiId8}, AR:(Rn=D)",       IF_000, "Load Effective Address", ],
     [ "101000000000vvvv", "LINEA Imm:(xxx=v)",      IF_000, "A-Line", ],
     [ "0100111001010SSS", "LINK.W AR:(Rn=S), DISPLACEMENT:(xxx=I1.W)",      IF_000, "Link and Allocate (word)", ],
@@ -758,9 +763,9 @@ instruction_table = [
     [ "1110vvvazz010DDD", "ROXd.z:(z=z&d=a) Imm:(xxx=v), DR:(Rn=D)",      IF_000, "Rotate with Extend (register rotate, source immediate)", ],
     [ "1110SSSazz110DDD", "ROXd.z:(z=z&d=a) DR:(Rn=S), DR:(Rn=D)",      IF_000, "Rotate with Extend (register rotate, source register)", ],
     [ "1110010a11sssSSS", "ROXd.W:(d=a) EA:(mode=s&register=S){ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",      IF_000, "Rotate with Extend (memory rotate)", ],
-    [ "0100111001110011", "RTE",       IF_000, "Return from Exception", ],
-    [ "0100111001110111", "RTR",       IF_000, "Return and Restore Condition Codes", ],
-    [ "0100111001110101", "RTS",       IF_020, "Return from Subroutine", ],
+    [ "0100111001110011", "RTE",       IF_000|IFX_ENDSEQ, "Return from Exception", ],
+    [ "0100111001110111", "RTR",       IF_000|IFX_ENDSEQ, "Return and Restore Condition Codes", ],
+    [ "0100111001110101", "RTS",       IF_020|IFX_ENDSEQ, "Return from Subroutine", ],
     [ "1000DDD100000SSS", "SBCD DR:(Rn=S),DR:(Rn=D)",       IF_000, "Add Decimal With Extend (register)", ],
     [ "1000DDD100001SSS", "SBCD PreARi:(Rn=S),PreARi:(Rn=D)",      IF_000, "Add Decimal With Extend (memory)", ],
     [ "0101cccc11sssSSS", "Scc:(cc=c) EA:(mode=s&register=S){DR|ARi|ARiPost|PreARi|ARid16|ARiId8|AbsW|AbsL}",       IF_000, "Set According to Condition", ],
