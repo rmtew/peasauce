@@ -24,7 +24,7 @@ http://qt-project.org/wiki/Signals_and_Slots_in_PySide
 import collections
 import cPickle
 import logging
-import new
+import new # type: ignore
 import operator
 import os
 import sys
@@ -32,7 +32,10 @@ import time
 import traceback
 import types
 
-from PySide import QtCore, QtGui
+# mypy-lang support
+from typing import Any
+
+from PySide import QtCore, QtGui # type: ignore
 
 import disassemblylib
 import editor_state
@@ -57,7 +60,7 @@ UNCERTAIN_ADDRESS_IDX = 0
 
 
 class BaseItemModel(QtCore.QAbstractItemModel):
-    _header_font = None
+    _header_font = None # type: QtGui.QApplication.font
 
     def __init__(self, columns, parent):
         super(BaseItemModel, self).__init__(parent)
@@ -216,7 +219,7 @@ def create_table_model(parent, columns, _class=None):
 
 class CustomQTableView(QtGui.QTableView):
     selection_change_signal = QtCore.Signal(tuple)
-    _initial_line_idx = None
+    _initial_line_idx = None # type: int
 
     def paintEvent(self, event):
         if self._initial_line_idx is not None:
@@ -480,13 +483,13 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
 
 class MainWindow(QtGui.QMainWindow):
-    _settings = None
+    _settings = None # type: dict
 
     loaded_signal = QtCore.Signal(int)
     log_signal = QtCore.Signal(tuple)
 
-    _progress_dialog = None
-    _progress_dialog_steps = 0
+    _progress_dialog = None # type: QtGui.QProgressDialog
+    _progress_dialog_steps = 0 # type: int
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
@@ -1006,11 +1009,13 @@ class MainWindow(QtGui.QMainWindow):
         return current_address
 
     def _set_setting(self, setting_name, setting_value):
+        # type: (str, Any) -> None
         self._settings[setting_name] = setting_value
         with open(SETTINGS_FILE, "wb") as f:
             cPickle.dump(self._settings, f)
 
     def _get_setting(self, setting_name, default_value=None):
+        # type: (str, Any) -> Any
         if self._settings is None:
             if os.path.exists(SETTINGS_FILE):
                 with open(SETTINGS_FILE, "rb") as f:
@@ -1565,7 +1570,7 @@ class NewProjectDialog(QtGui.QDialog):
 
 
 class RowSelectionDialog(QtGui.QDialog):
-    selection_key = None
+    selection_key = None # type: int
 
     def __init__(self, parent, title_text, body_text, button_text, rows, row_keys):
         super(RowSelectionDialog, self).__init__(parent)

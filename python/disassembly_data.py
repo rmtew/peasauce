@@ -117,6 +117,7 @@ class ProgramData(object):
         self.post_segment_addresses = None # {}
         "Default flags"
         self.flags = 0
+        self.processor_id = 0 # loaderlib.constants.PROCESSOR_*
 
         # disassemblylib:
         "Identifies which architecture the file has been identified as belonging to."
@@ -180,6 +181,7 @@ class ProgramData(object):
         self.dis_disassemble_one_line_func = None
         self.dis_disassemble_as_data_func = None
         self.dis_constant_pc_offset = None
+        self.dis_get_default_symbol_name_func = None
 
         # loaderlib:
         self.loader_data_types = None
@@ -239,6 +241,8 @@ class NewProjectOptions:
     dis_name = None # type: str
     loader_load_address = None # type: int
     loader_entrypoint_offset = None # type: int
+    is_binary_file = None # type: bool
+    processor_id = None # type: int
 
 class LoadProjectOptions:
     valid_file_size = False

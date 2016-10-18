@@ -11,6 +11,8 @@ involving a GUI.
 
 import os
 import types
+# mypy-lang support
+from typing import Tuple, Union, BinaryIO
 
 import editor_state
 
@@ -22,13 +24,16 @@ class ToolEditorClient(editor_state.ClientAPI):
     # __init__(self, owner)
 
     # External responsibility.
-    _binary_parameters = None
-    _goto_address_value = None
+    _binary_parameters = None # type: Tuple[int, int, int]
+    _goto_address_value = None # type: int
 
     def reset_state(self):
+        # type: () -> None
         self.owner_ref().reset_state()
 
     def request_load_file(self):
+        # type: () -> Union[str, Tuple[BinaryIO, str]]
+
         # Offers the user a chance to load a file.
         # Returns None if user aborted.
         # Returns the file object on success.
@@ -38,6 +43,7 @@ class ToolEditorClient(editor_state.ClientAPI):
         return open(file_path, "rb"), file_path
 
     def get_load_file(self):
+        # type: () -> BinaryIO
         file_path = self.owner_ref().get_file_path()
         return open(file_path, "rb")
 
@@ -53,6 +59,7 @@ class ToolEditorClient(editor_state.ClientAPI):
         return load_options
 
     def request_address(self, address):
+        # type: (int) -> int
         return self._goto_address_value
 
     # These can be ignored, as we have no GUI.
@@ -70,10 +77,10 @@ class ToolEditorClient(editor_state.ClientAPI):
 
 
 class ToolAPI(object):
-    editor_state = None
+    editor_state = None # type: ToolEditorClient
 
-    file_path = None
-    input_file_path = None
+    file_path = None # type: str
+    input_file_path = None # type: str
 
     def __init__(self, editor_state_ob=None):
         self.editor_client = ToolEditorClient(self)

@@ -152,6 +152,7 @@ def check_is_project_file(f):
     return persistence.read_uint32(f) == SAVEFILE_ID
 
 def save_project(f, program_data, save_options):
+    # type: (file, ProgramData, SaveProjectOptions) -> None
     f.seek(0, os.SEEK_SET)
 
     persistence.write_uint32(f, SAVEFILE_ID)
