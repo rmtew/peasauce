@@ -29,7 +29,7 @@ import disassembly_persistence
 import persistence
 import util
 # mypy-lang support
-from editor_state import WorkState
+from disassembly_util import WorkState
 
 logger = logging.getLogger("disassembly")
 
@@ -1835,6 +1835,77 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
         # Putting may happen multiple times.
         # .. Keep looking until register overwritten?
         # Getting only needs to happen once, but we may need to follow back.
+
+DIRECTION_BACKWARD = -1
+DIRECTION_FORWARD = 1
+
+class RegisterTrackingState(object):
+    def __init__(self, direction):
+        self.direction = direction # type: int
+        # The list of register names to track down.
+        self.register_values_pending = set([]) # type: Set[str]
+        # Map the register name to the collection of address/value matches.
+        self.register_values = {} # type: Dict[str, Dict[int,Instruction]]
+
+    def track_register(self, register_name):
+        # type: (str) -> None
+        self.register_values_pending.add(register_name)
+        self.register_values[register_name] = []
+
+    def stop_tracking_register(self, register_name):
+        # type: (str) -> None
+        self.register_values_pending.remove(register_name)
+
+    def record_value(self, register_name, address, value):
+        # type: (str, int, Instruction) -> None
+        self.register_values[register_name][address] = value
+
+    def is_complete(self):
+        # type: () -> int
+        return len(self.register_values_pending)
+
+    def still_tracking_register(self, register_name):
+        # type: (str) -> bool
+        return register_name in self.register_values_pending
+
+    def are_tracking_sources(self):
+        # type: () -> bool
+        return self.direction == DIRECTION_BACKWARD
+
+    def are_tracking_destinations(self):
+        # type: () -> bool
+        return self.direction == DIRECTION_FORWARD
+
+
+def platform_m68k_attempt_register_tracking(platform_data, register_state, initial_block, initial_line_data, initial_idx):
+    # type: (disassembly_data.PlatformData, RegisterTrackingState, disassembly_data.SegmentBlock, List[InstructionEntryLite], int) -> None
+    """
+    The direction implicitly determines if we are looking for register sources, or destinations.
+    """
+    # TODO(rmtew): Ideally this function will be architecture agnostic.  It will be necessary to improve the architecture infrastructure to support this.
+    current_block = initial_block
+    current_line_data = initial_line_data
+    current_idx = initial_idx
+    visited_block_addresses = set([]) # type: Set[int]
+    while 1:
+        # Exhaust all sources for a next instruction.
+        instruction, current_idx = find_next_instruction(program_data, current_block, current_line_data, current_idx, register_state.direction)
+        if instruction is None:
+            # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
+            visited_block_addresses.add(current_block.address)
+            # ... any reference that is followed from here, should proceed from this point ...
+            # ... collect different results for each followed reference, detect clashes in input values ...
+            if register_state.direction == DIRECTION_BACKWARD:
+                # ... is the preceding block a code block and is the last instruction a non-final instruction?
+                # ... does the first instruction have references by instructions in code blocks?
+                pass
+            elif register_state.direction == DIRECTION_FORWARD:
+                # ... follow branches?  stop at final instructions?
+                # ... if final instruction in the block is not final, look to the next block and see if it is an instruction.
+                # ... if source return value is pointer, can ignore branches on eq condition
+                pass
+            break
+    pass
 
 def get_string_at_address(program_data, block, address):
     # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> Union[str, None]
