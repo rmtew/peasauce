@@ -1850,7 +1850,7 @@ class RegisterTrackingState(object):
     def track_register(self, register_name):
         # type: (str) -> None
         self.register_values_pending.add(register_name)
-        self.register_values[register_name] = []
+        self.register_values[register_name] = {}
 
     def stop_tracking_register(self, register_name):
         # type: (str) -> None
@@ -1877,8 +1877,8 @@ class RegisterTrackingState(object):
         return self.direction == DIRECTION_FORWARD
 
 
-def platform_m68k_attempt_register_tracking(platform_data, register_state, initial_block, initial_line_data, initial_idx):
-    # type: (disassembly_data.PlatformData, RegisterTrackingState, disassembly_data.SegmentBlock, List[InstructionEntryLite], int) -> None
+def platform_m68k_attempt_register_tracking(program_data, register_state, initial_block, initial_line_data, initial_idx):
+    # type: (disassembly_data.ProgramData, RegisterTrackingState, disassembly_data.SegmentBlock, List[InstructionEntryLite], int) -> None
     """
     The direction implicitly determines if we are looking for register sources, or destinations.
     """
@@ -1889,7 +1889,7 @@ def platform_m68k_attempt_register_tracking(platform_data, register_state, initi
     visited_block_addresses = set([]) # type: Set[int]
     while 1:
         # Exhaust all sources for a next instruction.
-        instruction, current_idx = find_next_instruction(program_data, current_block, current_line_data, current_idx, register_state.direction)
+        current_idx, instruction = find_next_instruction(program_data, current_block, current_line_data, current_idx, register_state.direction)
         if instruction is None:
             # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
             visited_block_addresses.add(current_block.address)
