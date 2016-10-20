@@ -42,6 +42,9 @@
     <Compile Include="python\disassemblylib\archm68k.py" />
     <Compile Include="python\disassemblylib\archmips.py" />
     <Compile Include="python\disassemblylib\archz80.py" />
+    <Compile Include="python\disassemblylib\capstone.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="python\disassemblylib\constants.py">
       <SubType>Code</SubType>
     </Compile>
@@ -50,6 +53,7 @@
     <Compile Include="python\disassemblylib\__init__.py" />
     <Compile Include="python\disassembly_data.py" />
     <Compile Include="python\disassembly_persistence.py" />
+    <Compile Include="python\disassembly_util.py" />
     <Compile Include="python\editor_state.py" />
     <Compile Include="python\graveyard.py" />
     <Compile Include="python\loaderlib\amiga\doshunks.py" />

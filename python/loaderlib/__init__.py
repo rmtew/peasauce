@@ -121,6 +121,8 @@ def cache_segment_data(input_file, segments, segment_id, base_file_offset=0):
         file_data = input_file.read(file_length)
         if len(file_data) == file_length:
             data = bytearray(file_data)
+            # NOTE(rmtew): This does not work as bytearray(v)[0] -> int, but memoryview(bytearray(v))[0] -> str
+            data = memoryview(data)
         else:
             logger.error("Unable to cache segment %d data, got %d bytes, wanted %d", segment_id, len(file_data), file_length)
     segments[segment_id][SI_CACHED_DATA] = data
@@ -137,7 +139,7 @@ def relocate_segment_data(segments, data_types, relocations, relocatable_address
                 address = value + target_address
                 relocated_addresses.setdefault(address, set()).add(local_address + local_offset)
                 relocatable_addresses.add(local_address + local_offset)
-                data[local_offset:local_offset+4] = data_types.uint32_bytes(address)
+                data[local_offset:local_offset+4] = data_types.uint32_value_as_string(address)
 
 
 def has_segment_headers(system_name):
@@ -177,52 +179,58 @@ class DataTypes(object):
             return self.uint8_value(bytes, idx)
         raise Exception("unsupported size", data_size)
 
-    def uint8_value(self, bytes, idx=None):
-        if idx:
-            bytes = bytes[idx:idx+1]
-        return bytes[0]
+    def uint8_value(self, bytes, idx=0):
+        return self.uint8(bytes[idx])
 
-    def uint16_value(self, bytes, idx=None):
-        if idx:
-            bytes = bytes[idx:idx+2]
-        if self.endian_id == constants.ENDIAN_BIG:
-            return (bytes[0] << 8) + bytes[1]
-        else:
-            return (bytes[1] << 8) + bytes[0]
+    def uint16_value(self, bytes, idx=0):
+        return self.uint16(bytes[idx:idx+2])
 
-    def uint32_value(self, bytes, idx=None):
-        if idx:
-            bytes = bytes[idx:idx+4]
-        if self.endian_id == constants.ENDIAN_BIG:
-            return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]
-        else:
-            return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]
+    def uint32_value(self, bytes, idx=0):
+        return self.uint32(bytes[idx:idx+4])
 
-    def uint32_bytes(self, v):
+    def uint32_value_as_string(self, v):
         if self.endian_id == constants.ENDIAN_BIG:
-            return [ (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF ]
+            return struct.pack(">I", v)
         else:
-            return [ v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF ]
+            return struct.pack("<I", v)
 
     # String to value.
 
     def uint16(self, s):
-        return struct.unpack(self._endian_char +"H", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">H", s)[0]
+        else:
+            return struct.unpack("<H", s)[0]
 
     def int16(self, s):
-        return struct.unpack(self._endian_char +"h", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">h", s)[0]
+        else:
+            return struct.unpack("<h", s)[0]
 
     def uint32(self, s):
-        return struct.unpack(self._endian_char +"I", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">I", s)[0]
+        else:
+            return struct.unpack("<I", s)[0]
 
     def int32(self, s):
-        return struct.unpack(self._endian_char +"i", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">i", s)[0]
+        else:
+            return struct.unpack("<i", s)[0]
 
     def uint8(self, s):
-        return struct.unpack(self._endian_char +"B", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">B", s)[0]
+        else:
+            return struct.unpack("<B", s)[0]
 
     def int8(self, s):
-        return struct.unpack(self._endian_char +"b", s)[0]
+        if self.endian_id == constants.ENDIAN_BIG:
+            return struct.unpack(">b", s)[0]
+        else:
+            return struct.unpack("<b", s)[0]
 
 
 

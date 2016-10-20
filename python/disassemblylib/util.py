@@ -1,7 +1,7 @@
 import logging
 import re
 import struct
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Tuple
 
 logger = logging.getLogger("disassembler-util")
 
@@ -75,6 +75,8 @@ class Match(object):
     opcodes = None # type: List[MatchOpcode]
     vars = None # type: Dict[str, Union[int, str]]
     num_bytes = None # type: int
+    pc = None # type: int
+    data = None # type: str
 
 class MatchOpcode(object):
     # Overrides the one in the specification
@@ -83,7 +85,7 @@ class MatchOpcode(object):
     specification = None # type: Specification
     description = None # type: str
     vars = None # type: Dict[str, Union[int, str]]
-    rl_bits = None # type: Union[None, int]
+    register_list_masks = None # type: Tuple[int,int]
 
 class Specification(object):
     key = None # type: str
@@ -353,6 +355,7 @@ class ArchInterface(object):
             if data_idx is None: # Disassembly failure.
                 return None, idx0
         M.num_bytes = data_idx - idx0
+        M.data = data[idx0:data_idx]
         return M, data_idx
 
     """ Function: . """
@@ -447,6 +450,7 @@ class ArchInterface(object):
                 instruction_parts = get_instruction_format_parts(t[II_NAME])
 
                 M = Match()
+                # TODO(rmtew): Should not have pc?  Have address of instruction.
                 M.pc = data_abs_idx + self.constant_pc_offset
                 M.data_words = [ word1 ]
 

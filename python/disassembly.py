@@ -13,13 +13,14 @@ MAF_CONSTANT_VALUE = 4
 MAF_UNCERTAIN = 8
 MAF_CERTAIN = 16
 
+import binascii
 import bisect
+import copy
 import logging
 import operator
 import os
 # mypy-lang support
 from typing import Tuple, List, Set, Union, Any, Callable
-#import traceback
 
 import loaderlib
 import disassemblylib
@@ -97,18 +98,6 @@ def find_previous_instruction(program_data, block, line_data, idx):
     """
     while idx > 0:
         idx -= 1
-        if line_data[idx][0] == disassembly_data.SLD_INSTRUCTION:
-            return idx, get_instruction_entry(program_data, block, line_data, idx)
-    return idx, None
-
-def find_next_instruction(program_data, block, line_data, idx, direction):
-    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, List[InstructionEntryLite], int, int) -> Tuple[int, Union[None, Instruction]]
-    """
-    Get the next instruction of the given type and it's line index within the block.
-    This will generate the instruction entry if it does not exist.
-    """
-    while idx > 0 and idx < len(line_data)-1:
-        idx += direction
         if line_data[idx][0] == disassembly_data.SLD_INSTRUCTION:
             return idx, get_instruction_entry(program_data, block, line_data, idx)
     return idx, None
@@ -554,7 +543,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
             if line_type_id in (disassembly_data.SLD_INSTRUCTION, disassembly_data.SLD_EQU_LOCATION_RELATIVE):
                 data = loaderlib.get_segment_data(segments, block.segment_id)
                 data_offset = block.segment_offset + block_offset0
-                return "".join([ "%02X" % c for c in data[data_offset:data_offset+line_num_bytes] ])
+                return binascii.hexlify(data[data_offset:data_offset+line_num_bytes])
             return ""
         elif column_idx == LI_LABEL:
             label = get_symbol_for_address(program_data, address0)
@@ -609,7 +598,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     if block.flags & disassembly_data.BLOCK_FLAG_ALLOC:
                         return ""
                     data = loaderlib.get_segment_data(segments, block.segment_id)
-                    return "".join([ "%02X" % c for c in data[data_idx:data_idx+num_bytes] ])
+                    return binascii.hexlify(data[data_idx:data_idx+num_bytes])
                 elif column_idx == LI_LABEL:
                     label = get_symbol_for_address(program_data, loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
                     if label is None:
@@ -651,7 +640,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     return "%08X" % (loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
                 elif column_idx == LI_BYTES:
                     data = loaderlib.get_segment_data(segments, block.segment_id)
-                    return "".join([ "%02X" % c for c in data[data_idx:data_idx+byte_length] ])
+                    return binascii.hexlify(data[data_idx:data_idx+byte_length])
                 elif column_idx == LI_LABEL:
                     label = get_symbol_for_address(program_data, loaderlib.get_segment_address(segments, block.segment_id) + data_idx)
                     if label is None:
@@ -664,7 +653,8 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     last_value = None
                     data = loaderlib.get_segment_data(segments, block.segment_id)
                     # TODO(rmtew): Make non-architecture specific.  m68k = comma separation?
-                    for byte in data[data_idx:data_idx+byte_length]:
+                    for char in data[data_idx:data_idx+byte_length]:
+                        byte = ord(char)
                         if byte >= 32 and byte < 127:
                             # Sequential displayable characters get collected into a contiguous string.
                             value = chr(byte)
@@ -1200,7 +1190,7 @@ def _process_block_as_ascii(program_data, block):
     line_width_max = 40
     last_value = None
     while bytes_consumed < block.length:
-        byte = data[data_offset_start+bytes_consumed]
+        byte = ord(data[data_offset_start+bytes_consumed])
         comma_separated = False
         char_line_width = 0
         if byte >= 32 and byte < 127:
@@ -1836,16 +1826,26 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
         # .. Keep looking until register overwritten?
         # Getting only needs to happen once, but we may need to follow back.
 
+    analyser = CodeAnalysis(program_data)
+    analyser.run()
+
+
 DIRECTION_BACKWARD = -1
 DIRECTION_FORWARD = 1
 
-class RegisterTrackingState(object):
+class RegisterAnalysisGoals(object):
     def __init__(self, direction):
         self.direction = direction # type: int
         # The list of register names to track down.
         self.register_values_pending = set([]) # type: Set[str]
         # Map the register name to the collection of address/value matches.
         self.register_values = {} # type: Dict[str, Dict[int,Instruction]]
+
+    def clone(self):
+        result =  RegisterAnalysisGoals(self.direction)
+        result.register_values_pending = self.register_values_pending.copy()
+        result.register_values = { k: copy.copy(v) for (k, v) in self.register_values.iteritems() }
+        return result
 
     def track_register(self, register_name):
         # type: (str) -> None
@@ -1860,7 +1860,7 @@ class RegisterTrackingState(object):
         # type: (str, int, Instruction) -> None
         self.register_values[register_name][address] = value
 
-    def is_complete(self):
+    def is_incomplete(self):
         # type: () -> int
         return len(self.register_values_pending)
 
@@ -1876,44 +1876,213 @@ class RegisterTrackingState(object):
         # type: () -> bool
         return self.direction == DIRECTION_FORWARD
 
+class M68KRuntimeContext(object):
+    def __init__(self):
+        self.registers = {}
 
-def platform_m68k_attempt_register_tracking(program_data, register_state, initial_block, initial_line_data, initial_idx):
-    # type: (disassembly_data.ProgramData, RegisterTrackingState, disassembly_data.SegmentBlock, List[InstructionEntryLite], int) -> None
-    """
-    The direction implicitly determines if we are looking for register sources, or destinations.
-    """
-    # TODO(rmtew): Ideally this function will be architecture agnostic.  It will be necessary to improve the architecture infrastructure to support this.
-    current_block = initial_block
-    current_line_data = initial_line_data
-    current_idx = initial_idx
-    visited_block_addresses = set([]) # type: Set[int]
-    while 1:
-        # Exhaust all sources for a next instruction.
-        current_idx, instruction = find_next_instruction(program_data, current_block, current_line_data, current_idx, register_state.direction)
-        if instruction is None:
-            # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
-            visited_block_addresses.add(current_block.address)
-            # ... any reference that is followed from here, should proceed from this point ...
-            # ... collect different results for each followed reference, detect clashes in input values ...
-            if register_state.direction == DIRECTION_BACKWARD:
-                # ... is the preceding block a code block and is the last instruction a non-final instruction?
-                # ... does the first instruction have references by instructions in code blocks?
+class CodeAnalysis(object):
+    def __init__(self, program_data):
+        # type: (disassembly_data.ProgramData) -> None
+        self.program_data = program_data
+        self.library_calls = [] # type: List[Tuple[int, disassembly_data.SegmentBlock, int, str, int]]
+        self.library_handle_stores = {} # type: Dict[Union[None, int], Set[int]]
+
+        self._preprocess()
+
+    def get_operand_register_name(self, instruction, operand_index):
+        # type: (Instruction, int) -> str
+        operand = instruction.opcodes[operand_index]
+        operand_key = operand.specification.key
+        if operand_key == "AR":
+            operand_values = self.program_data.dis_get_operand_values_func(instruction, operand)
+            return operand_values["An"][1]
+        elif operand_key == "DR":
+            operand_values = self.program_data.dis_get_operand_values_func(instruction, operand)
+            return operand_values["Dn"][1]
+
+    def get_operand_value_address(self, instruction, operand_index):
+        # type: (Instruction, int) -> int
+        operand_values = self.program_data.dis_get_operand_values_func(instruction, instruction.opcodes[0])
+        return operand_values["xxx"][0]
+
+    def get_instruction_address(self, instruction):
+        # type: (Instruction) -> int
+        return instruction.pc - self.program_data.dis_constant_pc_offset
+
+    def get_first_instruction(self, block):
+        # type: (disassembly_data.SegmentBlock) -> Tuple[int, Union[None, Instruction]]
+        block_data_type = disassembly_data.get_block_data_type(block)
+        if block_data_type == disassembly_data.DATA_TYPE_CODE:
+            for line_idx, (type_id, instruction) in enumerate(block.line_data):
+                if type_id == disassembly_data.SLD_INSTRUCTION:
+                    return line_idx, get_instruction_entry(self.program_data, block, block.line_data, line_idx)
+        return 0, None
+
+    def get_next_instruction(self, block, line_idx, direction):
+        # type: (disassembly_data.SegmentBlock, int, int) -> Tuple[int, Union[None, Instruction]]
+        """
+        Get the next instruction of the given type and it's line index within the block.
+        This will generate the instruction entry if it does not exist.
+        """
+        if direction not in (DIRECTION_FORWARD, DIRECTION_BACKWARD):
+            raise Exception("bad direction", direction)
+        while True:
+            if direction == DIRECTION_FORWARD:
+                if line_idx >= len(block.line_data)-1:
+                    break
+            elif direction == DIRECTION_BACKWARD:
+                if line_idx <= 0:
+                    break
+            line_idx += direction
+            if block.line_data[line_idx][0] == disassembly_data.SLD_INSTRUCTION:
+                return line_idx, get_instruction_entry(self.program_data, block, block.line_data, line_idx)
+        return line_idx, None
+
+    def run(self):
+        self._preprocess()
+
+        # TODO(rmtew): This shouldn't be backwards.  It should just be back and forward as needed.
+
+        if False:
+            for (address, block, line_idx, register_name, call_offset) in self.library_calls:
+                register_goals = RegisterAnalysisGoals(DIRECTION_BACKWARD)
+                # Need register name.
+                register_goals.track_register(register_name)
+                self._resolve_register_values(block, line_idx, register_goals)
+
+    def _preprocess(self):
+        self.library_calls = []
+        self.library_handle_stores = {} # 
+
+        for block in self.program_data.blocks:
+            line_idx, instruction = self.get_first_instruction(block)
+            while instruction is not None:
+                instruction_key = instruction.specification.key
+                if instruction_key == "JSR":
+                    if instruction.opcodes[0].key == "ARid16":
+                        operand_values = self.program_data.dis_get_operand_values_func(instruction, instruction.opcodes[0])
+                        offset_value, register_name = operand_values["D16"][0], operand_values["An"][1]
+                        self.library_calls.append((self.get_instruction_address(instruction), block, line_idx, register_name, offset_value))
+                elif instruction_key == "MOVEA.L":
+                    if instruction.opcodes[0].key == "AbsW":                        
+                        source_address = self.get_operand_value_address(instruction, 0)
+                        if source_address == 4:
+                            dest_register_name = self.get_operand_register_name(instruction, 1)
+                            pass
+                            # TODO(rmtew): Trace the flow to see whether we can link it to the following jsrs.
+                            # This will be useful, because
+                elif instruction_key == "MOVE.L":
+                    if instruction.opcodes[0].key == "AbsW":
+                        source_address = self.program_data.dis_get_operand_value_func(instruction, instruction.opcodes[0].key, instruction.opcodes[0].vars)
+                        if source_address == 4:
+                            # Catch storing the exec library base address in secondary locations.
+                            # TODO(rmtew): This should be examined more closely, what if it shares the location with other handles?  Who knows why they did this?
+                            if instruction.opcodes[1].key == "AbsL":
+                                destination_address = self.program_data.dis_get_operand_value_func(instruction, instruction.opcodes[1].key, instruction.opcodes[1].vars)
+                                if None not in self.library_handle_stores:
+                                    self.library_handle_stores[None] = set()
+                                self.library_handle_stores[None].add(destination_address)
+                            else:
+                                pass
+                line_idx, instruction = self.get_next_instruction(block, line_idx, DIRECTION_FORWARD)
+        pass
+
+    def _resolve_calls(self, initial_block, initial_idx, call_register_name):
+        # type: (disassembly_data.SegmentBlock, int, str) -> None
+
+        # NOTE(rmtew): 
+
+        # NOTE(rmtew): Currently, this will start from the setting of execbase, then work it's way down to any trailing calls.
+        # NOTE(rmtew): In theory, it should track other useful register values.
+        current_block = initial_block
+        current_idx = initial_idx
+        visited_block_addresses = set([]) # type: Set[int]
+        while True:
+            # Exhaust all sources for a next instruction.
+            current_idx, instruction = self.get_next_instruction(current_block, current_idx, register_goals.direction)
+            if instruction is None:
+                # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
+                visited_block_addresses.add(current_block.address)
+                # ... any reference that is followed from here, should proceed from this point ...
+                # ... collect different results for each followed reference, detect clashes in input values ...
+                if register_goals.direction == DIRECTION_BACKWARD:
+                    # ... is the preceding block a code block and is the last instruction a non-final instruction?
+                    # ... does the first instruction have references by instructions in code blocks?
+                    pass
+                elif register_goals.direction == DIRECTION_FORWARD:
+                    # ... follow branches?  stop at final instructions?
+                    # ... if final instruction in the block is not final, look to the next block and see if it is an instruction.
+                    # ... if source return value is pointer, can ignore branches on eq condition
+                    pass
+                break
+
+            instruction_key = instruction.specification.key
+            if instruction_key == "JSR":
+                if instruction.opcodes[0].key == "ARid16":
+                    operand_values = self.program_data.dis_get_operand_values_func(instruction, instruction.opcodes[0])
+                    offset_value, register_name = operand_values["D16"][0], operand_values["An"][1]
+                    self.library_calls.append((self.get_instruction_address(instruction), block, line_idx, register_name, offset_value))
+            else:
+                # TODO(rmtew): If the call register is clobbered, give up.
+                # TODO(rmtew): Need to handle saves and restores?  pushes and pops?
                 pass
-            elif register_state.direction == DIRECTION_FORWARD:
-                # ... follow branches?  stop at final instructions?
-                # ... if final instruction in the block is not final, look to the next block and see if it is an instruction.
-                # ... if source return value is pointer, can ignore branches on eq condition
-                pass
-            break
-    pass
+        pass
+
+    def _resolve_register_values(self, initial_block, initial_idx, register_goals):
+        # type: (disassembly_data.SegmentBlock, int, RegisterAnalysisGoals) -> None
+        """
+        The direction implicitly determines if we are looking for register sources, or destinations.
+        """
+        # TODO(rmtew): Ideally this function will be architecture agnostic.  It will be necessary to improve the architecture infrastructure to support this.
+        current_block = initial_block
+        current_idx = initial_idx
+        visited_block_addresses = set([]) # type: Set[int]
+        while register_goals.is_incomplete():
+            # Exhaust all sources for a next instruction.
+            current_idx, instruction = self.get_next_instruction(current_block, current_idx, register_goals.direction)
+            if instruction is None:
+                # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
+                visited_block_addresses.add(current_block.address)
+                # ... any reference that is followed from here, should proceed from this point ...
+                # ... collect different results for each followed reference, detect clashes in input values ...
+                if register_goals.direction == DIRECTION_BACKWARD:
+                    # ... is the preceding block a code block and is the last instruction a non-final instruction?
+                    # ... does the first instruction have references by instructions in code blocks?
+                    pass
+                elif register_goals.direction == DIRECTION_FORWARD:
+                    # ... follow branches?  stop at final instructions?
+                    # ... if final instruction in the block is not final, look to the next block and see if it is an instruction.
+                    # ... if source return value is pointer, can ignore branches on eq condition
+                    pass
+                break
+
+            # ... if one operand, is not a source operand unless soemthing like a clear
+            # ... otherwise, last operand is the destination operand.
+            if register_goals.direction == DIRECTION_BACKWARD:
+                if len(instruction.opcodes) == 2:
+                    destination_register_name = self.get_operand_register_name(instruction, 1)
+                    if destination_register_name is not None and register_goals.still_tracking_register(destination_register_name):
+                        instruction_key = instruction.specification.key
+                        if instruction_key in ("LEA", "MOVEA.L"):
+                            register_goals.record_value(destination_register_name, self.get_instruction_address(instruction), instruction)
+                            register_goals.stop_tracking_register(destination_register_name)
+            elif register_goals.direction == DIRECTION_FORWARD:
+                if len(instruction.opcodes) == 2:
+                    source_register_name = self.get_operand_register_name(instruction, 0)
+                    if source_register_name is not None and register_goals.still_tracking_register(source_register_name):
+                        pass
+            pass
+
 
 def get_string_at_address(program_data, block, address):
     # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> Union[str, None]
     data_idx = address - loaderlib.get_segment_address(program_data.loader_segments, block.segment_id)
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
-    data_end_idx = data.find('\0', data_idx)
-    if data_end_idx != -1:
-        return data[data_idx:data_end_idx]
+    string_end_idx = data_idx
+    while data[string_end_idx] != '\0' and string_end_idx < len(data):
+        string_end_idx += 1
+    if string_end_idx != data_idx:
+        return data[data_idx:string_end_idx].tobytes()
     return None
 
 def onload_set_disassemblylib_functions(program_data):
