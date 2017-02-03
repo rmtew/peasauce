@@ -1,3 +1,6 @@
+2017-02-03
+	- For binary files, attempt some initial naive identification of pointers
+	  within the loaded binary data, and adding automatic symbols for them.
 2016-10-17
 	- Detect library calls.  For exec open library calls, rename the library name
 	  symbol, and change it's data type to ASCII.  This adds some initial support 

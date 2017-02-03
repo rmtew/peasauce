@@ -1128,6 +1128,9 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
         #    print "program_data.new_block_events", program_data.new_block_events
         #    print "program_data.block_data_type_events", program_data.block_data_type_events
 
+    if program_data.new_block_events is None:
+        pass
+
     event_blocks = {} # type: Dict[int, Tuple[disassembly_data.SegmentBlock, int, int, Union[int, None]]]
     for event_block in program_data.new_block_events:
         data_type = disassembly_data.get_block_data_type(event_block)
@@ -1143,8 +1146,6 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
         event_blocks[event_block.address] = (event_block, data_type_old, data_type, None)
     for t in program_data.block_data_type_events:
         event_blocks[t[0].address] = t
-    program_data.new_block_events = None
-    program_data.block_data_type_events = None
 
     # The type of the block has been changed.  If the new type was code, then that may have cascaded changing the
     # type of other existing blocks, as well as splitting off parts of the original selected block.
@@ -1419,10 +1420,13 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
 
         on_block_data_type_change(program_data, block, old_data_type, disassembly_data.DATA_TYPE_CODE, block_length_original)
 
+        is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
+
         # Extract any addresses which are referred to, for later use.
         for type_id, entry in line_data:
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 entry_address = entry.pc - program_data.dis_constant_pc_offset
+                xxx = entry.pc
                 for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).iteritems():
                     if flags & MAF_CODE:
                         disassembly_offsets.add(match_address)
@@ -1435,10 +1439,13 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                                     insert_reference_address(program_data, match_address, entry_address, pending_symbol_addresses)
                                     break
                                 search_address += 1
+                        # TODO(rmtew): Need to know the address length.
+                        elif is_binary_file and check_known_address(program_data, match_address) and program_data.dis_is_operand_pointer_sized(entry, entry.opcodes[opcode_idx]):
+                            insert_reference_address(program_data, match_address, entry_address, pending_symbol_addresses)
                     elif flags & MAF_UNCERTAIN != MAF_UNCERTAIN:
                         # This code is unverified.  For relocated programs, it was creating symbols for arbitrary Imm values.
                         do_insert = None
-                        if flags & MAF_CERTAIN or (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE:
+                        if flags & MAF_CERTAIN or is_binary_file:
                             do_insert = True
                         elif match_address in program_data.loader_relocated_addresses:
                             do_insert = True
@@ -2135,6 +2142,7 @@ def onload_set_disassemblylib_functions(program_data):
     program_data.dis_is_final_instruction_func = arch.function_is_final_instruction
     program_data.dis_get_match_addresses_func = arch.function_get_match_addresses
     program_data.dis_get_instruction_string_func = arch.function_get_instruction_string
+    program_data.dis_is_operand_pointer_sized = arch.function_is_operand_pointer_sized
     program_data.dis_get_operand_string_func = arch.function_get_operand_string
     program_data.dis_get_operand_values_func = arch.function_get_operand_values
     program_data.dis_get_operand_value_func = arch.function_get_operand_value

@@ -363,6 +363,10 @@ class ArchInterface(object):
     """ Function: . """
     function_get_default_symbol_name = _unimplemented_function
 
+    """ Function: . """
+    def function_is_operand_pointer_sized(self, instruction):
+        return False
+
     # API: Internal use.
     def set_instruction_table(self, table_data):
         self.table_instructions = process_instruction_list(self, table_data)

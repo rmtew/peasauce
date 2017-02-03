@@ -169,6 +169,13 @@ class ArchM68k(ArchInterface):
         key = instruction.specification.key
         return _get_formatted_description(key, vars)
 
+    def function_is_operand_pointer_sized(self, instruction, operand):
+        #if len(instruction.opcodes) == 2:
+        #    return instruction.specification.key.endswith(".L")
+        #elif len(instruction.opcodes) == 
+        # This is nowhere near complete.
+        return operand.key == "AbsL"
+
     def function_get_operand_value(self, instruction, variable_type, variables):
         if variable_type == "ARid16":
             return self._signed_value(variables["D16"], 16)
