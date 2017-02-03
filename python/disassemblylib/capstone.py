@@ -233,10 +233,20 @@ class Cs(object):
     detail = False
 
     def __init__(self, cs_arch, cs_mode):
+        # type: (int, int) -> None
         self.cs_arch = cs_arch
         self.cs_mode = cs_mode
 
-    def disasm(self, code, offset, count=0):
+    def disasm(self, code, offset, count=1):
         # type: (str, int, int) -> Iterator[capstone_Instruction]
-        pass
+        """
+        code: the data
+        offset: address of first instruction word
+        count: the number of instructions to disassemble
+        """
+        for i in range(count):
+            pass
+            # TODO(rmtew): disassemble a line.
+            # offset = address of first instruction word
+            # 
 

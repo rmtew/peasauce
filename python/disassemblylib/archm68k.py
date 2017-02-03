@@ -11,23 +11,16 @@ From the X68000 TNT.x executable from the Tunnels and Trolls disk image.
 0x6683A: 0xFF3C: 1111[111]100[111][100] cpSAVE 7, Imm
 This is not a valid addressing mode, so would cause F-Line.
 
------------------ INSTRUCTION SIZES -----------------
+----------------- LLVM NOTES -----------------
 
-  "=I+.z"                       ADDI, ANDI, CMPI, EORI, ORI, SUBI reads one or two words depending on whether size is B, W or L.
-  "=I+.B"                       ANDI to CCR, BCHG, BCLR, BSET, BTST, EORI to CCR, ORI to CCR reads an extra word for the lower byte.
-  "DISPLACEMENT:(xxx=v)"        BCC, BRA, BSR reads 0,1 or 2 extra words depending on its instruction word displacement value.
-  "DISPLACEMENT:(xxx=I1.W)"     DBCC reads 1 extra word for 16-bit diplacement
-  - unimplemented -             MOVEP reads 1 extra word for 16-bit diplacement
-  - irrelevant -                JMP / JSR operand based ..... ignore
-  "DISPLACEMENT:(xxx=I1.W)"     LINK.W reads 1 extra word
-  "DISPLACEMENT:(xxx=I1.L)"     LINK.L reads 1 extra longword
-  "RL:(xxx=I1.W)"               MOVEM
+http://llvm.org/docs/WritingAnLLVMBackend.html
 
-B:00, W:01, L:10 - ADDI, ADDQ, ADDX, ANDI, ASd, CLR, CMPI, CMPM, EORI, LSd, NEG, NEGx, NOT, ORI, ROd, ROXd, SUBI, SUBQ, SUBX, TST,
-B:--, W:11, L:10 - CHK, MOVEA (handled case by case)
-B:01, W:11, L:10 - MOVE (handled case by case)
-B: -, W: 0, L: 1 - MOVEM (handled case by case)
-???????????????? - DIVS, DIVU
+----------------- SPEC PARSING / CODE GENERATION -----------------
+
+Prototyping parsing the last M68k spec, and generating code and tables
+from it.
+
+https://bitbucket.org/rmtew/archgen
 
 """
 

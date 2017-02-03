@@ -670,7 +670,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                                 if type(last_value) is str:
                                     string += "'"
                                 string += ","
-                            string += _get_byte_representation(byte)
+                            string += _get_byte_representation(chr(byte))
                         last_value = value
                     if last_value is not None:
                         if type(last_value) is str:
@@ -1190,12 +1190,12 @@ def _process_block_as_ascii(program_data, block):
     line_width_max = 40
     last_value = None
     while bytes_consumed < block.length:
-        byte = ord(data[data_offset_start+bytes_consumed])
+        byte = data[data_offset_start+bytes_consumed]
         comma_separated = False
         char_line_width = 0
-        if byte >= 32 and byte < 127:
+        if ord(byte) >= 32 and ord(byte) < 127:
             # Sequential displayable characters get collected into a contiguous string.
-            value = chr(byte)
+            value = byte
             if type(last_value) is not str:
                 comma_separated = True
                 char_line_width += 2 # start and end quoting characters for this character and all appended to it.
@@ -1230,11 +1230,11 @@ def _process_block_as_ascii(program_data, block):
     block.line_data = block_line_data
 
 def _get_byte_representation(byte):
-    # type: (int) -> str
-    if byte < 16:
-        return "%d" % byte
-    else:
-        return "$%X" % byte
+    # type: (str) -> str
+    v = ord(byte)
+    if v < 16:
+        return "%d" % v
+    return "$%X" % v
 
 __label_metadata = {
     disassembly_data.DATA_TYPE_CODE: disassemblylib.constants.DIS_ID_CODE,
@@ -1659,11 +1659,15 @@ def load_file(input_file, new_options, file_name, work_state=None):
 
     return program_data, get_file_line_count(program_data)
 
+# NOTE(rmtew): The following platform specific logic will eventually be refactored out to platform-specific plugings, and abstracted to common parts where possible.
+
 def platform_specific_processing(program_data, work_state=None):
     # type: (disassembly_data.ProgramData, WorkState) -> None
     if program_data.processor_id == loaderlib.constants.PROCESSOR_M680x0:
         if program_data.loader_system_name == loaderlib.amiga.__name__:
             platform_specific_processing_M680x0_amiga(program_data, work_state)
+
+AMIGA_EXEC_BASE_ADDRESS = 4
 
 def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
     # type: (disassembly_data.ProgramData, WorkState) -> None
@@ -1685,17 +1689,19 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
             for line_idx, (type_id, instruction) in enumerate(block.line_data):
                 if type_id == disassembly_data.SLD_INSTRUCTION:
                     instruction = get_instruction_entry(program_data, block, block.line_data, line_idx)
+                    # Detect aliasing of exec base address i.e. `move.l address.w, variable`
                     if len(instruction.opcodes) == 2:
                         instruction_operand0 = instruction.opcodes[0]
                         instruction_operand1 = instruction.opcodes[1]
                         # We can follow references for real store addresses, but exec base is a special case (at least for now).
                         if instruction.specification.key == "MOVE.L" and instruction_operand0.key == "AbsW" and instruction_operand1.key == "AbsL":
-                            source_address = program_data.dis_get_operand_value_func(instruction, instruction_operand0.key, instruction_operand0.vars)
-                            if source_address == 4:
+                            source_address = program_data.dis_get_operand_value_func(instruction, instruction_operand0.key, instruction_operand0.vars)                            
+                            if source_address == AMIGA_EXEC_BASE_ADDRESS:
                                 destination_address = program_data.dis_get_operand_value_func(instruction, instruction_operand1.key, instruction_operand1.vars)
                                 if None not in library_handle_stores:
                                     library_handle_stores[None] = set()
                                 library_handle_stores[None].add(destination_address)
+                    # Detect potential library calls i.e. `jsr offset(address_register)`
                     elif len(instruction.opcodes) == 1:
                         instruction_operand0 = instruction.opcodes[0]
                         if instruction.specification.key == "JSR" and instruction_operand0.key == "ARid16":
@@ -1813,7 +1819,7 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
                             duplicate_count += 1
                             library_name = "%s%02d" % (library_name_prefix, duplicate_count)
 
-                    library_open_calls[initial_address] = address_register_values[1]
+                    library_open_calls[initial_address] = library_name_address
                 else:
                     logger.debug("on_instruction_matched: At $%06X unable to locate open library A1 source", initial_address, call_register)
 
@@ -1880,6 +1886,12 @@ class M68KRuntimeContext(object):
     def __init__(self):
         self.registers = {}
 
+class InstructionContext(object):
+    def __init__(self, instruction, block, line_idx):
+        self.instruction = instruction
+        self.block = block
+        self.line_idx = line_idx
+
 class CodeAnalysis(object):
     def __init__(self, program_data):
         # type: (disassembly_data.ProgramData) -> None
@@ -1892,7 +1904,9 @@ class CodeAnalysis(object):
     def get_operand_register_name(self, instruction, operand_index):
         # type: (Instruction, int) -> str
         operand = instruction.opcodes[operand_index]
-        operand_key = operand.specification.key
+        operand_key = operand.key
+        if operand_key is None:
+            operand_key = operand.specification.key
         if operand_key == "AR":
             operand_values = self.program_data.dis_get_operand_values_func(instruction, operand)
             return operand_values["An"][1]
@@ -1956,21 +1970,45 @@ class CodeAnalysis(object):
 
         for block in self.program_data.blocks:
             line_idx, instruction = self.get_first_instruction(block)
+            execbase_register_names = set()
             while instruction is not None:
+                context = InstructionContext(instruction, block, line_idx)
                 instruction_key = instruction.specification.key
+
+                # TODO(rmtew):
+                # 1. Detect if this instruction does a write to execbase_register_name.
+                # 2. If so, clear execbase_register_name.
+                # ... the last operand ... xxxx
+                pass # ... xxx
+                if len(execbase_register_names) and len(instruction.opcodes) > 0:
+                    instr_s = DEBUG_get_instruction_repr(self.program_data, instruction)
+                    handled = False
+                    if instruction_key == "MOVEA.L":
+                        src_register_name = self.get_operand_register_name(instruction, 0)
+                        dst_register_name = self.get_operand_register_name(instruction, 1)
+                        if src_register_name and dst_register_name:
+                            if src_register_name in execbase_register_names:
+                                execbase_register_names.add(dst_register_name)
+                                handled = True
+                    if not handled and instruction.opcodes[-1].specification.key == "AR":
+                        register_name = self.get_operand_register_name(instruction, -1)
+                        if register_name in execbase_register_names:
+                            execbase_register_names.remove(register_name)
+
                 if instruction_key == "JSR":
                     if instruction.opcodes[0].key == "ARid16":
                         operand_values = self.program_data.dis_get_operand_values_func(instruction, instruction.opcodes[0])
                         offset_value, register_name = operand_values["D16"][0], operand_values["An"][1]
-                        self.library_calls.append((self.get_instruction_address(instruction), block, line_idx, register_name, offset_value))
+                        # Found a call to Exec library.  We can identify it, and finish tracing it later.
+                        if register_name in execbase_register_names:
+                            pass
+                        # self.library_calls.append((self.get_instruction_address(instruction), block, line_idx, register_name, offset_value))
                 elif instruction_key == "MOVEA.L":
-                    if instruction.opcodes[0].key == "AbsW":                        
+                    if instruction.opcodes[0].key == "AbsW":
                         source_address = self.get_operand_value_address(instruction, 0)
                         if source_address == 4:
-                            dest_register_name = self.get_operand_register_name(instruction, 1)
-                            pass
-                            # TODO(rmtew): Trace the flow to see whether we can link it to the following jsrs.
-                            # This will be useful, because
+                            # This is a light form of Exec library call tracking.
+                            execbase_register_names.add(self.get_operand_register_name(instruction, 1))
                 elif instruction_key == "MOVE.L":
                     if instruction.opcodes[0].key == "AbsW":
                         source_address = self.program_data.dis_get_operand_value_func(instruction, instruction.opcodes[0].key, instruction.opcodes[0].vars)
@@ -1987,10 +2025,15 @@ class CodeAnalysis(object):
                 line_idx, instruction = self.get_next_instruction(block, line_idx, DIRECTION_FORWARD)
         pass
 
+    def _trace_call(self, context):
+        # ... xxx
+        # Go up and get the source registers.
+        ## Don't know what they are, besides the call base address register.
+        ## Until the base call register is resolved.
+        pass
+
     def _resolve_calls(self, initial_block, initial_idx, call_register_name):
         # type: (disassembly_data.SegmentBlock, int, str) -> None
-
-        # NOTE(rmtew): 
 
         # NOTE(rmtew): Currently, this will start from the setting of execbase, then work it's way down to any trailing calls.
         # NOTE(rmtew): In theory, it should track other useful register values.
@@ -1999,17 +2042,18 @@ class CodeAnalysis(object):
         visited_block_addresses = set([]) # type: Set[int]
         while True:
             # Exhaust all sources for a next instruction.
-            current_idx, instruction = self.get_next_instruction(current_block, current_idx, register_goals.direction)
+            direction = DIRECTION_FORWARD
+            current_idx, instruction = self.get_next_instruction(current_block, current_idx, direction)
             if instruction is None:
                 # TODO(rmtew): For initial implementation, give up when the initial block is exhausted.
                 visited_block_addresses.add(current_block.address)
                 # ... any reference that is followed from here, should proceed from this point ...
                 # ... collect different results for each followed reference, detect clashes in input values ...
-                if register_goals.direction == DIRECTION_BACKWARD:
+                if direction == DIRECTION_BACKWARD:
                     # ... is the preceding block a code block and is the last instruction a non-final instruction?
                     # ... does the first instruction have references by instructions in code blocks?
                     pass
-                elif register_goals.direction == DIRECTION_FORWARD:
+                elif direction == DIRECTION_FORWARD:
                     # ... follow branches?  stop at final instructions?
                     # ... if final instruction in the block is not final, look to the next block and see if it is an instruction.
                     # ... if source return value is pointer, can ignore branches on eq condition
@@ -2021,7 +2065,7 @@ class CodeAnalysis(object):
                 if instruction.opcodes[0].key == "ARid16":
                     operand_values = self.program_data.dis_get_operand_values_func(instruction, instruction.opcodes[0])
                     offset_value, register_name = operand_values["D16"][0], operand_values["An"][1]
-                    self.library_calls.append((self.get_instruction_address(instruction), block, line_idx, register_name, offset_value))
+                    self.library_calls.append((self.get_instruction_address(instruction), current_block, initial_idx, register_name, offset_value))
             else:
                 # TODO(rmtew): If the call register is clobbered, give up.
                 # TODO(rmtew): Need to handle saves and restores?  pushes and pops?
