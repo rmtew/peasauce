@@ -49,7 +49,7 @@ if False:
             sys.stderr.write(sys.argv[0] +": unable to open file '"+ file_path +"'"+ os.linesep)
             sys.exit(2)
         
-        disassembly_data, line_count = disassembly.load_file(file_path)
+        disassembly_data, line_count = disassembly.api_load_file(file_path)
 
         print_block_stats(disassembly_data)
         print_undetected_code_blocks(disassembly_data)

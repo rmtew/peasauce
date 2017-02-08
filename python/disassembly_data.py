@@ -151,7 +151,7 @@ class ProgramData(object):
         "List of ascending block first line numbers (used by bisect for line number based lookups)."
         self.block_line0s = None # []
         "If list of first line numbers need recalculating, this is the entry to start at."
-        self.block_line0s_dirtyidx = None # 0
+        self._block_line0s_dirtyidx = None # 0
         "Callback application can register to be notified."
         self.symbol_insert_func = None
         "Callback application can register to be notified."
@@ -189,6 +189,14 @@ class ProgramData(object):
         # persistence exposed information:
         """ Whether the saved project embeds the input file in it's entirety. """
         self.input_file_cached = False
+
+    def get_block_line0s_dirtyidx(self):
+        return self._block_line0s_dirtyidx
+
+    def set_block_line0s_dirtyidx(self, value):
+        self._block_line0s_dirtyidx = value
+
+    block_line0s_dirtyidx = property(get_block_line0s_dirtyidx, set_block_line0s_dirtyidx)
 
 
 class SegmentBlock(object):

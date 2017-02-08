@@ -91,13 +91,13 @@ class BaseItemModel(QtCore.QAbstractItemModel):
     def _begin_row_change(self, row, row_count):
         if row_count < 0:
             self.beginRemoveRows(QtCore.QModelIndex(), row, row+(-row_count)-1)
-        else:
+        elif row_count > 0:
             self.beginInsertRows(QtCore.QModelIndex(), row, row+row_count-1)
 
     def _end_row_change(self, row, row_count):
         if row_count < 0:
             self.endRemoveRows()
-        else:
+        elif row_count > 0:
             self.endInsertRows()
 
     def _set_header_font(self, font):
@@ -1076,11 +1076,18 @@ class MainWindow(QtGui.QMainWindow):
 
     def on_pre_line_change(self, args):
         line0, line_count = args
-        self.list_model._begin_row_change(line0, line_count)
+        if line_count == 0:
+            pass
+        else:
+            self.list_model._begin_row_change(line0, line_count)
 
     def on_post_line_change(self, args):
         line0, line_count = args
-        self.list_model._end_row_change(line0, line_count)
+        if line_count == 0:
+            for i in range(self.list_model._column_count):
+                self.list_table.update(self.list_model.createIndex(line0, i))
+        else:
+            self.list_model._end_row_change(line0, line_count)
 
     def on_disassembly_symbol_added(self, args):
         symbol_address, symbol_label = args
@@ -1221,6 +1228,8 @@ class MainWindow(QtGui.QMainWindow):
         addresses = set()
         for row_idx in selected_row_indices:
             addresses.add(self.uncertain_code_references_model._lookup_cell_value(row_idx, address_row_idx))
+        for address in addresses:
+            self.editor_state.add_label_for_value(self.editor_client)
 
 
 ## Option dialogs.
