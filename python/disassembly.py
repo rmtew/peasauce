@@ -809,6 +809,20 @@ def api_insert_reference_address(program_data, referring_address):
                     if program_data.post_line_change_func:
                         program_data.post_line_change_func(line0, 0)
 
+                remove_uncertain_reference(program_data, data_type, referring_address, referred_address)
+                return
+
+def remove_uncertain_reference(program_data, data_type, referring_address1, referred_address1):
+    new_block, new_block_idx = lookup_block_by_address(program_data, referring_address1)
+    for t in new_block.references:
+        referring_address2, referred_address2, text = t
+        if referring_address1 == referring_address2:
+            if referred_address1 == referred_address2:
+                new_block.references.remove(t)
+                if program_data.uncertain_reference_modification_func is not None:
+                    program_data.uncertain_reference_modification_func(data_type, data_type, referring_address1, 4)
+                break
+
 def insert_reference_address(program_data, address, src_abs_idx, pending_symbol_addresses):
     # type: (disassembly_data.ProgramData, int, int, Set[int]) -> bool
     if not check_known_address(program_data, address):
@@ -1108,11 +1122,11 @@ def split_block(program_data, address, own_midinstruction=False):
     new_block.segment_offset = block.segment_offset + block.length
     new_block.address = block.address + block.length
     new_block.length = excess_length
+    new_block.references = new_block_references
 
     if block_data_type == disassembly_data.DATA_TYPE_CODE:
         block.line_data = block_line_data
         new_block.line_data = split_block_line_data
-        new_block.references = new_block_references
     elif block_data_type == disassembly_data.DATA_TYPE_ASCII:
         _process_block_as_ascii(program_data, block)
         _process_block_as_ascii(program_data, new_block)

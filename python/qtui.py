@@ -1227,8 +1227,9 @@ class MainWindow(QtGui.QMainWindow):
         selected_row_indices = self._get_rows_from_indices(table.selectedIndexes())
         addresses = set()
         for row_idx in selected_row_indices:
-            addresses.add(self.uncertain_code_references_model._lookup_cell_value(row_idx, address_row_idx))
+            addresses.add(model._lookup_cell_value(row_idx, address_row_idx))
         for address in addresses:
+            self.scroll_to_address(address)
             self.editor_state.add_label_for_value(self.editor_client)
 
 
