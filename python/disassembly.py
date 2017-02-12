@@ -1900,14 +1900,6 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
                                     address_register_values[current_dest_register_number] = program_data.dis_get_operand_value_func(current_instruction, current_source_operand.key, current_source_operand.vars) 
                                 else:
                                     raise Exception("Unexpected operand type", current_source_operand.key)
-                                if False:
-                                    current_source_operand_values = program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0])
-                                    if current_instruction.opcodes[0].key == "PCid16":
-                                        address_register_values[current_dest_register_number] = current_instruction.pc + current_source_operand_values["D16"][0]
-                                    elif current_instruction.opcodes[0].key == "PCid8":
-                                        address_register_values[current_dest_register_number] = current_instruction.pc + current_source_operand_values["D8"][0]
-                                    elif current_instruction.opcodes[0].key == "AbsL":
-                                        address_register_values[current_dest_register_number] = current_source_operand_values["xxx"][0]
                                 del track_address_registers[current_dest_register_number]
                                 continue
                             logger.debug("on_instruction_matched: At $%06X A%d unhandled source is %s", current_instruction_address, call_register, current_instruction.specification.key)
