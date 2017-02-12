@@ -1895,8 +1895,19 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
                         current_dest_register_number = current_dest_operand_values["An"][0]
                         if current_dest_register_number in track_address_registers:
                             if current_instruction.specification.key == "LEA":
-                                current_source_operand_values = program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0])
-                                address_register_values[current_dest_register_number] = current_source_operand_values["xxx"][0]
+                                current_source_operand = current_instruction.opcodes[0]
+                                if current_source_operand.key in ("PCid16", "PCid8", "AbsW", "AbsL"):
+                                    address_register_values[current_dest_register_number] = program_data.dis_get_operand_value_func(current_instruction, current_source_operand.key, current_source_operand.vars) 
+                                else:
+                                    raise Exception("Unexpected operand type", current_source_operand.key)
+                                if False:
+                                    current_source_operand_values = program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0])
+                                    if current_instruction.opcodes[0].key == "PCid16":
+                                        address_register_values[current_dest_register_number] = current_instruction.pc + current_source_operand_values["D16"][0]
+                                    elif current_instruction.opcodes[0].key == "PCid8":
+                                        address_register_values[current_dest_register_number] = current_instruction.pc + current_source_operand_values["D8"][0]
+                                    elif current_instruction.opcodes[0].key == "AbsL":
+                                        address_register_values[current_dest_register_number] = current_source_operand_values["xxx"][0]
                                 del track_address_registers[current_dest_register_number]
                                 continue
                             logger.debug("on_instruction_matched: At $%06X A%d unhandled source is %s", current_instruction_address, call_register, current_instruction.specification.key)
@@ -1912,7 +1923,7 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
                                     found_address_register_source = True
                                     continue
                                 # This is actually an error.  The register should be the same.
-                            elif current_instruction.specification.key == "MOVEA.L" and current_instruction.opcodes[0].key == "AbsL" and current_instruction.opcodes[1].specification.key == "AR":
+                            elif current_instruction.specification.key == "MOVEA.L" and current_instruction.opcodes[0].key in ("AbsW", "AbsL") and current_instruction.opcodes[1].specification.key == "AR":
                                 current_source_operand_values = program_data.dis_get_operand_values_func(current_instruction, current_instruction.opcodes[0])
                                 handle_address = current_source_operand_values["xxx"][0]
                                 # Amiga exec library base address.  Note that if the program has data at address 4, there may be a clash here..  Hmm.
