@@ -1161,7 +1161,7 @@ class MainWindow(QtGui.QMainWindow):
         to_model._sort_list(addition_rows)
 
         if to_model._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
-            op = operator.lt
+            op = operator.le
         else:
             op = operator.ge
         sort_column1 = to_model._sort_column1
@@ -1170,13 +1170,16 @@ class MainWindow(QtGui.QMainWindow):
         while to_index < len(to_row_data) and from_index < len(addition_rows):
             insert_row = addition_rows[from_index]
             if op(insert_row[sort_column1], to_row_data[to_index][sort_column1]):
-                to_row_data.insert(to_index, insert_row)
+                doesNotExistAlready = insert_row != to_row_data[to_index]
+                if doesNotExistAlready:
+                    to_row_data.insert(to_index, insert_row)
                 if len(insert_ranges) and insert_ranges[-1][1] == to_index-1:
                     insert_ranges[-1][1] = to_index
                 else:
                     if len(insert_ranges):
                         to_model._set_row_data(to_row_data, addition_rows=(insert_ranges[-1][0], insert_ranges[-1][1]))
-                    insert_ranges.append([ to_index, to_index ])
+                    if doesNotExistAlready:
+                        insert_ranges.append([ to_index, to_index ])
                 from_index += 1
             to_index += 1
         if len(insert_ranges):
