@@ -302,6 +302,21 @@ class EditorState(object):
 
         return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
+    def if_uncertain_data_reference_address(self, acting_client):
+        if self.state_id != EditorState.STATE_LOADED:
+            return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
+
+        current_address = self.get_address(acting_client)
+        if current_address is None:
+            return ERRMSG_BUG_UNKNOWN_ADDRESS
+
+        references = disassembly.api_get_uncertain_references_by_address(self.disassembly_data, current_address)
+        for (address, value, text) in references:
+            if address == current_address:
+                return
+
+        return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+
     def pop_address(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY

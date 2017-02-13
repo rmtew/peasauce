@@ -178,6 +178,12 @@ class CustomItemModel(BaseItemModel):
         # If you use this data, remember it may be arbitrarily sorted by column.
         return self._row_data
 
+    def _index_cell_value(self, column, value):
+        for i, row in enumerate(self._row_data):
+            if row[column] == value:
+                return i
+        return -1
+
     def _lookup_cell_value(self, row, column):
         return self._row_data[row][column]
 
@@ -607,6 +613,7 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table = create_table_widget(dock, self.symbols_model)
         self.symbols_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.symbols_table)
+        dock.setFocusProxy(self.symbols_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-symbols") # State/geometry persistence requirement.
@@ -625,6 +632,7 @@ class MainWindow(QtGui.QMainWindow):
         self.uncertain_code_references_table = create_table_widget(dock, self.uncertain_code_references_model, multiselect=True)
         self.uncertain_code_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_code_references_table)
+        dock.setFocusProxy(self.uncertain_code_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-uncertain-code-references") # State/geometry persistence requirement.
@@ -651,6 +659,7 @@ class MainWindow(QtGui.QMainWindow):
         self.uncertain_data_references_table = create_table_widget(dock, self.uncertain_data_references_model, multiselect=True)
         self.uncertain_data_references_table.setSortingEnabled(True) # Non-standard
         dock.setWidget(self.uncertain_data_references_table)
+        dock.setFocusProxy(self.uncertain_data_references_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-uncertain-data-references") # State/geometry persistence requirement.
@@ -675,6 +684,7 @@ class MainWindow(QtGui.QMainWindow):
         self.tracked_models.append(model)
         self.segments_table = create_table_widget(dock, model)
         dock.setWidget(self.segments_table)
+        dock.setFocusProxy(self.segments_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-segments") # State/geometry persistence requirement.
@@ -685,6 +695,7 @@ class MainWindow(QtGui.QMainWindow):
         self.tracked_models.append(model)
         self.orphaned_blocks_table = create_table_widget(dock, model)
         dock.setWidget(self.orphaned_blocks_table)
+        dock.setFocusProxy(self.orphaned_blocks_table)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-orphaned-blocks") # State/geometry persistence requirement.
@@ -788,7 +799,7 @@ class MainWindow(QtGui.QMainWindow):
         ## Uncertain code references list table.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         ## Uncertain data references list table.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
 
     def reset_all(self):
         self.reset_ui()
@@ -912,6 +923,7 @@ class MainWindow(QtGui.QMainWindow):
         row_idx = self.uncertain_code_references_table.currentIndex().row()
         address = self.uncertain_code_references_model._lookup_cell_value(row_idx, UNCERTAIN_ADDRESS_IDX)
         self.functionality_view_push_address(current_address, address)
+        self.list_table.setFocus()
 
     def interaction_uncertain_data_references_view_push_symbol(self):
         if not self.editor_state.in_loaded_state(self.editor_client):
@@ -926,10 +938,27 @@ class MainWindow(QtGui.QMainWindow):
         row_idx = self.uncertain_data_references_table.currentIndex().row()
         address = self.uncertain_data_references_model._lookup_cell_value(row_idx, UNCERTAIN_ADDRESS_IDX)
         self.functionality_view_push_address(current_address, address)
+        self.list_table.setFocus()
 
     def interaction_view_push_symbol(self):
         errmsg = self.editor_state.push_address(self.editor_client)
         if type(errmsg) in types.StringTypes:
+            # Fallback behaviour, select any uncertain data reference in the custom window.
+            if errmsg == editor_state.ERRMSG_NO_IDENTIFIABLE_DESTINATION:
+                errmsg = self.editor_state.if_uncertain_data_reference_address(self.editor_client)
+                if errmsg is None:
+                    address = self.editor_state.get_address(self.editor_client)
+                    new_line_idx = self.uncertain_data_references_model._index_cell_value(0, address)
+                    if new_line_idx > -1:
+                        index = self.uncertain_data_references_model.index(new_line_idx, 2, QtCore.QModelIndex())
+                        self.uncertain_data_references_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Clear | QtGui.QItemSelectionModel.Select | QtGui.QItemSelectionModel.Rows)
+                        self.uncertain_data_references_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+                        dockWidget = self.uncertain_data_references_table.parentWidget()
+                        if dockWidget.isHidden():
+                            dockWidget.show()
+                        if isinstance(dockWidget, QtGui.QDockWidget):
+                            dockWidget.setFocus()
+                        return
             QtGui.QMessageBox.information(self, "Error", errmsg)
             return
         line_idx = self.editor_state.get_line_number(self.editor_client)
