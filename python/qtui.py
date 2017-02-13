@@ -294,13 +294,17 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             super(DisassemblyItemDelegate, self).paint(painter, option, index)
 
     def sizeHint(self, option, index):
-        if index.column() == 4:
+        """
+        I do not remember why I had this.  Maybe something to do with auto-sizing that did not work?
+        columnNumber = index.column()
+        if columnNumber == 4:
             options = QtGui.QStyleOptionViewItemV4(option)
             self.initStyleOption(options, index)
             doc = QtGui.QTextDocument()
             doc.setHtml(options.text)
             doc.setTextWidth(option.rect.width())
             return QtCore.QSize(doc.idealWidth(), doc.size().height())
+        """
         return super(DisassemblyItemDelegate, self).sizeHint(option, index)
 
     shflag = False
@@ -515,10 +519,11 @@ class MainWindow(QtGui.QMainWindow):
 
         self.setWindowTitle(APPLICATION_NAME)
 
-        self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Extra", str) ], _class=DisassemblyItemModel)
+        self.list_model = create_table_model(self, [ ("Address", int), ("Data", str), ("Label", str), ("Instruction", str), ("Operands", str), ("Template", str) ], _class=DisassemblyItemModel)
         self.tracked_models.append(self.list_model)
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self, self.list_model)
+        self.list_table.setColumnWidth(4, 200)
         self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table))
         self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
         self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
