@@ -256,6 +256,9 @@ class EditorState(object):
         # worth reconsidering dealing with things in terms of line numbers.  TODO.
         return disassembly.api_get_address_for_line_number(self.disassembly_data, self.line_number)
 
+    def get_address_for_line_number(self, acting_client, line_number):
+        return disassembly.api_get_address_for_line_number(self.disassembly_data, line_number)
+
     def get_line_number_for_address(self, acting_client, address):
         return disassembly.api_get_line_number_for_address(self.disassembly_data, address)
 

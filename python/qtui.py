@@ -260,7 +260,8 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
         }
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent, window):
+        self._window = window
         super(DisassemblyItemDelegate, self).__init__(parent)
 
     def paint(self, painter, option, index):
@@ -273,8 +274,10 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             doc.setDefaultFont(self.parent().font())
             doc.setDefaultStyleSheet(self.default_style_sheet)
             text = options.text
-            bits = text.split(", ")
-            if options.state & QtGui.QStyle.State_Selected:
+            if self._window._is_uncertain_data_reference(index.row()):
+                text = "<span style='color: white; background-color: black'>"+ text +"</span>";
+            elif options.state & QtGui.QStyle.State_Selected:
+                bits = text.split(", ")
                 if len(bits) > 1:
                     bits[0] += ", "
                 text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
@@ -530,7 +533,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setColumnWidth(4, 200)
-        self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table))
+        self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table, self))
         self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
         self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
         self.setCentralWidget(self.list_table)
@@ -1253,6 +1256,10 @@ class MainWindow(QtGui.QMainWindow):
 
         self._progress_dialog = None
         self._progress_dialog_steps = 0
+
+    def _is_uncertain_data_reference(self, line_number):
+        address = self.editor_state.get_address_for_line_number(self.editor_client, line_number)
+        return self.uncertain_data_references_model._index_cell_value(0, address) > -1
 
     def _get_rows_from_indices(self, indices):
         # Whether the selection model is per-row (rather than per-cell) or not, we get all

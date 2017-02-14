@@ -1,4 +1,7 @@
+samples
+local_binaries
 *.pyc
 *.pikl
-/.vs/Solution/v14/.suo
-/.pyproj.user
+/.vs/Solution/v*/.suo
+/*.pyproj.user
+/*.psproj

@@ -985,9 +985,9 @@ def get_block_line_number(program_data, block_idx):
 def clear_block_line_count(program_data, block, block_idx=None):
     """ line_count_rlock """
     # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> None
-    if block_idx is None:
-        discard, block_idx = lookup_block_by_address(program_data, block.address)
     with line_count_rlock:
+        if block_idx is None:
+            discard, block_idx = lookup_block_by_address(program_data, block.address)
         block.line_count = 0
         if program_data.block_line0s_dirtyidx is None or block_idx < program_data.block_line0s_dirtyidx:
             program_data.block_line0s_dirtyidx = block_idx
@@ -1025,10 +1025,10 @@ def api_get_next_block_line_number(program_data, data_type, line_idx, direction_
 def insert_block(program_data, insert_idx, block):
     """ line_count_rlock """
     # type: (disassembly_data.ProgramData, int, disassembly_data.SegmentBlock) -> None
-    program_data.block_addresses.insert(insert_idx, block.address)
-    program_data.blocks.insert(insert_idx, block)
-
     with line_count_rlock:
+        program_data.block_addresses.insert(insert_idx, block.address)
+        program_data.blocks.insert(insert_idx, block)
+
         program_data.block_line0s.insert(insert_idx, None)
         # Update how much of the sorted line number index needs to be recalculated.
         if program_data.block_line0s_dirtyidx is None or insert_idx < program_data.block_line0s_dirtyidx:
