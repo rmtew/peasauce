@@ -91,6 +91,9 @@ this disassembler unless you can deal with that.
 
 ### QT UI Keyboard Shortcuts
 
+* 1: Select the first operand, if any, in the operands column of the currently selected row.
+* 2: Select the second operand, if any, in the operands column of the currently selected row.
+* 3: Select the third operand, if any, in the operands column of the currently selected row.
 * CTRL+G: Open a dialog to enter an address to jump to.
 * CTRL+O: Open a dialog to select a file to open to disassemble.
 * CTRL+Q: Quit.
@@ -99,8 +102,9 @@ this disassembler unless you can deal with that.
 * CTRL+F: Go to the next search match after the current cursor position.
 * CTRL+SHIFT+F: Go to the next search match before the current cursor position.
 * CTRL+SHIFT+RIGHT: Open a dialog with a list of references to the label at the current cursor position.
-* CTRL+RIGHT: Jump to an address referenced on the line at the current cursor position.
+* CTRL+RIGHT: Jump to an address referenced on the line at the current cursor position. If the operand is an uncertain data reference, it will switch focus to the matching line in the uncertain data reference window.
 * CTRL+LEFT: Return to the last address where you followed a reference from.
+* ENTER: Create or edit the label for the address of the currently selected row.
 
 ## Future Work
 
@@ -119,8 +123,8 @@ This is intended to be a summarised list of points that briefly note intended wo
 * UI: The orphaned block window should show entries, including address, length, leading data..?  What are orphaned blocks again?
 * UI: All actions should happen as part of a scriptable system with an accumulator (#0001).
 * UI: Find text options (#0003).
-* UI: Ala Resource, change the numeric base of a value whether code operand or data.
-* UI: Ala Resource, edit/override values.
+* UI: Ala Resource, change the numeric base of a value whether code operand or data.  This should now be possible for code operands, with the operand selection now working.
+* UI: Ala Resource, edit/override values.  Again, this should benefit from the addition of operand selection.
 * UI: Uncertain references: use context menu to add labels for one or more selected entries (should work in a macro-like fashion / window.toolapiob).
 * UI: Merge uncertain code and data reference panes, have type column, perhaps ability to multi-select and toolbar with option to relocate.
 * Disassembly: Symbol library and the ability to apply symbol names to values (#0004).
