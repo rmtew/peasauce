@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012-2016 Richard Tew
+    Copyright (C) 2012-2017 Richard Tew
     Licensed using the MIT license.
 """
 
@@ -63,6 +63,8 @@ class BaseItemModel(QtCore.QAbstractItemModel):
     _header_font = None # type: QtGui.QApplication.font
 
     def __init__(self, columns, parent):
+        self.window = parent
+
         super(BaseItemModel, self).__init__(parent)
 
         self._header_data = {}
@@ -144,8 +146,6 @@ class BaseItemModel(QtCore.QAbstractItemModel):
 
 class DisassemblyItemModel(BaseItemModel):
     def __init__(self, columns, parent):
-        self.window = parent
-
         super(DisassemblyItemModel, self).__init__(columns, parent)
 
     def rowCount(self, parent=None):
@@ -246,23 +246,10 @@ class CustomQTableView(QtGui.QTableView):
         self.selection_change_signal.emit((selected, deselected))
 
 
-class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
-    default_style_sheet = """
-        div.operand1 {
-            xbackground-color: red;
-        }
-        div.operand2 {
-            xbackground-color: green;
-        }
-        table {
-            padding: 0px;
-            border-style: none;
-        }
-    """
-
+class DisassemblyOperandDelegate(QtGui.QStyledItemDelegate):
     def __init__(self, parent, window):
-        self._window = window
-        super(DisassemblyItemDelegate, self).__init__(parent)
+        self.window = window
+        super(DisassemblyOperandDelegate, self).__init__(parent)
 
     def paint(self, painter, option, index):
         if index.column() == 4:
@@ -272,15 +259,20 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             style = QtGui.QApplication.style() if options.widget is None else options.widget.style()
             doc = QtGui.QTextDocument()
             doc.setDefaultFont(self.parent().font())
-            doc.setDefaultStyleSheet(self.default_style_sheet)
             text = options.text
-            if self._window._is_uncertain_data_reference(index.row()):
-                text = "<span style='color: white; background-color: black'>"+ text +"</span>";
-            elif options.state & QtGui.QStyle.State_Selected:
+            #if self.window._is_uncertain_data_reference(index.row()):
+            #    text = "<span style='color: white; background-color: black'>"+ text +"</span>";
+            #el
+            if options.state & QtGui.QStyle.State_Selected:
                 bits = text.split(", ")
-                if len(bits) > 1:
-                    bits[0] += ", "
-                text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
+                for i, operand_text in enumerate(bits):
+                    if i + 1 == self.window.last_selected_operand:
+                        bits[i] = "<span style='background-color: #16c72e; padding-left: 5px; padding-right: 5px;'>"+ operand_text +"</span>"
+                    else:
+                        bits[i] = "<span>"+ operand_text +"</span>"
+                text = ", ".join(bits)
+
+                #text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
             doc.setHtml(text)
             doc.setTextWidth(option.rect.width())
             doc.setDocumentMargin(0)
@@ -300,7 +292,7 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             doc.documentLayout().draw(painter, ctx)
             painter.restore()
         else:
-            super(DisassemblyItemDelegate, self).paint(painter, option, index)
+            super(DisassemblyOperandDelegate, self).paint(painter, option, index)
 
     def sizeHint(self, option, index):
         """
@@ -314,7 +306,7 @@ class DisassemblyItemDelegate(QtGui.QStyledItemDelegate):
             doc.setTextWidth(option.rect.width())
             return QtCore.QSize(doc.idealWidth(), doc.size().height())
         """
-        return super(DisassemblyItemDelegate, self).sizeHint(option, index)
+        return super(DisassemblyOperandDelegate, self).sizeHint(option, index)
 
     shflag = False
 
@@ -533,7 +525,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_model._column_alignments[0] = QtCore.Qt.AlignRight
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setColumnWidth(4, 200)
-        self.list_table.setItemDelegate(DisassemblyItemDelegate(self.list_table, self))
+        self.list_table.setItemDelegateForColumn(4, DisassemblyOperandDelegate(self.list_table, self))
         self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
         self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
         self.setCentralWidget(self.list_table)
@@ -573,6 +565,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # State related to having something loaded.
         self.view_address_stack = []
+        self.last_selected_operand = None
 
     def closeEvent(self, event):
         """ Intercept the window close event and anything which needs to happen first. """
@@ -596,6 +589,8 @@ class MainWindow(QtGui.QMainWindow):
         if len(selected_indexes) == 1:
             index = selected_indexes[0]
             self.editor_state.set_line_number(self.editor_client, index.row())
+
+        self.last_selected_operand = None
 
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
@@ -798,11 +793,15 @@ class MainWindow(QtGui.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence(self.tr("Shift+Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
         # Edit the name of a label.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        # ...
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_1), self.list_table, self.interaction_select_operand_1).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_2), self.list_table, self.interaction_select_operand_2).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_3), self.list_table, self.interaction_select_operand_3).setContext(QtCore.Qt.WidgetShortcut)
 
         ## Uncertain code references list table.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         ## Uncertain data references list table.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)        
 
     def reset_all(self):
         self.reset_ui()
@@ -912,6 +911,24 @@ class MainWindow(QtGui.QMainWindow):
         errmsg = self.editor_state.set_label_name(self.editor_client)
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
+
+    def interaction_select_operand_1(self):
+        self.last_selected_operand = 1
+
+        line_idx = self.editor_state.get_line_number(self.editor_client)
+        self.list_table.update(self.list_model.createIndex(line_idx, 4))
+
+    def interaction_select_operand_2(self):
+        self.last_selected_operand = 2
+
+        line_idx = self.editor_state.get_line_number(self.editor_client)
+        self.list_table.update(self.list_model.createIndex(line_idx, 4))
+
+    def interaction_select_operand_3(self):
+        self.last_selected_operand = 3
+
+        line_idx = self.editor_state.get_line_number(self.editor_client)
+        self.list_table.update(self.list_model.createIndex(line_idx, 4))
 
     def interaction_uncertain_code_references_view_push_symbol(self):
         if not self.editor_state.in_loaded_state(self.editor_client):

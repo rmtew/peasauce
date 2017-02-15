@@ -1,6 +1,6 @@
 """
     Peasauce - interactive disassembler
-    Copyright (C) 2012-2016 Richard Tew
+    Copyright (C) 2012-2017 Richard Tew
     Licensed using the MIT license.
 
     This file is intended to allow compilation of assembler instructions and
