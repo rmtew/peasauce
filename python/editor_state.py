@@ -462,6 +462,9 @@ class EditorState(object):
     def get_uncertain_references_by_address(self, acting_client, address):
         return disassembly.api_get_uncertain_references_by_address(self.disassembly_data, address)
 
+    def get_operand_count(self, acting_client, line_number):
+        return disassembly.api_get_operand_count_for_line_number(self.disassembly_data, line_number)
+
     ## GENERAL:
 
     def _symbol_insert_callback(self, symbol_address, symbol_label):

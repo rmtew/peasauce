@@ -40,6 +40,36 @@ How to do this?  Stack?  Actions with parameters?
 GENERAL NOTES
 ~~~~~~~~~~~~~
 
+2017-02-18
+- OPERAND SELECTION IN THE CURRENTLY SELECTED ROW
+  The first implementation of the operand selection code required explicit
+  selection of an operand.  Pressing 1, 2, or 3 would put an operand selection
+  in place for the currently selected row.
+  - BUG: In the operand selection code, where it doesn't seem to work
+    for every row.  Fix that first.
+	- RESOLUTION: Was trying to repaint the given row for the selection, and it
+	  wasn't working doing model.update() calls.  Switched to emitting
+	  dataChanged events, which appears to work.
+  - Bind left and right cursor keys to toggling operand selection.
+  - When moving between rows, the first operand (if there is one) of the newly
+    selected row is automatically selected.
+- KEYBOARD CONTROL
+  Ideally it should be possible to control the program using just the
+  keyboard.  I've hooked up the space key, on the uncertain data control
+  window to show the context menu.
+  - BUG: Get focus on uncertain data references, and press space, and then
+    then labelise a value.  The focus will not be returned to the table,
+	and the table will have some weird dotted line per-cell selection mode.
+	- RESOLUTION: None known, focus switches to main disassembly window at the
+	  moment, which hides the problem as next focus of the uncertain data
+	  references window generally is done by selecting a row.
+
+2017-02-17
+- TABLE SELECTION
+  Selection for the disassembly table was per-cell, but there was no obvious
+  benefit from it, given that it included use of the left and right cursor
+  keys, which might be more natural fits for operand selection.
+
 2016-09-27
 - When I see a block which is one data type, and I want to know why it was
   created as there are no references to it, to jump to, I want to be able

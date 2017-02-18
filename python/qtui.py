@@ -105,6 +105,10 @@ class BaseItemModel(QtCore.QAbstractItemModel):
     def _set_header_font(self, font):
         self._header_font = font
 
+    def _data_changed(self, start_x, start_y, end_x, end_y):
+        # NOTE(rmtew): The same start and end indexes does nothing.
+        self.dataChanged.emit(self.createIndex(start_x, start_y), self.createIndex(end_x, end_y))
+
     def setHeaderData(self, section, orientation, data):
         self._header_data[(section, orientation)] = data
 
@@ -226,6 +230,7 @@ def create_table_model(parent, columns, _class=None):
 class CustomQTableView(QtGui.QTableView):
     selection_change_signal = QtCore.Signal(tuple)
     _initial_line_idx = None # type: int
+    _selected_indexes = []
 
     def paintEvent(self, event):
         if self._initial_line_idx is not None:
@@ -242,7 +247,9 @@ class CustomQTableView(QtGui.QTableView):
         return result
 
     def selectionChanged(self, selected, deselected):
+        # type: (QtGui.QItemSelection, QtGui.QItemSelection) -> None
         super(CustomQTableView, self).selectionChanged(selected, deselected)
+        self._selected_indexes = selected.indexes()
         self.selection_change_signal.emit((selected, deselected))
 
 
@@ -260,19 +267,17 @@ class DisassemblyOperandDelegate(QtGui.QStyledItemDelegate):
             doc = QtGui.QTextDocument()
             doc.setDefaultFont(self.parent().font())
             text = options.text
-            #if self.window._is_uncertain_data_reference(index.row()):
-            #    text = "<span style='color: white; background-color: black'>"+ text +"</span>";
-            #el
             if options.state & QtGui.QStyle.State_Selected:
                 bits = text.split(", ")
                 for i, operand_text in enumerate(bits):
-                    if i + 1 == self.window.last_selected_operand:
-                        bits[i] = "<span style='background-color: #16c72e; padding-left: 5px; padding-right: 5px;'>"+ operand_text +"</span>"
+                    if i == self.window.last_selected_operand:
+                        bits[i] = "<span style='background-color: #a6dafc; color: black;'>&nbsp;&nbsp;&nbsp;"+ operand_text +"&nbsp;&nbsp;&nbsp;</span>"
                     else:
                         bits[i] = "<span>"+ operand_text +"</span>"
                 text = ", ".join(bits)
+            elif self.window._is_uncertain_data_reference(index.row()):
+                text = "<span style='color: white; background-color: black'>"+ text +"</span>";
 
-                #text = "<table border=0 cellpadding=0 cellspacing=0><tr><td bgcolor=red>"+ ("</td><td bgcolor=green>".join(bits)) +"</td></tr></table>"
             doc.setHtml(text)
             doc.setTextWidth(option.rect.width())
             doc.setDocumentMargin(0)
@@ -328,9 +333,9 @@ def create_table_widget(parent, model, multiselect=False):
     # table.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
     table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
     # No selection of individual cells, but rather line specific selection.
+    if multiselect:
+        table.setSelectionMode(QtGui.QAbstractItemView.SelectionMode.MultiSelection)
     table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-    if not multiselect:
-        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
     table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
     return table
 
@@ -526,7 +531,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setColumnWidth(4, 200)
         self.list_table.setItemDelegateForColumn(4, DisassemblyOperandDelegate(self.list_table, self))
-        self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectItems)
+        self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
         self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
         self.setCentralWidget(self.list_table)
 
@@ -586,11 +591,12 @@ class MainWindow(QtGui.QMainWindow):
         At this time, it assumes single row selection, as that is what our code above configures.
         """
         selected_indexes = result[0].indexes()
-        if len(selected_indexes) == 1:
-            index = selected_indexes[0]
-            self.editor_state.set_line_number(self.editor_client, index.row())
+        if len(selected_indexes) > 0:
+            # Multiple cells in the same row are selected.
+            self.editor_state.set_line_number(self.editor_client, selected_indexes[0].row())
 
-        self.last_selected_operand = None
+        # If the line has operands, set the selection to the first one.
+        self.set_selected_operand(0)
 
     def create_dock_windows(self):
         dock = QtGui.QDockWidget("Log", self)
@@ -797,11 +803,14 @@ class MainWindow(QtGui.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_1), self.list_table, self.interaction_select_operand_1).setContext(QtCore.Qt.WidgetShortcut)
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_2), self.list_table, self.interaction_select_operand_2).setContext(QtCore.Qt.WidgetShortcut)
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_3), self.list_table, self.interaction_select_operand_3).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_select_operand_previous).setContext(QtCore.Qt.WidgetShortcut)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_select_operand_next).setContext(QtCore.Qt.WidgetShortcut)
 
         ## Uncertain code references list table.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         ## Uncertain data references list table.
         QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)        
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Space), self.uncertain_data_references_table, self.interaction_show_row_contextmenu).setContext(QtCore.Qt.WidgetShortcut)
 
     def reset_all(self):
         self.reset_ui()
@@ -912,23 +921,50 @@ class MainWindow(QtGui.QMainWindow):
         if type(errmsg) in types.StringTypes:
             QtGui.QMessageBox.information(self, "Error", errmsg)
 
-    def interaction_select_operand_1(self):
-        self.last_selected_operand = 1
+    def set_selected_operand(self, operand_index):
+        line_index = self.editor_state.get_line_number(self.editor_client)
+        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
+        if operand_index >= 0 and operand_index < operand_count:
+            self.last_selected_operand = operand_index
+            self.list_model._data_changed(0, line_index, 5, line_index)
+            return True
+        return False
 
-        line_idx = self.editor_state.get_line_number(self.editor_client)
-        self.list_table.update(self.list_model.createIndex(line_idx, 4))
+    def interaction_select_operand_1(self):
+        self.set_selected_operand(0)
 
     def interaction_select_operand_2(self):
-        self.last_selected_operand = 2
-
-        line_idx = self.editor_state.get_line_number(self.editor_client)
-        self.list_table.update(self.list_model.createIndex(line_idx, 4))
+        self.set_selected_operand(1)
 
     def interaction_select_operand_3(self):
-        self.last_selected_operand = 3
+        self.set_selected_operand(2)
 
-        line_idx = self.editor_state.get_line_number(self.editor_client)
-        self.list_table.update(self.list_model.createIndex(line_idx, 4))
+    def interaction_select_operand_previous(self):
+        line_index = self.editor_state.get_line_number(self.editor_client)
+        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
+        if operand_count > 0:
+            if self.last_selected_operand is None:
+                self.last_selected_operand = 0
+            else:
+                self.last_selected_operand = (self.last_selected_operand - 1) % operand_count
+            self.list_model._data_changed(0, line_index, 5, line_index)
+
+    def interaction_select_operand_next(self):
+        line_index = self.editor_state.get_line_number(self.editor_client)
+        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
+        if operand_count > 0:
+            if self.last_selected_operand is None:
+                self.last_selected_operand = 0
+            else:
+                self.last_selected_operand = (self.last_selected_operand + 1) % operand_count
+            self.list_model._data_changed(0, line_index, 5, line_index)
+
+    def interaction_show_row_contextmenu(self):
+        # Get the currently selected row.
+        if len(self.uncertain_data_references_table._selected_indexes):
+            y = self.uncertain_data_references_table.rowViewportPosition(self.uncertain_data_references_table._selected_indexes[0].row())
+            x = self.uncertain_data_references_table.columnWidth(0) / 2
+            self.uncertain_data_references_table.customContextMenuRequested.emit(QtCore.QPoint(x, y))
 
     def interaction_uncertain_code_references_view_push_symbol(self):
         if not self.editor_state.in_loaded_state(self.editor_client):
@@ -970,8 +1006,8 @@ class MainWindow(QtGui.QMainWindow):
                     address = self.editor_state.get_address(self.editor_client)
                     new_line_idx = self.uncertain_data_references_model._index_cell_value(0, address)
                     if new_line_idx > -1:
+                        self.uncertain_data_references_table.selectRow(new_line_idx)
                         index = self.uncertain_data_references_model.index(new_line_idx, 2, QtCore.QModelIndex())
-                        self.uncertain_data_references_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Clear | QtGui.QItemSelectionModel.Select | QtGui.QItemSelectionModel.Rows)
                         self.uncertain_data_references_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
                         dockWidget = self.uncertain_data_references_table.parentWidget()
                         if dockWidget.isHidden():
@@ -1040,9 +1076,11 @@ class MainWindow(QtGui.QMainWindow):
     def scroll_to_line(self, new_line_idx, other=False):
         if not other:
             logger.debug("scroll_to_line line=%d", new_line_idx)
-        index = self.list_model.index(new_line_idx, 2, QtCore.QModelIndex())
-        self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Clear | QtGui.QItemSelectionModel.Select)
+        index = self.list_model.index(new_line_idx, 0, QtCore.QModelIndex())
+        #self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.ClearAndSelect)
         self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+        self.list_table.setFocus()
+        self.list_table.selectRow(new_line_idx)
 
     def functionality_view_push_address(self, current_address, address):
         self.view_address_stack.append(current_address)
@@ -1138,8 +1176,9 @@ class MainWindow(QtGui.QMainWindow):
     def on_post_line_change(self, args):
         line0, line_count = args
         if line_count == 0:
-            for i in range(self.list_model._column_count):
-                self.list_table.update(self.list_model.createIndex(line0, i))
+            #for i in range(self.list_model._column_count):
+            #    self.list_table.update(self.list_model.createIndex(line0, i))
+            self.list_model._data_changed(0, line0, 5, line0)
         else:
             self.list_model._end_row_change(line0, line_count)
 

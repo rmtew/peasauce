@@ -173,9 +173,13 @@ def get_block_line_count(program_data, block):
 
     return line_count
 
-# NOTE(rmtew): Called from one location, guarded by line count lock.
+def api_get_code_block_info_for_address(program_data, address):
+    # type: (disassembly_data.ProgramData, int) -> Union[None, InstructionEntry]
+    with line_count_rlock:
+        return get_code_block_info_for_address(program_data, address)
+
+# NOTE(rmtew): Called from two locations, guarded by line count lock.
 def get_code_block_info_for_address(program_data, address):
-    """ line_count_rlock """
     # type: (disassembly_data.ProgramData, int) -> Union[None, InstructionEntry]
     block, block_idx = lookup_block_by_address(program_data, address)
     base_address = program_data.block_addresses[block_idx]
@@ -224,7 +228,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
                 line_type = None
                 if previous_result is not None:
                     line_type = hex(previous_result[0])
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, line_type)
+                #logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s", line_number, line_count, line_type)
                 return previous_result
 
             entry = get_instruction_entry(program_data, block, block.line_data, line_idx)
@@ -232,7 +236,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
 
             # Exactly this instruction.
             if line_number == line_count:
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (code)", line_number, line_count, hex(current_result[0]))
+                #logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (code)", line_number, line_count, hex(current_result[0]))
                 return current_result
 
             previous_result = current_result
@@ -240,7 +244,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
             line_count += get_instruction_line_count(program_data, entry)
         elif type_id in (disassembly_data.SLD_COMMENT_FULL_LINE, disassembly_data.SLD_EQU_LOCATION_RELATIVE):
             if line_number == line_count:
-                logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (comment/location-relative)", line_number, line_count, hex(base_address + entry))
+                #logger.debug("get_code_block_info_for_line_number.1: %d, %d = %s (comment/location-relative)", line_number, line_count, hex(base_address + entry))
                 return base_address + entry, previous_result[1]
             line_count += 1
     # Within but not at the start of the previous instruction.
@@ -248,7 +252,7 @@ def get_code_block_info_for_line_number(program_data, line_number):
         logger.debug("get_code_block_info_for_line_number.2: %d, %d = %s", line_number, line_count, hex(previous_result[0]))
         return previous_result
 
-    logger.debug("get_code_block_info_for_line_number.3: %d, %d", line_number, line_count)
+    #logger.debug("get_code_block_info_for_line_number.3: %d, %d", line_number, line_count)
     # return None, previous_result
 
 def api_get_data_type_for_address(program_data, address):
@@ -850,6 +854,14 @@ def get_referring_addresses(program_data, address):
 def api_get_entrypoint_address(program_data):
     # type: (disassembly_data.ProgramData) -> int
     return loaderlib.get_segment_address(program_data.loader_segments, program_data.loader_entrypoint_segment_id) + program_data.loader_entrypoint_offset
+
+def api_get_operand_count_for_line_number(program_data, line_number):
+    # type: (disassembly_data.ProgramData, int)
+    ret = get_code_block_info_for_line_number(program_data, line_number)
+    if ret is None:
+        return 0
+    address, instruction = ret
+    return len(instruction.opcodes)
 
 def api_get_address_for_symbol(program_data, symbol_name):
     return get_address_for_symbol(program_data, symbol_name)
