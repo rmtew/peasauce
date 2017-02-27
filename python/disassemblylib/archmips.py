@@ -10,7 +10,7 @@
 import logging
 from typing import List
 
-from .util import ArchInterface, _b2n, IFX_ENDSEQ_BD, IFX_BRANCH, IFX_ENDSEQ
+from .util import ArchInterface, _b2n, IFX_ENDSEQ_BD, IFX_BRANCH, IFX_ENDSEQ, II_MASK
 
 logger = logging.getLogger("disassembler-mips")
 
