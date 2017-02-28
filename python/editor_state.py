@@ -16,6 +16,7 @@ import operator
 import os
 import types
 import weakref
+from typing import Any
 
 import disassembly
 import disassembly_data # DATA TYPES ONLY
@@ -138,6 +139,8 @@ class EditorState(object):
     STATE_LOADING = 1
     STATE_LOADED = 2
 
+    disassembly_state = None # type: disassembly.DisassemblyApi
+
     def __init__(self):
         self.worker_thread = disassembly_util.WorkerThread()
         self.clients = weakref.WeakSet()
@@ -160,7 +163,7 @@ class EditorState(object):
         return disassembly_persistence.check_is_project_file(input_file)
 
     def reset_state(self, acting_client):
-        self.disassembly_data = None
+        self.disassembly_state = None
         self.line_number = 0
         self.address_stack = []
         self.last_search_text = None
@@ -207,14 +210,14 @@ class EditorState(object):
 
     def _convert_addresses_to_symbols_where_possible(self, addresses):
         for i, address in enumerate(addresses):
-            symbol_name = disassembly.api_get_symbol_for_address(self.disassembly_data, address)
+            symbol_name = self.disassembly_state.get_symbol_for_address(address)
             if symbol_name is not None:
                 addresses[i] = symbol_name
             else:
                 addresses[i] = self._address_to_string(address)
 
     def get_data_type_for_address(self, acting_client, address):
-        data_type = disassembly.api_get_data_type_for_address(self.disassembly_data, address)
+        data_type = self.disassembly_state.get_data_type_for_address(address)
         if data_type == disassembly_data.DATA_TYPE_CODE:
             return "code"
         elif data_type == disassembly_data.DATA_TYPE_ASCII:
@@ -227,40 +230,40 @@ class EditorState(object):
             return "32bit"
 
     def get_source_code_for_address(self, acting_client, address):
-        line_idx = disassembly.api_get_line_number_for_address(self.disassembly_data, address)
+        line_idx = self.disassembly_state.get_line_number_for_address(address)
         return self.get_source_code_for_line_number(acting_client, line_idx)
 
     def get_source_code_for_line_number(self, acting_client, line_idx):
-        code_string = disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION)
-        operands_text = disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS)
+        code_string = self.disassembly_state.get_file_line(line_idx, disassembly.LI_INSTRUCTION)
+        operands_text = self.disassembly_state.get_file_line(line_idx, disassembly.LI_OPERANDS)
         if len(operands_text):
             code_string += " "+ operands_text
         return code_string
 
     def get_row_for_line_number(self, acting_client, line_idx):
         return [
-            disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_OFFSET),
-            disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_BYTES),
-            disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_LABEL),
-            disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_INSTRUCTION),
-            disassembly.api_get_file_line(self.disassembly_data, line_idx, disassembly.LI_OPERANDS),
+            self.disassembly_state.get_file_line(line_idx, disassembly.LI_OFFSET),
+            self.disassembly_state.get_file_line(line_idx, disassembly.LI_BYTES),
+            self.disassembly_state.get_file_line(line_idx, disassembly.LI_LABEL),
+            self.disassembly_state.get_file_line(line_idx, disassembly.LI_INSTRUCTION),
+            self.disassembly_state.get_file_line(line_idx, disassembly.LI_OPERANDS),
         ]
 
     def get_referring_addresses_for_address(self, acting_client, address):
-        return list(disassembly.api_get_referring_addresses(self.disassembly_data, address))
+        return list(self.disassembly_state.get_referring_addresses(address))
 
     def get_address(self, acting_client):
         # The current line number is the start of the block line which the specific address falls
         # within.  If the units are 16 bits, the line number may be for 0x10000 and the actual
         # specific user targeted address may be 0x10001.  This is a complication, and it may be
         # worth reconsidering dealing with things in terms of line numbers.  TODO.
-        return disassembly.api_get_address_for_line_number(self.disassembly_data, self.line_number)
+        return self.disassembly_state.get_address_for_line_number(self.line_number)
 
     def get_address_for_line_number(self, acting_client, line_number):
-        return disassembly.api_get_address_for_line_number(self.disassembly_data, line_number)
+        return self.disassembly_state.get_address_for_line_number(line_number)
 
     def get_line_number_for_address(self, acting_client, address):
-        return disassembly.api_get_line_number_for_address(self.disassembly_data, address)
+        return self.disassembly_state.get_line_number_for_address(address)
 
     def get_line_number(self, acting_client):
         return self.line_number
@@ -271,17 +274,17 @@ class EditorState(object):
         self.line_number = line_number
 
     def get_line_count(self, acting_client):
-        if self.disassembly_data is None:
+        if self.disassembly_state is None:
             return 0
-        return disassembly.api_get_file_line_count(self.disassembly_data)
+        return self.disassembly_state.get_file_line_count()
 
     def get_file_line(self, acting_client, row, column):
-        if self.disassembly_data is None:
+        if self.disassembly_state is None:
             return ""
-        return disassembly.api_get_file_line(self.disassembly_data, row, column)
+        return self.disassembly_state.get_file_line(row, column)
 
     def get_symbols(self, acting_client):
-        return self.disassembly_data.symbols_by_address.items()
+        return self.disassembly_state.get_symbols()
 
     def push_address(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -291,9 +294,9 @@ class EditorState(object):
         if current_address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
 
-        operand_addresses = disassembly.api_get_referenced_symbol_addresses_for_line_number(self.disassembly_data, self.line_number)
+        operand_addresses = self.disassembly_state.get_referenced_symbol_addresses_for_line_number(self.line_number)
         if len(operand_addresses) == 1:
-            next_line_number = disassembly.api_get_line_number_for_address(self.disassembly_data, operand_addresses[0])
+            next_line_number = self.disassembly_state.get_line_number_for_address(operand_addresses[0])
             if next_line_number is None:
                 return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
 
@@ -313,7 +316,7 @@ class EditorState(object):
         if current_address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
 
-        references = disassembly.api_get_uncertain_references_by_address(self.disassembly_data, current_address)
+        references = self.disassembly_state.get_uncertain_references_by_address(current_address)
         for (address, value, text) in references:
             if address == current_address:
                 return
@@ -329,7 +332,7 @@ class EditorState(object):
 
         address = self.address_stack.pop()
         # It is expected that if you can have pushed the address, there was a line number for it.
-        line_number = disassembly.api_get_line_number_for_address(self.disassembly_data, address)
+        line_number = self.disassembly_state.get_line_number_for_address(address)
         self.set_line_number(acting_client, line_number)
 
     def search_text(self, acting_client):
@@ -351,10 +354,10 @@ class EditorState(object):
             return
         # Convert an entered symbol name to it's address.
         if type(result) in types.StringTypes:
-            result = disassembly.api_get_address_for_symbol(self.disassembly_data, result)
+            result = self.disassembly_state.get_address_for_symbol(result)
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
-        line_number = disassembly.api_get_line_number_for_address(self.disassembly_data, result)
+        line_number = self.disassembly_state.get_line_number_for_address(result)
         self.set_line_number(acting_client, line_number)
 
     def goto_referring_address(self, acting_client):
@@ -362,7 +365,7 @@ class EditorState(object):
         if current_address is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
-        addresses = list(disassembly.api_get_referring_addresses(self.disassembly_data, current_address))
+        addresses = list(self.disassembly_state.get_referring_addresses(current_address))
         if not len(addresses):
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
@@ -380,7 +383,7 @@ class EditorState(object):
         if selected_address is None:
             return False
 
-        next_line_number = disassembly.api_get_line_number_for_address(self.disassembly_data, selected_address)
+        next_line_number = self.disassembly_state.get_line_number_for_address(selected_address)
         if next_line_number is None:
             return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
 
@@ -390,14 +393,14 @@ class EditorState(object):
 
     def goto_previous_code_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.api_get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, -1)
+        new_line_idx = self.disassembly_state.get_next_block_line_number(disassembly_data.DATA_TYPE_CODE, line_idx, -1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
 
     def goto_previous_data_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.api_get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, -1, operator.ne)
+        new_line_idx = self.disassembly_state.get_next_block_line_number(disassembly_data.DATA_TYPE_CODE, line_idx, -1, operator.ne)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
@@ -415,14 +418,14 @@ class EditorState(object):
 
     def goto_next_code_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.api_get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, 1)
+        new_line_idx = self.disassembly_state.get_next_block_line_number(disassembly_data.DATA_TYPE_CODE, line_idx, 1)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
 
     def goto_next_data_block(self, acting_client):
         line_idx = self.get_line_number(acting_client)
-        new_line_idx = disassembly.api_get_next_block_line_number(self.disassembly_data, disassembly_data.DATA_TYPE_CODE, line_idx, 1, operator.ne)
+        new_line_idx = self.disassembly_state.get_next_block_line_number(disassembly_data.DATA_TYPE_CODE, line_idx, 1, operator.ne)
         if new_line_idx is None:
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, new_line_idx)
@@ -454,16 +457,16 @@ class EditorState(object):
             client.event_uncertain_reference_modification(client is acting_client, data_type_from, data_type_to, address, length)
 
     def get_uncertain_code_references(self, acting_client):
-        return disassembly.api_get_uncertain_code_references(self.disassembly_data)
+        return self.disassembly_state.get_uncertain_code_references()
 
     def get_uncertain_data_references(self, acting_client):
-        return disassembly.api_get_uncertain_data_references(self.disassembly_data)
+        return self.disassembly_state.get_uncertain_data_references()
 
     def get_uncertain_references_by_address(self, acting_client, address):
-        return disassembly.api_get_uncertain_references_by_address(self.disassembly_data, address)
+        return self.disassembly_state.get_uncertain_references_by_address(address)
 
     def get_operand_count(self, acting_client, line_number):
-        return disassembly.api_get_operand_count_for_line_number(self.disassembly_data, line_number)
+        return self.disassembly_state.get_operand_count_for_line_number(line_number)
 
     ## GENERAL:
 
@@ -482,21 +485,21 @@ class EditorState(object):
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         current_address = self.get_address(acting_client)
-        symbol_name = disassembly.api_get_symbol_for_address(self.disassembly_data, current_address)
+        symbol_name = self.disassembly_state.get_symbol_for_address(current_address)
         # Prompt user to edit the current label, or add a new one.
         new_symbol_name = acting_client.request_label_name(symbol_name)
         if new_symbol_name is not None and new_symbol_name != symbol_name:
             match = RE_LABEL.match(new_symbol_name)
             if match is None:
                 return ERRMSG_INVALID_LABEL_NAME
-            disassembly.api_set_symbol_for_address(self.disassembly_data, current_address, new_symbol_name)
+            self.disassembly_state.set_symbol_for_address(current_address, new_symbol_name)
 
     def add_label_for_value(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
         current_address = self.get_address(acting_client)
-        disassembly.api_insert_reference_address(self.disassembly_data, current_address)
+        self.disassembly_state.insert_reference_address(current_address)
 
     def set_datatype_code(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
@@ -544,7 +547,7 @@ class EditorState(object):
         self._set_data_type(acting_client, address, disassembly_data.DATA_TYPE_ASCII)
 
     def _set_data_type(self, acting_client, address, data_type):
-        self._prolonged_action(acting_client, "TITLE_DATA_TYPE_CHANGE", "TEXT_GENERIC_PROCESSING", disassembly.set_data_type_at_address, self.disassembly_data, address, data_type, can_cancel=False)
+        self._prolonged_action(acting_client, "TITLE_DATA_TYPE_CHANGE", "TEXT_GENERIC_PROCESSING", self.disassembly_state.set_data_type_at_address, address, data_type, can_cancel=False)
 
     def _search_text(self, acting_client, direction, work_state=None):
         # Start after the current line.
@@ -552,11 +555,11 @@ class EditorState(object):
         line_count = self.get_line_count(acting_client)
         result_lower_case = self.last_search_text.lower()
         while line_number >= 0 and line_number < line_count and not work_state.is_cancelled():
-            text = disassembly.api_get_file_line(self.disassembly_data, line_number, disassembly.LI_LABEL)
-            text += " "+ disassembly.api_get_file_line(self.disassembly_data, line_number, disassembly.LI_INSTRUCTION)
-            text += " "+ disassembly.api_get_file_line(self.disassembly_data, line_number, disassembly.LI_OPERANDS)
+            text = self.disassembly_state.get_file_line(line_number, disassembly.LI_LABEL)
+            text += " "+ self.disassembly_state.get_file_line(line_number, disassembly.LI_INSTRUCTION)
+            text += " "+ self.disassembly_state.get_file_line(line_number, disassembly.LI_OPERANDS)
             if disassembly.DEBUG_ANNOTATE_DISASSEMBLY:
-                text += " "+ disassembly.api_get_file_line(self.disassembly_data, line_number, disassembly.LI_ANNOTATIONS)
+                text += " "+ self.disassembly_state.get_file_line(line_number, disassembly.LI_ANNOTATIONS)
 
             if result_lower_case in text.lower():
                 break
@@ -592,9 +595,9 @@ class EditorState(object):
             client.event_load_start(client is acting_client, file_path)
 
         if is_saved_project:
-            result = self._prolonged_action(acting_client, "TITLE_LOADING_PROJECT", "TEXT_GENERIC_LOADING", disassembly.api_load_project_file, load_file, file_name)
+            disassembly_state = self._prolonged_action(acting_client, "TITLE_LOADING_PROJECT", "TEXT_GENERIC_LOADING", disassembly.load_project_file, load_file, file_name)
         else:
-            new_options = disassembly.api_get_new_project_options(self.disassembly_data)
+            new_options = disassembly.get_new_project_options()
             identify_result = loaderlib.identify_file(load_file, file_name)
             # Parameters passed in, to help the client make up it's mind.
             if identify_result is not None:
@@ -615,21 +618,22 @@ class EditorState(object):
                 self.reset_state(acting_client)
                 return new_option_result
 
-            result = self._prolonged_action(acting_client, "TITLE_LOADING_FILE", "TEXT_GENERIC_LOADING", disassembly.api_load_file, load_file, new_option_result, file_name)
+            disassembly_state = self._prolonged_action(acting_client, "TITLE_LOADING_FILE", "TEXT_GENERIC_LOADING", disassembly.load_file, load_file, new_option_result, file_name)
 
         # Loading was cancelled.
-        if result is None:
+        if disassembly_state is None:
             self.reset_state(acting_client)
             return
 
         self.state_id = EditorState.STATE_LOADED
-        self.disassembly_data, line_count = result
+        self.disassembly_state = disassembly_state
 
         # Register our event dispatching callbacks.
-        disassembly.api_set_uncertain_reference_modification_func(self.disassembly_data, self._uncertain_reference_modification_callback)
-        disassembly.api_set_symbol_insert_func(self.disassembly_data, self._symbol_insert_callback)
-        disassembly.api_set_symbol_delete_func(self.disassembly_data, self._symbol_delete_callback)
+        self.disassembly_state.set_uncertain_reference_modification_func(self._uncertain_reference_modification_callback)
+        self.disassembly_state.set_symbol_insert_func(self._symbol_insert_callback)
+        self.disassembly_state.set_symbol_delete_func(self._symbol_delete_callback)
 
+        line_count = self.disassembly_state.get_file_line_count()
         if line_count == 0:
             self.reset_state(acting_client)
             return ERRMSG_NOT_SUPPORTED_EXECUTABLE_FILE_FORMAT
@@ -637,12 +641,12 @@ class EditorState(object):
         is_saved_project = disassembly_persistence.check_is_project_file(acting_client.get_load_file())
         if is_saved_project:
             # User may have optionally chosen to not save the input file, as part of the project file.
-            if not disassembly.api_is_segment_data_cached(self.disassembly_data):
-                load_options = disassembly.api_get_new_project_options(self.disassembly_data)
+            if not self.disassembly_state.is_segment_data_cached():
+                load_options = self.disassembly_state.get_new_project_options()
                 # Parameters passed in, to help the client make up it's mind.
-                load_options.input_file_filesize = self.disassembly_data.file_size
-                load_options.input_file_filename = self.disassembly_data.file_name
-                load_options.input_file_checksum = self.disassembly_data.file_checksum
+                load_options.input_file_filesize = self.disassembly_state.get_file_size()
+                load_options.input_file_filename = self.disassembly_state.get_file_name()
+                load_options.input_file_checksum = self.disassembly_state.get_file_checksum()
                 # Parameters received out, our "return values".
                 load_options.loader_file_path = None
                 load_options = acting_client.request_load_project_option_values(load_options)
@@ -655,28 +659,27 @@ class EditorState(object):
                 with open(load_options.loader_file_path, "rb") as input_data_file:
                     input_data_file.seek(0, os.SEEK_END)
                     errmsg = None
-                    if input_data_file.tell() != self.disassembly_data.file_size:
+                    if input_data_file.tell() != self.disassembly_state.get_file_size():
                         errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS
-                    elif util.calculate_file_checksum(input_data_file) != self.disassembly_data.file_checksum:
+                    elif util.calculate_file_checksum(input_data_file) != self.disassembly_state.get_file_checksum():
                         errmsg = ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH
                     if type(errmsg) in types.StringTypes:
                         self.reset_state(acting_client)
                         return errmsg
-                    disassembly.api_cache_segment_data(self.disassembly_data, input_data_file)
-                    disassembly.api_load_project_file_finalise(self.disassembly_data)
+                    self.disassembly_state.load_project_file_finalise(input_data_file)
 
-        entrypoint_address = disassembly.api_get_entrypoint_address(self.disassembly_data)
-        line_number = disassembly.api_get_line_number_for_address(self.disassembly_data, entrypoint_address)
+        entrypoint_address = self.disassembly_state.get_entrypoint_address()
+        line_number = self.disassembly_state.get_line_number_for_address(entrypoint_address)
         self.set_line_number(acting_client, line_number)
 
         def _pre_line_change_callback(line0, line_count):
             for client in self.clients:
                 client.event_pre_line_change(client is acting_client, line0, line_count)
-        self.disassembly_data.pre_line_change_func = _pre_line_change_callback
+        self.disassembly_state.set_pre_line_change_func(_pre_line_change_callback)
         def _post_line_change_callback(line0, line_count):
             for client in self.clients:
                 client.event_post_line_change(client is acting_client, line0, line_count)
-        self.disassembly_data.post_line_change_func = _post_line_change_callback
+        self.disassembly_state.set_post_line_change_func(_post_line_change_callback)
 
         for client in self.clients:
             client.event_load_successful(client is acting_client)
@@ -686,9 +689,9 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        save_options = disassembly.api_get_save_project_options(self.disassembly_data)
+        save_options = self.disassembly_state.get_save_project_options()
         # Install higher-level defined and used option attributes.
-        save_options.cache_input_file = disassembly.api_get_project_save_count(self.disassembly_data) == 0 or disassembly.api_is_project_inputfile_cached(self.disassembly_data)
+        save_options.cache_input_file = self.disassembly_state.get_project_save_count() == 0 or self.disassembly_state.is_project_inputfile_cached()
         # Prompt user if they want to save the source file.
         save_options = acting_client.request_save_project_option_values(save_options)
         # User chose to cancel the save process.
@@ -698,21 +701,21 @@ class EditorState(object):
             save_options.input_file = acting_client.get_load_file()
 
         with open(save_options.save_file_path, "wb") as f:
-            disassembly.api_save_project_file(f, self.disassembly_data, save_options)
+            self.disassembly_state.save_project_file(f, save_options)
 
     def export_source_code(self, acting_client):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
-        line_count = disassembly.api_get_file_line_count(self.disassembly_data)
+        line_count = self.disassembly_state.get_file_line_count()
 
         # Prompt for save file name.
         save_file = acting_client.request_code_save_file()
         if save_file is not None:
             for i in xrange(line_count):
-                label_text = disassembly.api_get_file_line(self.disassembly_data, i, disassembly.LI_LABEL)
-                instruction_text = disassembly.api_get_file_line(self.disassembly_data, i, disassembly.LI_INSTRUCTION)
-                operands_text = disassembly.api_get_file_line(self.disassembly_data, i, disassembly.LI_OPERANDS)
+                label_text = self.disassembly_state.get_file_line(i, disassembly.LI_LABEL)
+                instruction_text = self.disassembly_state.get_file_line(i, disassembly.LI_INSTRUCTION)
+                operands_text = self.disassembly_state.get_file_line(i, disassembly.LI_OPERANDS)
                 if label_text:
                     save_file.write(label_text)
                 if instruction_text or operands_text:

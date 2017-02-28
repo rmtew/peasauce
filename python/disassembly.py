@@ -20,6 +20,7 @@ import logging
 import operator
 import os
 import threading
+import types
 # mypy-lang support
 from typing import Tuple, List, Set, Union, Any, Callable
 
@@ -779,6 +780,7 @@ def insert_branch_address(program_data, address, src_abs_idx, pending_symbol_add
     return True
 
 def api_insert_reference_address(program_data, referring_address):
+    # type: (disassembly_data.ProgramData, int) -> None
     is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
     # Is it a binary file?
     # Is the address 
@@ -1637,11 +1639,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             continue
         logger.debug("%06X (%06X): Found end of block boundary with processed code and no end instruction (data type: %d, processed: %d)", address, block.address, disassembly_data.get_block_data_type(block), block.flags & disassembly_data.BLOCK_FLAG_PROCESSED)
 
-def api_get_new_project_options(program_data):
-    return disassembly_data.NewProjectOptions()
-
-def get_load_project_options(program_data):
-    return disassembly_data.LoadProjectOptions()
+#def get_load_project_options(program_data):
+#    return disassembly_data.LoadProjectOptions()
 
 def api_get_save_project_options(program_data):
     return disassembly_data.SaveProjectOptions()
@@ -2389,8 +2388,180 @@ def DEBUG_locate_potential_code_blocks(program_data):
     return blocks
 
 
+class DisassemblyApi(object):
+    """
+    Plan:
+    1) Proxy all existing api calls.
+    2) Replace external calls to global functions with use of this object's api.
+    3) Remove the global functions and integrate them into this object.
+    """
+    _program_data = None
+
+    def __init__(self, program_data):
+        self._program_data = program_data
+
+    def get_code_block_info_for_address(self, address):
+        # type: (DisassemblyCore, int) -> Union[None, InstructionEntry]
+        with line_count_rlock:
+            return api_get_code_block_info_for_address(self._program_data, address)
+
+    def set_data_type_at_address(self, address, data_type, work_state=None):
+        # type: (DisassemblyCore, int, int, WorkState) -> None
+        return set_data_type_at_address(self._program_data, address, data_type, work_state)
+
+    def get_data_type_for_address(self, address):
+        # type: (DisassemblyCore, int) -> int
+        return api_get_data_type_for_address(self._program_data, address)
+
+    def get_line_number_for_address(self, address):
+        # type: (DisassemblyCore, int) -> Union[None, int]
+        return api_get_line_number_for_address(self._program_data, address)
+
+    def get_address_for_line_number(self, line_number):
+        # type: (DisassemblyCore, int) -> Union[int, None]
+        return api_get_address_for_line_number(self._program_data, line_number)
+
+    def get_referenced_symbol_addresses_for_line_number(self, line_number):
+        # type: (DisassemblyCore, int) -> List[int]
+        return api_get_referenced_symbol_addresses_for_line_number(self._program_data, line_number)
+
+    def get_file_line_count(self):
+        # type: (DisassemblyCore) -> int
+        return api_get_file_line_count(self._program_data)
+
+    def get_file_line(self, line_idx, column_idx):
+        # type: (DisassemblyCore, int, int) -> str
+        return api_get_file_line(self._program_data, line_idx, column_idx)
+
+    def insert_reference_address(self, referring_address):
+        # type: (DisassemblyCore, int) -> None
+        return api_insert_reference_address(self._program_data, referring_address)
+
+    def get_referring_addresses(self, address):
+        # type: (DisassemblyCore, int) -> Set[int]
+        return api_get_referring_addresses(self._program_data, address)
+
+    def get_entrypoint_address(self):
+        # type: (DisassemblyCore) -> int
+        return api_get_entrypoint_address(self._program_data)
+
+    def get_operand_count_for_line_number(self, line_number):
+        # type: (DisassemblyCore, int)
+        return api_get_operand_count_for_line_number(self._program_data, line_number)
+
+    def get_address_for_symbol(self, symbol_name):
+        # type: (DisassemblyCore, str) -> int
+        return get_address_for_symbol(self._program_data, symbol_name)
+
+    def set_symbol_for_address(self, address, symbol_label):
+        # type: (DisassemblyCore, int, str) -> bool
+        return api_set_symbol_for_address(self._program_data, address, symbol_label)
+
+    def get_symbol_for_address(self, address, absolute_info=None):
+        # type: (DisassemblyCore, int, Tuple[int, int]) -> str
+        return api_get_symbol_for_address(self._program_data, address, absolute_info)
+
+    def get_symbols(self):
+        return self._program_data.symbols_by_address.items()
+
+    def get_next_block_line_number(self, data_type, line_idx, direction_offset=1, op_func=operator.eq):
+        """ line_count_rlock """
+        # type: (DisassemblyCore, int, int, int, Callable[[Any, Any], int]) -> int
+        return api_get_next_block_line_number(self._program_data, data_type, line_idx, direction_offset, op_func)
+
+    def get_uncertain_data_references(self):
+        return api_get_uncertain_data_references(self._program_data)
+
+    def get_uncertain_code_references(self):
+        # type: (DisassemblyCore) -> List[Tuple[int, int, str]]
+        return api_get_uncertain_code_references(self._program_data)
+
+    def get_uncertain_references_by_address(self, address):
+        # type: (DisassemblyCore, int) -> List[Tuple[int, int, str]]
+        return api_get_uncertain_references_by_address(self._program_data, address)
+
+    ## Events.
+
+    def set_symbol_insert_func(self, f):
+        # type: (DisassemblyCore, Callable[[int, str], None]) -> None
+        return api_set_symbol_insert_func(self._program_data, f)
+
+    def set_symbol_delete_func(self, f):
+        # type: (DisassemblyCore, Callable[[int, str], None]) -> None
+        return api_set_symbol_delete_func(self._program_data, f)
+
+    def set_uncertain_reference_modification_func(self, f):
+        # type: (DisassemblyCore, Callable) -> None
+        return api_set_uncertain_reference_modification_func(self._program_data, f)
+
+    def set_pre_line_change_func(self, f):
+        self._program_data.pre_line_change_func = f
+
+    def set_post_line_change_func(self, f):
+        self._program_data.post_line_change_func = f
+
+    ## Project loading and saving support.
+
+    #def get_load_project_options(program_data):
+    #    return disassembly_data.LoadProjectOptions()
+
+    def get_save_project_options(self):
+        return api_get_save_project_options(self._program_data)
+
+    def is_project_inputfile_cached(self):
+        # type: (DisassemblyCore) -> bool
+        return api_is_project_inputfile_cached(self._program_data)
+
+    def get_project_save_count(self):
+        # type: (DisassemblyCore) -> int
+        return api_get_project_save_count(self._program_data)
+
+    ## Project loading and saving.
+
+    def load_project_file_finalise(self, f):
+        # type: (DisassemblyCore) -> None
+        api_cache_segment_data(self._program_data, f)
+        return api_load_project_file_finalise(self._program_data)
+
+    def save_project_file(self, save_file, save_options):
+        # (DisassemblyCore, file, disassembly_data.SaveProjectOptions) -> None
+        return api_save_project_file(save_file, self._program_data, save_options)
+
+    def is_segment_data_cached(self):
+        # type: (DisassemblyCore) -> bool
+        return api_is_segment_data_cached(self._program_data)
+
+    def get_file_size(self):
+        return self._program_data.file_size
+
+    def get_file_name(self):
+        return self._program_data.file_name
+
+    def get_file_checksum(self):
+        return self._program_data.file_checksum
+
+
+def get_new_project_options():
+    return disassembly_data.NewProjectOptions()
+
+def load_file(input_file, new_options, file_name, work_state=None):
+    # type: (file, disassembly_data.NewProjectOptions, str, WorkState) -> Tuple[disassembly_data.ProgramData, int]
+    result = api_load_file(input_file, new_options, file_name, work_state)
+    if result is not None:
+        return DisassemblyApi(result[0])
+        #self._program_data = result[0]
+
+def load_project_file(save_file, file_name, work_state=None):
+    # type: (file, str, WorkState) -> Tuple[disassembly_data.ProgramData, int]
+    result = api_load_project_file(save_file, file_name, work_state)
+    if result is not None:
+        return DisassemblyApi(result[0])
+        #self._program_data = result[0]
+
+
 if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
     logger.addHandler(ch)
+

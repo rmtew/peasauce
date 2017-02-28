@@ -468,9 +468,6 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def event_prolonged_action_complete(self, active_client):
         self.prolonged_action_complete_signal.emit()
-        import disassembly
-        if self.owner_ref().editor_state.disassembly_data:
-            disassembly.DEBUG_check_file_line_count(self.owner_ref().editor_state.disassembly_data)
 
     ## Events related to post-load disassembly events.
     # It is necessary to delegate these to the GUI thread via slots and signals.
@@ -710,6 +707,9 @@ class MainWindow(QtGui.QMainWindow):
         #self.save_project_as_action = QtGui.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
         self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
         self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
+        
+        self.edit_undo_action = QtGui.QAction("Undo", self, shortcut="Ctrl+Z", statusTip="Undo the last action", triggered=self.interaction_undo_last_action)
+        self.edit_redo_action = QtGui.QAction("Redo", self, shortcut="Ctrl+Y", statusTip="Redo the last action", triggered=self.interaction_redo_from_action_stack)
 
         self.edit_datatype_submenu_action = QtGui.QAction("Change address datatype", self, statusTip="Change data type at current address")
         self.edit_set_datatype_code_action = QtGui.QAction("Code", self, shortcut="Alt+C", statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
@@ -746,6 +746,8 @@ class MainWindow(QtGui.QMainWindow):
         self.file_menu.addAction(self.quit_action)
 
         self.edit_menu = self.menuBar().addMenu("&Edit")
+        self.edit_menu.addAction(self.edit_undo_action)
+        self.edit_menu.addAction(self.edit_redo_action)
         self.edit_menu.addAction(self.edit_datatype_submenu_action)
         self.edit_menu.addAction(self.edit_numericbase_submenu_action)
         if True:
@@ -1037,6 +1039,12 @@ class MainWindow(QtGui.QMainWindow):
             return
         line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
+
+    def interaction_undo_last_action(self):
+        pass
+
+    def interaction_redo_from_action_stack(self):
+        pass
 
     def interaction_set_datatype_code(self):
         # May change current line number due to following references above in the file.
