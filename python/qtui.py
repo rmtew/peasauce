@@ -1088,6 +1088,8 @@ class MainWindow(QtGui.QMainWindow):
         #self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.ClearAndSelect)
         self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
         self.list_table.setFocus()
+        # NOTE(rmtew): The table is single row selection, but leaves rows selected resulting in multiple rows!
+        self.list_table.clearSelection()
         self.list_table.selectRow(new_line_idx)
 
     def functionality_view_push_address(self, current_address, address):

@@ -358,6 +358,8 @@ class EditorState(object):
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         line_number = self.disassembly_state.get_line_number_for_address(result)
+        if line_number is None:
+            return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
         self.set_line_number(acting_client, line_number)
 
     def goto_referring_address(self, acting_client):

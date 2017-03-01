@@ -1639,9 +1639,6 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             continue
         logger.debug("%06X (%06X): Found end of block boundary with processed code and no end instruction (data type: %d, processed: %d)", address, block.address, disassembly_data.get_block_data_type(block), block.flags & disassembly_data.BLOCK_FLAG_PROCESSED)
 
-#def get_load_project_options(program_data):
-#    return disassembly_data.LoadProjectOptions()
-
 def api_get_save_project_options(program_data):
     return disassembly_data.SaveProjectOptions()
 
@@ -2501,9 +2498,6 @@ class DisassemblyApi(object):
         self._program_data.post_line_change_func = f
 
     ## Project loading and saving support.
-
-    #def get_load_project_options(program_data):
-    #    return disassembly_data.LoadProjectOptions()
 
     def get_save_project_options(self):
         return api_get_save_project_options(self._program_data)
