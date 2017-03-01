@@ -261,11 +261,6 @@ def api_get_data_type_for_address(program_data, address):
     block, block_idx = lookup_block_by_address(program_data, address)
     return disassembly_data.get_block_data_type(block)
 
-def api_get_line_number_for_address(program_data, address):
-    # type: (disassembly_data.ProgramData, int) -> Union[None, int]
-    with line_count_rlock:
-        return get_line_number_for_address(program_data, address)
-
 # NOTE(rmtew): Called from three places, all guarded by line count lock.
 def get_line_number_for_address(program_data, address):
     """ line_count_rlock """
@@ -275,9 +270,11 @@ def get_line_number_for_address(program_data, address):
     if data_type == disassembly_data.DATA_TYPE_CODE:
         result = get_code_block_info_for_address(program_data, address)
         return result[0]
-    elif data_type in disassembly_data.NUMERIC_DATA_TYPES:
+
+    block_offsetN = 0
+    block_lineN = None
+    if data_type in disassembly_data.NUMERIC_DATA_TYPES:
         block_lineN = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
-        block_offsetN = 0
         address_block_offset = address - block.address
         for data_size, num_bytes, size_count, size_lines in get_data_type_sizes(block):
             block_offset0 = block_offsetN
@@ -288,7 +285,6 @@ def get_line_number_for_address(program_data, address):
                 return block_line0 + (address_block_offset - block_offset0) / num_bytes
     elif data_type == disassembly_data.DATA_TYPE_ASCII:
         block_lineN = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
-        block_offsetN = 0
         address_block_offset = address - block.address
         for byte_offset, byte_length in block.line_data:
             block_offset0 = block_offsetN
@@ -297,6 +293,14 @@ def get_line_number_for_address(program_data, address):
             block_lineN += 1
             if address_block_offset >= block_offset0 and address_block_offset < block_offsetN:
                 return block_line0
+
+    if block_offsetN > 0 and block_lineN is not None and block_idx == len(program_data.blocks)-1:
+        addresses = program_data.post_segment_addresses.get(block.segment_id, [])
+        line0 = block_lineN
+        for i, post_segment_address in enumerate(addresses):
+            if address + i == post_segment_address:
+                return line0 + i
+
     return None
 
 def api_get_address_for_line_number(program_data, line_number):
@@ -1021,7 +1025,6 @@ def lookup_block_by_line_count(program_data, lookup_key):
     return program_data.blocks[lookup_index-1], lookup_index-1
 
 def lookup_block_by_address(program_data, lookup_key):
-    """ line_count_rlock """
     # type: (disassembly_data.ProgramData, int) -> Tuple[disassembly_data.SegmentBlock, int]
     lookup_index = bisect.bisect_right(program_data.block_addresses, lookup_key)
     return program_data.blocks[lookup_index-1], lookup_index-1
@@ -2412,7 +2415,8 @@ class DisassemblyApi(object):
 
     def get_line_number_for_address(self, address):
         # type: (DisassemblyCore, int) -> Union[None, int]
-        return api_get_line_number_for_address(self._program_data, address)
+        with line_count_rlock:
+            return get_line_number_for_address(self._program_data, address)
 
     def get_address_for_line_number(self, line_number):
         # type: (DisassemblyCore, int) -> Union[int, None]

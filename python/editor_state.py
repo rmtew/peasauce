@@ -39,7 +39,6 @@ ERRMSG_INVALID_LABEL_NAME = "Invalid label name"
 
 ERRMSG_BUG_UNKNOWN_ADDRESS = "Unable to determine address at current line, this is a bug."
 ERRMSG_BUG_NO_OPERAND_SELECTION_MECHANISM = "Too many valid operands, this is a bug."
-ERRMSG_BUG_UNABLE_TO_GOTO_LINE = "Unable to go to the given line, this is a bug."
 
 ERRMSG_TODO_BAD_STATE_FUNCTIONALITY = "TODO: Work out you can do this in the current program state."
 
@@ -298,7 +297,7 @@ class EditorState(object):
         if len(operand_addresses) == 1:
             next_line_number = self.disassembly_state.get_line_number_for_address(operand_addresses[0])
             if next_line_number is None:
-                return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
+                return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
             self.set_line_number(acting_client, next_line_number)
             self.address_stack.append(current_address)
@@ -359,7 +358,7 @@ class EditorState(object):
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         line_number = self.disassembly_state.get_line_number_for_address(result)
         if line_number is None:
-            return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
         self.set_line_number(acting_client, line_number)
 
     def goto_referring_address(self, acting_client):
@@ -387,7 +386,7 @@ class EditorState(object):
 
         next_line_number = self.disassembly_state.get_line_number_for_address(selected_address)
         if next_line_number is None:
-            return ERRMSG_BUG_UNABLE_TO_GOTO_LINE
+            return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         self.set_line_number(acting_client, next_line_number)
         self.address_stack.append(current_address)
