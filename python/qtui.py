@@ -33,7 +33,7 @@ import traceback
 import types
 
 # mypy-lang support
-from typing import Any
+from typing import Any, List
 
 from PySide import QtCore, QtGui # type: ignore
 
@@ -230,7 +230,7 @@ def create_table_model(parent, columns, _class=None):
 class CustomQTableView(QtGui.QTableView):
     selection_change_signal = QtCore.Signal(tuple)
     _initial_line_idx = None # type: int
-    _selected_indexes = []
+    _selected_indexes = [] # type: List[Any]
 
     def paintEvent(self, event):
         if self._initial_line_idx is not None:
