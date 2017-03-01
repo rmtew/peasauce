@@ -643,7 +643,7 @@ class EditorState(object):
         if is_saved_project:
             # User may have optionally chosen to not save the input file, as part of the project file.
             if not self.disassembly_state.is_segment_data_cached():
-                load_options = self.disassembly_state.get_new_project_options()
+                load_options = disassembly.get_new_project_options()
                 # Parameters passed in, to help the client make up it's mind.
                 load_options.input_file_filesize = self.disassembly_state.get_file_size()
                 load_options.input_file_filename = self.disassembly_state.get_file_name()

@@ -14,6 +14,9 @@ PySide eccentricities:
 - Changing the font used in the TableView will not change the height of the rows, resulting
   in clipping of text.  The font height needs to be obtained and the row height changed
   accordingly.
+- Table selection behaviour is flakey.  Despite setting both single-selection and row
+  selection, various things will do multi-selection of both rows, and bizarre item
+  (single cell) selection.
 
 http://doc.qt.digia.com/4.6/richtext-html-subset.html
 http://qt-project.org/faq/answer/how_can_i_programatically_find_out_which_rows_items_are_visible_in_my_view
