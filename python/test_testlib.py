@@ -1,4 +1,4 @@
-#
+from __future__ import print_function
 
 import copy
 import logging
@@ -69,7 +69,7 @@ def generate_unit_tests():
 
             if len(operand_spec.mask_char_vars):
                 format_variations = [ operand_format ]
-                for k, v in operand_spec.mask_char_vars.iteritems():
+                for k, v in operand_spec.mask_char_vars.items():
                     format_variations_temp = []
                     for format in format_variations:
                         if k in format:
@@ -112,9 +112,9 @@ def generate_unit_tests():
             text = instruction_syntax +" "+ ",".join(combination)
             result = asm.compile_text("a: "+ text, cpu_id, testlib.constants.ASM_SYNTAX_MOTOROLA)
             if result is None:
-                print "X", text
+                print("X", text)
             else:
-                print " ", text, [ hex(ord(c)) for c in result ]
+                print(" ", text, [ hex(ord(c)) for c in result ])
         if i == 15:
             break
 
@@ -122,10 +122,10 @@ def generate_unit_tests():
     if False:
         asm = testlib.tool_assembler_vasm.Assembler()
         result = asm.compile_text("a: movem.w d0-d6/a0-a6,-(sp)", testlib.constants.CPU_MC60000, testlib.constants.ASM_SYNTAX_MOTOROLA)
-        print [ hex(ord(c)) for c in result ]
+        print([ hex(ord(c)) for c in result ])
 
         result = asm.compile_text("a: moveq #0,d0", testlib.constants.CPU_MC60000, testlib.constants.ASM_SYNTAX_MOTOROLA)
-        print [ hex(ord(c)) for c in result ]
+        print([ hex(ord(c)) for c in result ])
 
 
 if __name__ == "__main__":

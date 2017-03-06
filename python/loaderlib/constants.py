@@ -34,7 +34,7 @@ processor_names = {
 
 def lookup_processor_id_by_name(specified_processor_name):
     specified_processor_name = specified_processor_name.lower()
-    for processor_id, processor_name in processor_names.iteritems():
+    for processor_id, processor_name in processor_names.items():
         if processor_name.lower() == specified_processor_name:
             return processor_id
 

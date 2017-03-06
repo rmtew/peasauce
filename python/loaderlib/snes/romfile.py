@@ -21,7 +21,7 @@ TASKS:
 
 """
 
-import cPickle
+import pickle
 import os
 import struct
 import sys
@@ -156,7 +156,7 @@ SAVEFILE_VERSION = 1
 
 def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
-    cPickle.dump(data, f, -1)
+    pickle.dump(data, f, -1)
     return True
 
 def load_project_data(f):
@@ -164,7 +164,7 @@ def load_project_data(f):
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
         return
-    data = cPickle.load(f)
+    data = pickle.load(f)
     return data
 
 

@@ -268,7 +268,7 @@ class EditorState(object):
         return self.line_number
 
     def set_line_number(self, acting_client, line_number):
-        if type(line_number) not in (int, long):
+        if type(line_number) is not int:
             raise ValueError("expected numeric type, got %s (%s)" % (line_number.__class__.__name__, line_number))
         self.line_number = line_number
 
@@ -352,7 +352,7 @@ class EditorState(object):
         if result is None: # Cancelled / aborted.
             return
         # Convert an entered symbol name to it's address.
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             result = self.disassembly_state.get_address_for_symbol(result)
             if result is None:
                 return ERRMSG_NO_IDENTIFIABLE_DESTINATION
@@ -371,7 +371,7 @@ class EditorState(object):
             return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
         # Addresses appear in numerical order.
-        addresses.sort()
+        addresses = sorted(addresses)
         # Symbols appear in place of addresses where they exist.
         converted_addresses = addresses[:]
         self._convert_addresses_to_symbols_where_possible(converted_addresses)
@@ -412,7 +412,7 @@ class EditorState(object):
             self.last_search_direction = -1
             return self.search_text(acting_client)
         result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, -1)
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             return result
         if result is not None:
             self.set_line_number(acting_client, result)
@@ -436,7 +436,7 @@ class EditorState(object):
         if self.last_search_text is None:
             return self.search_text(acting_client)
         result = self._prolonged_action(acting_client, "TITLE_SEARCHING", "TEXT_GENERIC_PROCESSING", self._search_text, acting_client, 1)
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             return result
         if result is not None:
             self.set_line_number(acting_client, result)
@@ -583,7 +583,7 @@ class EditorState(object):
         result = acting_client.request_load_file()
         if result is None:
             return
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             self.reset_state(acting_client)
             return result
         load_file, file_path = result
@@ -615,7 +615,7 @@ class EditorState(object):
                 new_options.loader_processor = ""
             # Prompt for new project option values.
             new_option_result = acting_client.request_new_project_option_values(new_options)
-            if new_option_result is None or type(new_option_result) in types.StringTypes:
+            if new_option_result is None or type(new_option_result) is str:
                 self.reset_state(acting_client)
                 return new_option_result
 
@@ -664,7 +664,7 @@ class EditorState(object):
                         errmsg = ERRMSG_INPUT_FILE_SIZE_DIFFERS
                     elif util.calculate_file_checksum(input_data_file) != self.disassembly_state.get_file_checksum():
                         errmsg = ERRMSG_INPUT_FILE_CHECKSUM_MISMATCH
-                    if type(errmsg) in types.StringTypes:
+                    if type(errmsg) is str:
                         self.reset_state(acting_client)
                         return errmsg
                     self.disassembly_state.load_project_file_finalise(input_data_file)
@@ -713,7 +713,7 @@ class EditorState(object):
         # Prompt for save file name.
         save_file = acting_client.request_code_save_file()
         if save_file is not None:
-            for i in xrange(line_count):
+            for i in range(line_count):
                 label_text = self.disassembly_state.get_file_line(i, disassembly.LI_LABEL)
                 instruction_text = self.disassembly_state.get_file_line(i, disassembly.LI_INSTRUCTION)
                 operands_text = self.disassembly_state.get_file_line(i, disassembly.LI_OPERANDS)

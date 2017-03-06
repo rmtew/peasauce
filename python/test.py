@@ -60,7 +60,7 @@ class TOOL_ProjectCompatibility_TestCase(unittest.TestCase):
             self.fail("missing input file '%s'" % INPUT_FILE_NAME)
 
         result = self.toolapiob.load_file(FILE_NAME, INPUT_FILE_NAME)
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
             self.fail("did not get correct load return value")
@@ -82,7 +82,7 @@ class TOOL_ReferringAddresses_TestCase(unittest.TestCase):
             self.fail("binary file dependency not available")
 
         result = self.toolapiob.load_file(FILE_NAME)
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
             self.fail("did not get correct load return value")
@@ -112,7 +112,7 @@ class TOOL_UncertainReferenceModification_TestCase(unittest.TestCase):
             self.skipTest("binary file dependency not available")
 
         result = self.toolapiob.load_binary_file(FILE_NAME, loaderlib.constants.PROCESSOR_M680x0, 0x21000, 0x57B8A-0x21000)
-        if type(result) in types.StringTypes:
+        if type(result) is str:
             self.fail("loading error ('%s')" % result)
         if type(result) is not tuple:
             self.fail("did not get correct load return value")
@@ -269,7 +269,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
         self.assertEqual(self.code_rows[:-1], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-1:]
-        ideal_data_rows.sort()
+        ideal_data_rows = sorted(ideal_data_rows)
         self.assertEqual(ideal_data_rows, self.uncertain_data_references_model._row_data)
 
     def test_trailing_blocks_bidirectional(self):
@@ -278,7 +278,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
 
         self.assertEqual(self.code_rows[:-2], self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[-2:]
-        ideal_data_rows.sort()
+        ideal_data_rows = sorted(ideal_data_rows)
         self.assertEqual(ideal_data_rows, self.uncertain_data_references_model._row_data)
 
     def test_mid_block_bidirectional(self):
@@ -288,7 +288,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:3] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[2:3]
-        ideal_data_rows.sort()
+        ideal_data_rows = sorted(ideal_data_rows)
         self.assertEqual(ideal_data_rows, self.uncertain_data_references_model._row_data)
 
     def test_mid_blocks_bidirectional(self):
@@ -298,7 +298,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         ideal_code_rows = [ v for v in self.code_rows if v not in self.code_rows[2:4] ]
         self.assertEqual(ideal_code_rows, self.uncertain_code_references_model._row_data)
         ideal_data_rows = self.data_rows + self.code_rows[2:4]
-        ideal_data_rows.sort()
+        ideal_data_rows = sorted(ideal_data_rows)
         self.assertEqual(ideal_data_rows, self.uncertain_data_references_model._row_data)
 
 

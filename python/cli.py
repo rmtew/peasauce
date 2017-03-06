@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -44,18 +46,18 @@ def command_load(toolapiob, arg_string):
     result = toolapiob.load_file(arg_string)
     # Cancelled?
     if result is None:
-        print "Usage: load <file path>"
+        print("Usage: load <file path>")
         return
     # Error message?
-    if type(result) in types.StringTypes:
-        print "ERROR: unable to open file -", result
+    if type(result) is str:
+        print("ERROR: unable to open file -", result)
         return
 
     # This isn't really good enough, as long loading files may conflict with cancellation and subsequent load attempts.
     if not toolapiob.editor_state.in_loaded_state():
         return
 
-    print "success"
+    print("success")
 
 def command_quit(toolapiob, arg_string):
     "Quit - Exit the program"
@@ -68,14 +70,14 @@ def command_help(toolapiob, arg_string):
     "Help - List available commands"
     command_mapping = create_command_mapping()
     l = []
-    for command_name, function in command_mapping.iteritems():
+    for command_name, function in command_mapping.items():
         l.append("%s\t-\t%s" % (command_name, function.__doc__))
     l.sort()
     for each in l:
-        print each
+        print(each)
 
 def default_command_no_file_loaded(toolapiob, arg_string):
-    print "ERROR: no file loaded."
+    print("ERROR: no file loaded.")
 
 def editor_command_go_to_line(toolapiob, arg_string):
     line_number = int(arg_string)
@@ -108,7 +110,7 @@ def print_line(toolapiob, line_number):
             line += s[:width-2]
             line += ".."
         line += " "
-    print line
+    print(line)
 
 def create_command_mapping(toolapiob):
     d = {}
@@ -163,7 +165,7 @@ def main_loop():
         command_mapping = create_command_mapping(toolapiob)
         function = command_mapping.get(cli_command, None)
         if function is None:
-            print "%s: %s" % (cli_command, ERRMSG_UNKNOWN_COMMAND)
+            print("%s: %s" % (cli_command, ERRMSG_UNKNOWN_COMMAND))
         else:
             function(toolapiob, cli_args)
 

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -48,7 +50,7 @@ o HUNK_UNIT: An object file, as created by compilation, is composed of program u
 o HUNK_HEADER: A load file, as created by linking, lacks external references or program units.
 """
 
-import cPickle
+import pickle
 import os
 import logging
 import struct
@@ -235,7 +237,7 @@ SAVEFILE_VERSION = 1
 
 def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
-    cPickle.dump(data, f, -1)
+    pickle.dump(data, f, -1)
     return True
 
 def load_project_data(f):
@@ -243,7 +245,7 @@ def load_project_data(f):
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
         return
-    data = cPickle.load(f)
+    data = pickle.load(f)
     return data
 
 
@@ -258,13 +260,13 @@ def _read_hunk_strings(file_info, data_types, f):
 def _read_hunk_string(file_info, data_types, f, num_longs=None):
     if num_longs is None:
         num_longs = data_types.uint32(f.read(4))
-    s = ""
     if num_longs > 0:
         s = f.read(num_longs * 4)
-        idx = s.find('\0')
+        idx = s.find(b'\0')
         if idx > -1:
-            return s[:idx]
-    return s
+            s = s[:idx]
+        return s.decode("ascii")
+    return ""
 
 
 def print_summary(file_info):
@@ -279,7 +281,7 @@ def print_summary(file_info):
 
         hunk_memory_name = MEMF_NAMES[header_segment[0]]
         hunk_memory_size = header_segment[1]
-        print hunk_name, hunk_data_offset, (hunk_data_size, hunk_memory_size), hunk_memory_name, hunk_relocation_count
+        print(hunk_name, hunk_data_offset, (hunk_data_size, hunk_memory_size), hunk_memory_name, hunk_relocation_count)
 
 # ----------------------------------------------------------------------------
 # TODO: Incorporate the below above, and test with sample files to verify correctness.
@@ -295,7 +297,7 @@ if False:
                     #
                     self.unit_name = self._read_hunk_string(f, data_types)
                     if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "HUNK_UNIT", self.unit_name
+                        print("HUNK_UNIT", self.unit_name)
                 # ...
                 elif hunk_id == HUNK_LIB:
                     if idx in self.hunk_type:
@@ -304,20 +306,20 @@ if False:
                     #
                     num_longwords = structures.read_uint32(f)
                     if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "HUNK_LIB"
+                        print("HUNK_LIB")
                 elif hunk_id == HUNK_INDEX:
                     if idx in self.hunk_type:
                         raise RuntimeError("Error", self.hunk_type[idx])
                     if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "HUNK_INDEX"
+                        print("HUNK_INDEX")
                     num_longwords = structures.read_uint32(f)
-                    print num_longwords * 4
+                    print(num_longwords * 4)
                     stringblock_length = structures.read_uint16(f)
                     data = f.read(stringblock_length)
-                    print stringblock_length, data[:40]
+                    print(stringblock_length, data[:40])
                     a = structures.read_uint16(f)
                     b = structures.read_uint16(f)
-                    print a,b
+                    print(a, b)
                     1/0
                 # ...
                 elif hunk_id == HUNK_DEBUG:
@@ -328,7 +330,7 @@ if False:
                     if char_4 == "ODEF":
                         num_lines = structures.read_uint32(f)
                         if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                            print "  HUNK_DEBUG id=\"%s\" num_lines=%d" % (char_4, num_lines)
+                            print("  HUNK_DEBUG id=\"%s\" num_lines=%d" % (char_4, num_lines))
                         line_info = []
                         while len(line_info) < num_lines:
                             leading_uint16 = structures.read_uint16(f)
@@ -364,7 +366,7 @@ if False:
                             num_name_longwords = structures.read_uint32(f)
                             file_name = self._read_hunk_string(f, num_name_longwords)
                             if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "  HUNK_DEBUG id=\"%s\" base_offset=%d file_name=\"%s\"" % (debug_id, debug_base, file_name)
+                                print("  HUNK_DEBUG id=\"%s\" base_offset=%d file_name=\"%s\"" % (debug_id, debug_base, file_name))
                             data_longwords = num_longwords - 3 - num_name_longwords
                             if data_longwords:
                                 num_lines = structures.read_uint32(f)
@@ -388,11 +390,11 @@ if False:
                             debug_id2 = f.read(8)              # 3
                             data = f.read((num_longwords - 4) * 4)
                             if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "  HUNK_DEBUG id=\"%s\" id2=\"%s\" base_offset=%d" % (debug_id, debug_id2, debug_base)
+                                print("  HUNK_DEBUG id=\"%s\" id2=\"%s\" base_offset=%d" % (debug_id, debug_id2, debug_base))
                                 text = "    "+ "".join(("%02x" % ord(c)) for c in data[:40])
                                 if len(data) > 40:
                                     text += "..."
-                                print len(text), text
+                                print(len(text), text)
                         elif debug_id == "LINE":
                             num_name_longwords = structures.read_uint32(f)
                             file_name = self._read_hunk_string(f, num_name_longwords)
@@ -404,28 +406,28 @@ if False:
                                 loop_longwords -= 2
 
                             if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "  HUNK_DEBUG id=\"%s\" base_offset=%d num_line_offsets=%d" % (debug_id, debug_base, num_line_offsets)
+                                print("  HUNK_DEBUG id=\"%s\" base_offset=%d num_line_offsets=%d" % (debug_id, debug_base, num_line_offsets))
                         elif debug_id == "OPTS":
                             opts_value = structures.read_uint32(f)
                             if True or DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "  HUNK_DEBUG id=\"%s\" base_offset=%d value=%x" % (debug_id, debug_base, opts_value)
+                                print("  HUNK_DEBUG id=\"%s\" base_offset=%d value=%x" % (debug_id, debug_base, opts_value))
                         else:
-                            print "  HUNK_DEBUG id=\"%s\" base_offset=%d" % (debug_id, debug_base)
+                            print("  HUNK_DEBUG id=\"%s\" base_offset=%d" % (debug_id, debug_base))
                             # Unknown, exit with information.
                             data = f.read(_post_file_offset - f.tell())
                             text = "    "+ "".join(("%02x" % ord(c)) for c in data[:40])
                             if len(data) > 40:
                                 text += "..."
-                            print text
+                            print(text)
                             raise RuntimeError("New debug", num_longwords, debug_id, debug_base, hex(_pre_file_offset))
                 elif hunk_id == HUNK_NAME:
                     # Optional.  Hunks with the same name are combined.
                     hunk_name = self._read_hunk_string(f)
                     if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "  HUNK_NAME", symbol_name
+                        print("  HUNK_NAME", symbol_name)
                 elif hunk_id == HUNK_EXT:
                     if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                        print "  HUNK_EXT"
+                        print("  HUNK_EXT")
                     name_length = structures.read_uint32(f)
                     while name_length != 0:
                         symbol_type = name_length >> 24
@@ -436,16 +438,16 @@ if False:
                         if symbol_type in (EXT_DEF, EXT_ABS, EXT_RES):
                             symbol_value = structures.read_uint32(f)
                             if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "    EXT_SYMBOL", "TYPE=%s" % EXT_NAMES[symbol_type], "LENGTH=%s" % name_length, "\"%s\"=%x" % (symbol_name, symbol_value)
+                                print("    EXT_SYMBOL", "TYPE=%s" % EXT_NAMES[symbol_type], "LENGTH=%s" % name_length, "\"%s\"=%x" % (symbol_name, symbol_value))
                         elif symbol_type in (EXT_REF32, EXT_REF16, EXT_REF8, EXT_DEXT32, EXT_DEXT16, EXT_DEXT8):
                             if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                print "    EXT_REFERENCE", "TYPE=%s" % EXT_NAMES[symbol_type], "LENGTH=%s" % name_length, "\"%s\":" % symbol_name
+                                print("    EXT_REFERENCE", "TYPE=%s" % EXT_NAMES[symbol_type], "LENGTH=%s" % name_length, "\"%s\":" % symbol_name)
                             reference_index = 0
                             reference_count = structures.read_uint32(f)
                             while reference_index < reference_count:
                                 reference_value = structures.read_uint32(f)
                                 if DEBUG_LEVEL >= DEBUG_HUNK_VERBOSE:
-                                    print "      "+ hex(reference_value)
+                                    print("      "+ hex(reference_value))
                                 reference_index += 1
                         #elif symbol_type == EXT_COMMON:
                         #    pass

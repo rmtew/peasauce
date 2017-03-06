@@ -14,7 +14,8 @@ The purpose of this module is to implement backwards compatible persistence
 of the disassembly state, at some point.
 """
 
-import cStringIO, os, struct
+from io import StringIO
+import os, struct
 
 
 def sizeof_uint32():
@@ -122,7 +123,7 @@ def read_dict_uint32_to_set_of_uint32s(f):
 def write_dict_uint32_to_set_of_uint32s(f, d):
     # Write number of dictionary entries.
     write_uint32(f, len(d))
-    for k, v in d.iteritems():
+    for k, v in d.items():
         # Write key uint.
         write_uint32(f, k)
         # Write number of set entries 'N'.
@@ -153,7 +154,7 @@ def read_dict_uint32_to_list_of_uint32s(f):
 def write_dict_uint32_to_list_of_uint32s(f, d):
     # Write number of dictionary entries.
     write_uint32(f, len(d))
-    for k, v in d.iteritems():
+    for k, v in d.items():
         # Write key uint.
         write_uint32(f, k)
         # Write number of list entries 'N'.
@@ -174,7 +175,7 @@ def read_dict_uint32_to_string(f):
     f.seek(4 * dict_entry_count, os.SEEK_CUR)
     strings_offset = f.tell()
     string_data = f.read(chunk_size - (strings_offset - chunk_size_offset))
-    string_file = cStringIO.StringIO(string_data)
+    string_file = StringIO(string_data)
     f.seek(values_offset, os.SEEK_SET)
     d = {}
     while dict_entry_count:
@@ -193,7 +194,7 @@ def write_dict_uint32_to_string(f, d):
 
     # Write keys, and collect values.
     values = []
-    for k, v in d.iteritems():
+    for k, v in d.items():
         values.append(v)
         # Write key.
         write_uint32(f, k)
@@ -216,7 +217,7 @@ if __name__ == "__main__":
         def test_dict_uint32_to_set_of_uint32s(self):
             dict_uint32_to_set_of_uint32s_value = { sys.maxint: set([ sys.maxint-1, 1, sys.maxint, 0 ]), 32: set([ 16, 8, 32, 64 ]), }
 
-            f = cStringIO.StringIO()
+            f = StringIO()
             write_dict_uint32_to_set_of_uint32s(f, dict_uint32_to_set_of_uint32s_value)
             write_offset = f.tell()
 
@@ -230,7 +231,7 @@ if __name__ == "__main__":
         def test_dict_uint32_to_list_of_uint32s(self):
             test_value = { sys.maxint: [ sys.maxint-1, 1, sys.maxint, 0 ], 32: [ 16, 8, 32, 64 ], }
 
-            f = cStringIO.StringIO()
+            f = StringIO()
             write_dict_uint32_to_list_of_uint32s(f, test_value)
             write_offset = f.tell()
 
@@ -248,7 +249,7 @@ if __name__ == "__main__":
                 v = "".join(chr(random.randint(ord('A'), ord('z')+1)) for i in range(10))
                 test_value[k] = v
 
-            f = cStringIO.StringIO()
+            f = StringIO()
             write_dict_uint32_to_string(f, test_value)
             write_offset = f.tell()
 
@@ -262,7 +263,7 @@ if __name__ == "__main__":
         def test_set_of_uint32s(self):
             test_value = set(random.randint(0, sys.maxint) for v in range(random.randint(15, 30)))
 
-            f = cStringIO.StringIO()
+            f = StringIO()
             write_set_of_uint32s(f, test_value)
             write_offset = f.tell()
 

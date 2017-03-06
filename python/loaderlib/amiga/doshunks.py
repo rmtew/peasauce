@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -46,7 +48,7 @@ EXT_DEXT8       = 135 #  8 bit data relative reference
 
 def get_matching_constants(prefix):
     d = {}
-    for k, v in globals().iteritems():
+    for k, v in globals().items():
         if k.startswith(prefix):
             d[v] = k
     return d
@@ -55,5 +57,5 @@ HUNK_NAMES = get_matching_constants("HUNK_")
 EXT_NAMES = get_matching_constants("EXT_")
 
 if __name__ == "__main__":
-    for k, v in HUNK_NAMES.iteritems():
-        print v, hex(k)
+    for k, v in HUNK_NAMES.items():
+        print (v, hex(k))

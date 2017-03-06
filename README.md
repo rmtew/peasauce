@@ -51,8 +51,11 @@ Currently Peasauce is prototyped in Python 2.7 using Pyside to display it's
 user interface.  The only installation you need to do, is to ensure the
 following prerequisites are installed on your computer.
 
-1. Download and install [Python 2.7](http://python.org/download/) for your platform.
-2. Download and install [PySide for Python 2.7](http://www.pyside.org/) for your platform (pip install pyside).
+1. Download and install [Python 3.x](http://python.org/download/) for your platform.
+2. Download and install [PyQT for Python 3.x](https://pypi.python.org/pypi/PyQt5) for your platform (pip install pyqt).
+3. Download and install [QT.py](https://pypi.python.org/pypi/Qt.py) for your platform (pip install QT.py).
+
+When `PySide` 2 becomes available in a stable form, it will be possible to choose whether to use that or `PyQT`, behind the `QT.py` install.
 
 ## Usage
 

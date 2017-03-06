@@ -106,7 +106,7 @@ class ArchMIPS(ArchInterface):
             key = operand.specification.key
         operand_idx = self.dict_operand_label_to_index[key]
         mode_format = self.table_operand_types[operand_idx][EAMI_FORMAT]
-        for subst_name, subst_value in operand.vars.iteritems():
+        for subst_name, subst_value in operand.vars.items():
             if subst_name == "Rn":
                 value_string = self.constant_register_prefix + str(subst_value)
             elif key == "CC" and subst_name == "v":

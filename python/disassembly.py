@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -16,6 +18,7 @@ MAF_CERTAIN = 16
 import binascii
 import bisect
 import copy
+import io
 import logging
 import operator
 import os
@@ -140,7 +143,6 @@ def get_instruction_line_count(program_data, match):
 
 
 def get_block_line_count(program_data, block):
-    """ line_count_rlock: irrelevant """
     # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock) -> int
     # Overwrite the old line count, it's OK, we've notified any removal if necessary.
     line_count = get_block_header_line_count(program_data, block)
@@ -259,7 +261,6 @@ def get_code_block_info_for_line_number(program_data, line_number):
 
 # NOTE(rmtew): Called from three places, all guarded by line count lock.
 def get_line_number_for_address(program_data, address):
-    """ line_count_rlock """
     # type: (disassembly_data.ProgramData, int) -> Union[None, int]
     block, block_idx = lookup_block_by_address(program_data, address)
     data_type = disassembly_data.get_block_data_type(block)
@@ -278,7 +279,7 @@ def get_line_number_for_address(program_data, address):
             block_line0 = block_lineN
             block_lineN += size_lines
             if address_block_offset >= block_offset0 and address_block_offset < block_offsetN:
-                return block_line0 + (address_block_offset - block_offset0) / num_bytes
+                return int((block_line0 + (address_block_offset - block_offset0)) / num_bytes)
     elif data_type == disassembly_data.DATA_TYPE_ASCII:
         block_lineN = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
         address_block_offset = address - block.address
@@ -355,7 +356,7 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
         address, match = result
         return [
 			k
-			for (k, v) in program_data.dis_get_match_addresses_func(match).iteritems()
+			for (k, v) in program_data.dis_get_match_addresses_func(match).items()
 			if k in program_data.symbols_by_address
 		]
 
@@ -375,7 +376,7 @@ def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
 This may be of future use, but what it should return remains to be decided.
 
 def get_all_references(program_data):
-    for target_address, referring_addresses in program_data.reference_addresses.iteritems():
+    for target_address, referring_addresses in program_data.reference_addresses.items():
         target_block, target_block_idx = lookup_block_by_address(program_data, target_address)
         if target_block.address != target_address:
             logger.error("get_all_references: analysing reference referrers, target address mismatch: %X != %X", target_block.address, target_address)
@@ -387,15 +388,14 @@ def get_all_references(program_data):
                     line_number, match = get_code_block_info_for_address(program_data, source_address)
 """
 
-def get_data_type_sizes(block):
-    # type: (disassembly_data.SegmentBlock) -> List[Tuple[int, int, int, int]]
+def get_data_type_sizes(block: disassembly_data.SegmentBlock) -> List[Tuple[int, int, int, int]]:
     block_data_size = disassembly_data.get_block_data_type(block)
     size_types = disassembly_data.DESCENDING_DATA_TYPE_SIZES[block_data_size]
 
     sizes = []
     unconsumed_byte_count = block.length
     for data_size, num_bytes in size_types:
-        size_count = unconsumed_byte_count / num_bytes
+        size_count = int(unconsumed_byte_count / num_bytes)
         if size_count == 0:
             continue
         if block.flags & disassembly_data.BLOCK_FLAG_ALLOC:
@@ -406,8 +406,7 @@ def get_data_type_sizes(block):
         unconsumed_byte_count -= size_count * num_bytes
     return sizes
 
-def get_block_footer_line_count(program_data, block, block_idx):
-    # type: (disassembly_data.ProgramData, disassembly_data.SegmentBlock, int) -> int
+def get_block_footer_line_count(program_data: disassembly_data.ProgramData, block: disassembly_data.SegmentBlock, block_idx: int) -> int:
     """ We may be working with a temporary block copy, so the block index
         should only be used for the purpose of comparing neighbouring
         blocks. """
@@ -707,8 +706,9 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                     last_value = None
                     data = loaderlib.get_segment_data(segments, block.segment_id)
                     # TODO(rmtew): Make non-architecture specific.  m68k = comma separation?
-                    for char in data[data_idx:data_idx+byte_length]:
-                        byte = ord(char)
+                    for byte in data[data_idx:data_idx+byte_length]:
+                        if type(byte) is str:
+                            byte = ord(byte)
                         if byte >= 32 and byte < 127:
                             # Sequential displayable characters get collected into a contiguous string.
                             value = chr(byte)
@@ -724,7 +724,7 @@ def get_file_line(program_data, line_idx, column_idx): # Zero-based
                                 if type(last_value) is str:
                                     string += "'"
                                 string += ","
-                            string += _get_byte_representation(chr(byte))
+                            string += _get_byte_representation(byte)
                         last_value = value
                     if last_value is not None:
                         if type(last_value) is str:
@@ -764,7 +764,7 @@ def check_known_address(program_data, address):
                 program_data.post_segment_addresses[pre_segment_id] = [ address ]
             elif address not in addresses:
                 addresses.append(address)
-                addresses.sort()
+                addresses = sorted(addresses)
         return True
     else:
         pass # logger.debug("Found address not within segment address spaces: %X, excess: %d, pre segment_id: %s", address, address - addressN, pre_ids)
@@ -827,7 +827,7 @@ def set_symbol_for_address(program_data, address, symbol_label):
     if not check_known_address(program_data, address):
         return False
 
-    for existing_symbol_label in program_data.symbols_by_address.itervalues():
+    for existing_symbol_label in program_data.symbols_by_address.values():
         if symbol_label == existing_symbol_label:
             return False
 
@@ -915,13 +915,12 @@ def _recalculate_line_count_index(program_data, dirtyidx=None):
             line_count_start = 0
             if dirtyidx > 0:
                 line_count_start = program_data.block_line0s[dirtyidx-1] + get_block_line_count_cached(program_data, program_data.blocks[dirtyidx-1])
-            for i in xrange(dirtyidx, len(program_data.block_line0s)):
+            for i in range(dirtyidx, len(program_data.block_line0s)):
                 program_data.block_line0s[i] = line_count_start
                 line_count_start += get_block_line_count_cached(program_data, program_data.blocks[i])
             program_data.block_line0s_dirtyidx = None
 
 def get_block_line_number(program_data, block_idx):
-    """ line_count_rlock """
     # type: (disassembly_data.ProgramData, int) -> int
     with line_count_rlock:
         _recalculate_line_count_index(program_data)
@@ -1110,7 +1109,7 @@ def _locate_uncertain_code_references(program_data, address, is_binary_file, blo
             address0 = addressN
             addressN += entry.num_bytes
             if addressN >= address:
-                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).iteritems():
+                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).items():
                     do_match = False
                     if is_binary_file:
                         do_match = flags & (MAF_ABSOLUTE_ADDRESS | MAF_CONSTANT_VALUE)
@@ -1193,7 +1192,7 @@ def set_block_data_type(program_data, data_type, block, block_idx=None, work_sta
     # In both cases, events need to be broadcast as otherwise the only place events are broadcast is on file load.
 
     is_binary_file = (program_data.flags & disassembly_data.PDF_BINARY_FILE) == disassembly_data.PDF_BINARY_FILE
-    for k, (affected_block, data_type_old, data_type_new, length_old) in event_blocks.iteritems():
+    for k, (affected_block, data_type_old, data_type_new, length_old) in event_blocks.items():
         do_broadcast = False
         old_references = affected_block.references
         if data_type_new == disassembly_data.DATA_TYPE_CODE:
@@ -1227,22 +1226,23 @@ def _process_block_as_ascii(program_data, block):
     block_line_data = []
     line_width = 0
     line_width_max = 40
-    last_value = None
+    last_byte = None
     while bytes_consumed < block.length:
         byte = data[data_offset_start+bytes_consumed]
+        # Python 2 memoryviews always return strings for indexed data.
+        if type(byte) is str:
+            byte = ord(byte)
         comma_separated = False
         char_line_width = 0
-        if ord(byte) >= 32 and ord(byte) < 127:
+        if byte >= 32 and byte < 127:
             # Sequential displayable characters get collected into a contiguous string.
-            value = byte
-            if type(last_value) is not str:
+            if type(last_byte) is not str:
                 comma_separated = True
                 char_line_width += 2 # start and end quoting characters for this character and all appended to it.
             char_line_width += 1 # char
         else:
             # Non-displayable characters are appended as separate pieces of data.
-            value = byte
-            comma_separated = last_value is not None
+            comma_separated = last_byte is not None
             byte_string = _get_byte_representation(byte)
             char_line_width += len(byte_string)
         if comma_separated:
@@ -1252,28 +1252,27 @@ def _process_block_as_ascii(program_data, block):
         # Append to current line or start a new one?
         force_new_line = False
         # Trailing null bytes indicate the end of each string in the block.
-        if last_value != 0 and value == 0:
+        if last_byte != 0 and byte == 0:
             force_new_line = True
         if line_width + char_line_width > line_width_max or force_new_line:
             # Would make the current line too long, store the current one and make a new one.
             block_line_data.append((bytes_consumed0, bytes_consumed-bytes_consumed0))
             bytes_consumed0 = bytes_consumed
             line_width = char_line_width
-            last_value = None
+            last_byte = None
         else:
             # Still room in this line, add it on.
             line_width += char_line_width
-            last_value = value
+            last_byte = byte
     if bytes_consumed != bytes_consumed0:
         block_line_data.append((bytes_consumed0, bytes_consumed-bytes_consumed0))
     block.line_data = block_line_data
 
 def _get_byte_representation(byte):
-    # type: (str) -> str
-    v = ord(byte)
-    if v < 16:
-        return "%d" % v
-    return "$%X" % v
+    # type: (int) -> str
+    if byte < 16:
+        return "%d" % byte
+    return "$%X" % byte
 
 __label_metadata = {
     disassembly_data.DATA_TYPE_CODE: disassemblylib.constants.DIS_ID_CODE,
@@ -1478,7 +1477,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 entry_address = entry.pc - program_data.dis_constant_pc_offset
                 xxx = entry.pc
-                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).iteritems():
+                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).items():
                     if flags & MAF_CODE:
                         disassembly_offsets.add(match_address)
                         insert_branch_address(program_data, match_address, entry_address, pending_symbol_addresses)
@@ -1503,7 +1502,7 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
                             insert_reference_address(program_data, match_address, entry_address, pending_symbol_addresses)
                         else:
                             # TODO: These need to be handled.
-                            print "SKIP REF ADDRESS INSERT SYM, instruction address: %x operand address %x" % (entry_address, match_address)
+                            print("SKIP REF ADDRESS INSERT SYM, instruction address: %x operand address %x" % (entry_address, match_address))
 
         # DEBUG BLOCK SPILLING BASED ON LOGICAL ASSUMPTION OF MORE CODE.
         if bytes_consumed == block.length and not found_terminating_instruction and not data_bytes_to_skip:
@@ -1538,7 +1537,7 @@ def api_save_project_file(save_file, program_data, save_options):
 
 
 def api_load_project_file(save_file, file_name, work_state=None):
-    # type: (file, str, WorkState) -> Tuple[disassembly_data.ProgramData, int]
+    # type: (io.IOBase, str, WorkState) -> Tuple[disassembly_data.ProgramData, int]
     program_data = disassembly_persistence.load_project(save_file, work_state=work_state)
     if program_data is None:
         return None, 0
@@ -1782,7 +1781,8 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
                                 if current_source_operand.key in ("PCid16", "PCid8", "AbsW", "AbsL"):
                                     address_register_values[current_dest_register_number] = program_data.dis_get_operand_value_func(current_instruction, current_source_operand.key, current_source_operand.vars) 
                                 else:
-                                    raise Exception("Unexpected operand type", current_source_operand.key)
+                                    # raise Exception("Unexpected operand type", current_source_operand.key)
+                                    logger.debug("on_instruction_matched: Unexpected operand type %s", current_source_operand.key)
                                 del track_address_registers[current_dest_register_number]
                                 continue
                             logger.debug("on_instruction_matched: At $%06X A%d unhandled source is %s", current_instruction_address, call_register, current_instruction.specification.key)
@@ -1855,7 +1855,7 @@ def platform_specific_processing_M680x0_amiga(program_data, work_state=None):
 
                     library_open_calls[initial_address] = library_name_address
                 else:
-                    logger.debug("on_instruction_matched: At $%06X unable to locate open library A1 source", initial_address, call_register)
+                    logger.debug("on_instruction_matched: At $%06X unable to locate open library A%d source", initial_address, call_register)
 
         # TODO(rmtew): Maybe search forward for the result destination.
         # Should be able to use the same logic as above with find_previous_instruction
@@ -1884,7 +1884,7 @@ class RegisterAnalysisGoals(object):
     def clone(self):
         result =  RegisterAnalysisGoals(self.direction)
         result.register_values_pending = self.register_values_pending.copy()
-        result.register_values = { k: copy.copy(v) for (k, v) in self.register_values.iteritems() }
+        result.register_values = { k: copy.copy(v) for (k, v) in self.register_values.items() }
         return result
 
     def track_register(self, register_name):
@@ -2157,10 +2157,13 @@ def get_string_at_address(program_data, block, address):
     data_idx = address - loaderlib.get_segment_address(program_data.loader_segments, block.segment_id)
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     string_end_idx = data_idx
-    while data[string_end_idx] != '\0' and string_end_idx < len(data):
+    end_char = 0
+    if type(data[0]) is str:
+        end_char = '\0'
+    while data[string_end_idx] != end_char and string_end_idx < len(data):
         string_end_idx += 1
     if string_end_idx != data_idx:
-        return data[data_idx:string_end_idx].tobytes()
+        return data[data_idx:string_end_idx].tobytes().decode("utf-8")
     return None
 
 def onload_set_disassemblylib_functions(program_data):
@@ -2359,7 +2362,7 @@ class DisassemblyApi(object):
     def get_address_for_symbol(self, symbol_name):
         # type: (str) -> int
         symbol_name = symbol_name.lower()
-        for k, v in self._program_data.symbols_by_address.iteritems():
+        for k, v in self._program_data.symbols_by_address.items():
             if v.lower() == symbol_name:
                 return k
 
@@ -2444,14 +2447,14 @@ class DisassemblyApi(object):
     ## Project loading and saving.
 
     def load_project_file_finalise(self, f):
-        # type: (file) -> None
+        # type: (io.IOBase) -> None
         segments = self._program_data.loader_segments
         for i in range(len(segments)):
             loaderlib.cache_segment_data(f, segments, i)
         onload_cache_uncertain_references(self._program_data)
 
     def save_project_file(self, save_file, save_options):
-        # type: (file, disassembly_data.SaveProjectOptions) -> None
+        # type: (io.IOBase, disassembly_data.SaveProjectOptions) -> None
         return api_save_project_file(save_file, self._program_data, save_options)
 
     def is_segment_data_cached(self):
@@ -2472,14 +2475,14 @@ def get_new_project_options():
     return disassembly_data.NewProjectOptions()
 
 def load_file(input_file, new_options, file_name, work_state=None):
-    # type: (file, disassembly_data.NewProjectOptions, str, WorkState) -> DisassemblyApi
+    # type: (io.IOBase, disassembly_data.NewProjectOptions, str, WorkState) -> DisassemblyApi
     result = api_load_file(input_file, new_options, file_name, work_state)
     if result is not None:
         return DisassemblyApi(result[0])
         #self._program_data = result[0]
 
 def load_project_file(save_file, file_name, work_state=None):
-    # type: (file, str, WorkState) -> DisassemblyApi
+    # type: (io.IOBase, str, WorkState) -> DisassemblyApi
     result = api_load_project_file(save_file, file_name, work_state)
     if result is not None:
         return DisassemblyApi(result[0])

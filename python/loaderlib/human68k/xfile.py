@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -19,7 +21,7 @@ o What is the bindlist?
 
 """
 
-import cPickle
+import pickle
 import os
 import struct
 import sys
@@ -191,14 +193,14 @@ def _read_symbol_table(file_info, data_types, data, f):
             offset = data_types.uint32(f.read(4))
             bytes_read += SIZEOF_SYMBOL_ENTRY
 
-            name = ""
+            name = b""
             c = f.read(1)
             bytes_read += 1
-            while c != "\0":
+            while c != b"\0":
                 name += c
                 c = f.read(1)
                 bytes_read += 1
-            l.append((name, xdef_type, offset))
+            l.append((name.decode("utf-8"), xdef_type, offset))
 
             if bytes_read & 1:
                 f.read(1)
@@ -215,7 +217,7 @@ SAVEFILE_VERSION = 1
 
 def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
-    cPickle.dump(data, f, -1)
+    pickle.dump(data, f, -1)
     return True
 
 def load_project_data(f):
@@ -223,30 +225,30 @@ def load_project_data(f):
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
         return
-    data = cPickle.load(f)
+    data = pickle.load(f)
     return data
 
 
 def print_summary(file_info):
     data = file_info.file_data
 
-    print "_reserved1", data._reserved1
-    print "_loadmode", data._loadmode
-    print "_base_address", data._base_address
-    print "_entry_offset", data._entry_offset
-    print "_text_segment_size", data._text_segment_size
-    print "_data_segment_size", data._data_segment_size
-    print "_bss_segment_size", data._bss_segment_size
-    print "_relocation_table_size", data._relocation_table_size
-    print "_symbol_table_size", data._symbol_table_size
-    print "_debug_line_size", data._debug_line_size
-    print "_debug_symbol_size", data._debug_symbol_size
-    print "_debug_string_size", data._debug_string_size
-    print "_reserved2", data._reserved2
-    print "_reserved3", data._reserved3
-    print "_reserved4", data._reserved4
-    print "_reserved5", data._reserved5
-    print "_bindlist_offset", data._bindlist_offset
+    print("_reserved1", data._reserved1)
+    print("_loadmode", data._loadmode)
+    print("_base_address", data._base_address)
+    print("_entry_offset", data._entry_offset)
+    print("_text_segment_size", data._text_segment_size)
+    print("_data_segment_size", data._data_segment_size)
+    print("_bss_segment_size", data._bss_segment_size)
+    print("_relocation_table_size", data._relocation_table_size)
+    print("_symbol_table_size", data._symbol_table_size)
+    print("_debug_line_size", data._debug_line_size)
+    print("_debug_symbol_size", data._debug_symbol_size)
+    print("_debug_string_size", data._debug_string_size)
+    print("_reserved2", data._reserved2)
+    print("_reserved3", data._reserved3)
+    print("_reserved4", data._reserved4)
+    print("_reserved5", data._reserved5)
+    print("_bindlist_offset", data._bindlist_offset)
 
     xdef_types = {}
     min_stack, max_stack = 1<<31, 0
@@ -260,13 +262,13 @@ def print_summary(file_info):
             if y < min_stack: min_stack, min_stack_name = y, x
             if y > max_stack: max_stack, max_stack_name = y, x
 
-    print "length of text + data + bss space", hex(data._text_segment_size + data._data_segment_size +data._bss_segment_size)
-    print "lowest stack symbol offset", hex(min_stack), min_stack_name
-    print "highest stack symbol offset", hex(max_stack), max_stack_name
+    print("length of text + data + bss space", hex(data._text_segment_size + data._data_segment_size +data._bss_segment_size))
+    print("lowest stack symbol offset", hex(min_stack), min_stack_name)
+    print("highest stack symbol offset", hex(max_stack), max_stack_name)
 
 def get_matching_constants(prefix):
     d = {}
-    for k, v in globals().iteritems():
+    for k, v in globals().items():
         if k.startswith(prefix):
             d[v] = k
     return d

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 # From disassembly:
 
 if False:
@@ -31,12 +33,12 @@ if False:
         for block in disassembly_data.blocks:
             if disassembly.get_block_data_type(block) == disassembly.DATA_TYPE_CODE:
                 code_block_count += 1
-        print "%d/%d code blocks" % (code_block_count, block_count)
+        print("%d/%d code blocks" % (code_block_count, block_count))
 
     def print_undetected_code_blocks(disassembly_data):
-        print "Detecting data that is likely code..",
+        print("Detecting data that is likely code..")
         blocks = disassembly.DEBUG_locate_potential_code_blocks(disassembly_data)
-        print "%d blocks found." % len(blocks)
+        print("%d blocks found." % len(blocks))
 
     def run():
         parser = argparse.ArgumentParser(description='Command-line disassembly.')
@@ -54,7 +56,7 @@ if False:
         print_block_stats(disassembly_data)
         print_undetected_code_blocks(disassembly_data)
 
-        print "Loaded with %d lines." % line_count
+        print("Loaded with %d lines." % line_count)
 
     if __name__ == "__main__":
         run()

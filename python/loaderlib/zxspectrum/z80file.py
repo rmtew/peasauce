@@ -4,7 +4,7 @@
     Licensed using the MIT license.
 """
 
-import cPickle
+import pickle
 import os
 import struct
 import sys
@@ -44,7 +44,7 @@ def identify_input_file(input_file, file_info, data_types, f_offset=0, f_length=
             result.file_format_id = constants.FILE_FORMAT_ZXSPECTRUM_Z80_3
 
         if result.file_format_id != constants.FILE_FORMAT_UNKNOWN:
-            result.confidence = MATCH_PROBABLE
+            result.confidence = constants.MATCH_PROBABLE
     else:
         result.file_format_id = constants.FILE_FORMAT_ZXSPECTRUM_Z80_1
 
@@ -153,7 +153,7 @@ SAVEFILE_VERSION = 1
 
 def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
-    cPickle.dump(data, f, -1)
+    pickle.dump(data, f, -1)
     return True
 
 def load_project_data(f):
@@ -161,7 +161,7 @@ def load_project_data(f):
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
         return
-    data = cPickle.load(f)
+    data = pickle.load(f)
     return data
 
 

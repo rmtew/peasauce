@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import logging
 import re
 import struct
@@ -195,7 +197,7 @@ def process_instruction_list(_A, _list):
             operands_bits = line_bits[1].split(",")
             for operand_string in operands_bits:
                 spec = _make_specification(operand_string)
-                for var_name, value_name in spec.mask_char_vars.iteritems():
+                for var_name, value_name in spec.mask_char_vars.items():
                     if value_name[0] == "I" and value_name[1] != "+": # I<word_idx>.<size_char>
                         size_idx = value_name.find(".")
                         if size_idx > 0:
@@ -230,13 +232,12 @@ def process_instruction_list(_A, _list):
                 if sort_idx == 0: sort_idx = len(operand_mask) - i
                 sort_key += '_'
         if (sort_idx, sort_key) in d:
-            print "Duplicate (first):", d[(sort_idx, sort_key)]
-            print "Duplicate (second):", entry
+            print("Duplicate (first):", d[(sort_idx, sort_key)])
+            print("Duplicate (second):", entry)
             raise RuntimeError("duplicate mask", sort_idx, sort_key)
         d[(sort_idx, sort_key)] = entry
 
-    ls = d.keys()
-    ls.sort()
+    ls = sorted(d.keys())
     _list = [ d[k] for k in ls ]
 
     # Pass 3: Validate instruction list.
@@ -257,7 +258,7 @@ def process_instruction_list(_A, _list):
                             format_string = _A.table_operand_types[ot_idx][EAMI_FORMAT]
                             for var_name in spec.mask_char_vars:
                                 if var_name not in format_string:
-                                    print format_string, var_name
+                                    print(format_string, var_name)
                     else:
                         logger.info("process_instruction_list: unknown operand type %s %s %s", _A.__class__.__name__[4:], name_bits[0], (spec.key, dest_var_name))
 
@@ -478,7 +479,7 @@ class ArchInterface(object):
     def _disassemble_vars_pass(self, I):
         def copy_values(mask_char_vars, char_vars):
             d = {}
-            for var_name, char_string in mask_char_vars.iteritems():
+            for var_name, char_string in mask_char_vars.items():
                 if char_string[0] == "I": # Pending read, propagate for resolution when decoding this opcode
                     var_value = char_string
                 else:
@@ -503,10 +504,10 @@ class ArchInterface(object):
                 d[var_name] = var_value
             return d
 
-        var_names = I.specification.mask_char_vars.values()
+        var_names = list(I.specification.mask_char_vars.values())
         # Extend the base variable list for the instruction itself with any valid candidates from each applicable operand.
         for O in I.opcodes:
-            for mask_var_name in O.specification.mask_char_vars.itervalues():
+            for mask_var_name in O.specification.mask_char_vars.values():
                 if mask_var_name not in var_names:
                     var_names.append(mask_var_name)
         # Extract the raw value for each variable from the instruction opcode.

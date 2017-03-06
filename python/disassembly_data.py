@@ -4,6 +4,8 @@
     Licensed using the MIT license.
 """
 
+import io
+
 from typing import List, Any, Tuple
 
 ## ProgramData related.
@@ -147,9 +149,9 @@ class ProgramData(object):
         "State the program data is in."
         self.state = STATE_LOADING
         "List of ascending block addresses (used by bisect for address based lookups)."
-        self.block_addresses = None # []
+        self.block_addresses = None # type: List[int]
         "List of ascending block first line numbers (used by bisect for line number based lookups)."
-        self.block_line0s = None # []
+        self.block_line0s = None # type: List[int]
         "If list of first line numbers need recalculating, this is the entry to start at."
         self.block_line0s_dirtyidx = 0
         "Callback application can register to be notified."
@@ -250,5 +252,5 @@ class LoadProjectOptions:
     valid_file_checksum = False # Unused.
 
 class SaveProjectOptions:
-    input_file = None # type: file
+    input_file = None # type: io.IOBase
     save_file_path = None # type: str

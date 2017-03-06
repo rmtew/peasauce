@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -12,7 +14,7 @@ relocation seems to happen within both based on the base address of
 where the text segment is loaded in memory.
 """
 
-import cPickle
+import pickle
 import os
 import struct
 import sys
@@ -143,12 +145,12 @@ def _read_symbol_table(file_info, data_types, prg_file, f):
     while len(l) != entry_count:
         symbol_name = f.read(8)
         # Strip unused space (null termination).
-        idx = symbol_name.find("\0")
+        idx = symbol_name.find(b"\0")
         if idx != -1:
             symbol_name = symbol_name[:idx]
         symbol_type = data_types.uint16(f.read(2))
         symbol_value = data_types.uint32(f.read(4))
-        l.append((symbol_name, symbol_type, symbol_value))
+        l.append((symbol_name.decode("ascii"), symbol_type, symbol_value))
 
     prg_file._symbol_table_entries = l
     return True
@@ -187,7 +189,7 @@ SAVEFILE_VERSION = 1
 
 def save_project_data(f, data):
     f.write(struct.pack("<H", SAVEFILE_VERSION))
-    cPickle.dump(data, f, -1)
+    pickle.dump(data, f, -1)
     return True
 
 def load_project_data(f):
@@ -195,23 +197,23 @@ def load_project_data(f):
     if savefile_version != SAVEFILE_VERSION:
         logger.error("Unable to load old savefile data, got: %d, wanted: %d", savefile_version, SAVEFILE_VERSION)
         return
-    data = cPickle.load(f)
+    data = pickle.load(f)
     return data
 
 
 def print_summary(file_info):
     prg_file = file_info.file_data
 
-    print "Text segment size:", prg_file._text_segment_size
-    print "Data segment size:", prg_file._data_segment_size
-    print "BSS segment size:", prg_file._bss_segment_size
-    print "reserved1:", hex(prg_file._reserved1)
-    print "reserved2:", hex(prg_file._reserved2)
-    print "reserved3:", hex(prg_file._reserved3)
+    print("Text segment size:", prg_file._text_segment_size)
+    print("Data segment size:", prg_file._data_segment_size)
+    print("BSS segment size:", prg_file._bss_segment_size)
+    print("reserved1:", hex(prg_file._reserved1))
+    print("reserved2:", hex(prg_file._reserved2))
+    print("reserved3:", hex(prg_file._reserved3))
 
-    print "# fixups:", sum(len(offsets) for (segment_id, offsets) in prg_file._fixup_offsets)
+    print("# fixups:", sum(len(offsets) for (segment_id, offsets) in prg_file._fixup_offsets))
 
-    print "# symbols:", len(prg_file._symbol_table_entries)
+    print("# symbols:", len(prg_file._symbol_table_entries))
     if False:
         # Order the SYMBOL type masks from highest to lowest bits, for visual display.
         symbol_flags = [
@@ -219,7 +221,7 @@ def print_summary(file_info):
             for (k, v) in globals().items()
             if k.startswith("SYMBOL_") and k != "SYMBOL_SEGMENT_MASK"
         ]
-        symbol_flags.sort(lambda a, b: cmp(a[1], b[1]))
+        symbol_flags.sort(key = lambda a: a[1])
 
         # List all the extracted symbols.
         for symbol_name, symbol_type, symbol_value in prg_file._symbol_table_entries:
@@ -230,5 +232,5 @@ def print_summary(file_info):
                         s += " | "
                     s += k
             # if symbol_type & SYMBOL_SEGMENT_MASK == 0:
-            print s, hex(symbol_value), symbol_name
+            print(s, hex(symbol_value), symbol_name)
 

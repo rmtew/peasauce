@@ -7,7 +7,7 @@
 import os
 import logging
 import struct
-from typing import Any
+from typing import Any, IO, List
 
 from . import amiga
 from . import atarist
@@ -39,7 +39,7 @@ def get_system_data_types(system_name):
     return DataTypes(system.endian_id)
 
 def load_file(input_file, file_name, loader_options=None, file_offset=0, file_length=None):
-    for system_name, system in systems_by_name.iteritems():
+    for system_name, system in systems_by_name.items():
         file_info = FileInfo(system, file_name, loader_options)
         data_types = get_system_data_types(system_name)
         if system.load_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length):
@@ -47,16 +47,16 @@ def load_file(input_file, file_name, loader_options=None, file_offset=0, file_le
 
 def identify_file(input_file, file_name, file_offset=0, file_length=None):
     matches = []
-    for system_name, system in systems_by_name.iteritems():
+    for system_name, system in systems_by_name.items():
         file_info = FileInfo(system, file_name)
         data_types = get_system_data_types(system_name)
         system_matches = system.identify_input_file(input_file, file_info, data_types, f_offset=file_offset, f_length=file_length)
-        matches.extend(((file_info, match) for match in system_matches))
+        matches.extend(((file_info, match, system) for match in system_matches))
 
     if len(matches):
         # For now take the match we are most confident in.
-        matches.sort(lambda n0, n1: cmp(n1[1].confidence, n0[1].confidence))
-        file_info, match = matches[0]
+        matches.sort(key = lambda v: v[1].confidence)
+        file_info, match, system = matches[0]
 
         if match.file_format_id != constants.FILE_FORMAT_UNKNOWN and match.confidence != constants.MATCH_NONE:
             result = {}
@@ -108,6 +108,7 @@ def is_segment_type_bss(segments, segment_id):
     return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_BSS
 
 def cache_segment_data(input_file, segments, segment_id, base_file_offset=0):
+    # type: (IO[bytes], List[Any], int, int) -> None
     """
     base_file_offset: when the input file is located within a containing file.
     """
@@ -118,11 +119,10 @@ def cache_segment_data(input_file, segments, segment_id, base_file_offset=0):
         file_length = get_segment_data_length(segments, segment_id)
 
         input_file.seek(base_file_offset + file_offset, os.SEEK_SET)
-        file_data = input_file.read(file_length)
-        if len(file_data) == file_length:
-            data = bytearray(file_data)
-            # NOTE(rmtew): This does not work as bytearray(v)[0] -> int, but memoryview(bytearray(v))[0] -> str
-            data = memoryview(data)
+        file_data = bytearray(file_length)
+        if input_file.readinto(file_data) == file_length:
+            # NOTE(rmtew): Python 2, type(data[0]) is str. Python 3, type(data[0]) is int
+            data = memoryview(file_data)
         else:
             logger.error("Unable to cache segment %d data, got %d bytes, wanted %d", segment_id, len(file_data), file_length)
     segments[segment_id][SI_CACHED_DATA] = data
@@ -168,6 +168,14 @@ class DataTypes(object):
         self.endian_id = endian_id
         self._endian_char = [ "<", ">" ][endian_id == constants.ENDIAN_BIG]
 
+        s = b"12345"
+        bs = bytearray(s)
+        mv = memoryview(bs)
+        if type(mv[0]) is int:
+            self.uint8_value = self._uint8_value3
+        else:
+            self.uint8_value = self._uint8_value2
+
     ## Data access related operations.
 
     def sized_value(self, data_size, bytes, idx=None):
@@ -179,14 +187,20 @@ class DataTypes(object):
             return self.uint8_value(bytes, idx)
         raise Exception("unsupported size", data_size)
 
-    def uint8_value(self, bytes, idx=0):
+    def _uint8_value2(self, bytes, idx=0):
         return self.uint8(bytes[idx])
+
+    def _uint8_value3(self, bytes, idx=0):
+        return bytes[idx]
 
     def uint16_value(self, bytes, idx=0):
         return self.uint16(bytes[idx:idx+2])
 
     def uint32_value(self, bytes, idx=0):
-        return self.uint32(bytes[idx:idx+4])
+        try:
+            return self.uint32(bytes[idx:idx+4])
+        except:
+            pass
 
     def uint32_value_as_string(self, v):
         if self.endian_id == constants.ENDIAN_BIG:

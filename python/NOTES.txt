@@ -39,6 +39,12 @@ How to do this?  Stack?  Actions with parameters?
 
 GENERAL NOTES
 ~~~~~~~~~~~~~
+2017-03-01
+- MORE FLAKEY QTABLE ROW SELECTION
+  More problems with flakey PySide/Qt QTable.  The selection behaviour seems
+  to have little effect, beyond a token level.  Selecting a row via
+  QTable.selectRow, makes a multiple selection in addition to any already
+  selected rows.  The table has row level selection, and single selection.
 
 2017-02-18
 - OPERAND SELECTION IN THE CURRENTLY SELECTED ROW

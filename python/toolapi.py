@@ -12,7 +12,7 @@ involving a GUI.
 import os
 import types
 # mypy-lang support
-from typing import Tuple, Union, BinaryIO
+from typing import Tuple, Union, IO
 
 import editor_state
 
@@ -27,13 +27,10 @@ class ToolEditorClient(editor_state.ClientAPI):
     _binary_parameters = None # type: Tuple[int, int, int]
     _goto_address_value = None # type: int
 
-    def reset_state(self):
-        # type: () -> None
+    def reset_state(self) -> None:
         self.owner_ref().reset_state()
 
-    def request_load_file(self):
-        # type: () -> Union[str, Tuple[BinaryIO, str]]
-
+    def request_load_file(self) -> Union[str, Tuple[IO[bytes], str]]:
         # Offers the user a chance to load a file.
         # Returns None if user aborted.
         # Returns the file object on success.
@@ -42,8 +39,7 @@ class ToolEditorClient(editor_state.ClientAPI):
             return ERRMSG_FILE_DOES_NOT_EXIST
         return open(file_path, "rb"), file_path
 
-    def get_load_file(self):
-        # type: () -> BinaryIO
+    def get_load_file(self) -> IO[bytes]:
         file_path = self.owner_ref().get_file_path()
         return open(file_path, "rb")
 
@@ -58,8 +54,7 @@ class ToolEditorClient(editor_state.ClientAPI):
             load_options.processor_id, load_options.loader_load_address, load_options.loader_entrypoint_offset = self._binary_parameters
         return load_options
 
-    def request_address(self, address):
-        # type: (int) -> int
+    def request_address(self, address: int) -> int:
         return self._goto_address_value
 
     # These can be ignored, as we have no GUI.
@@ -82,7 +77,7 @@ class ToolAPI(object):
     file_path = None # type: str
     input_file_path = None # type: str
 
-    def __init__(self, editor_state_ob=None):
+    def __init__(self, editor_state_ob=None) -> None:
         self.editor_client = ToolEditorClient(self)
         if editor_state_ob is None:
             editor_state_ob = editor_state.EditorState()
@@ -90,9 +85,11 @@ class ToolAPI(object):
         self.editor_state = editor_state_ob
 
     def on_app_exit(self):
+        # type: () -> None
         self.editor_state.on_app_exit()
 
     def reset_state(self):
+        # type: () -> None
         """ Called by the editor client. """
         if self.editor_state is None or self.editor_state.in_initial_state(self.editor_client):
             return
@@ -101,10 +98,12 @@ class ToolAPI(object):
         self.input_file_path = None
 
     def get_file_path(self):
+        # type: () -> str
         """ Called by the editor client. """
         return self.file_path
 
     def get_input_file_path(self):
+        # type: () -> str
         """ Called by the editor client. """
         return self.input_file_path
 
@@ -116,15 +115,16 @@ class ToolAPI(object):
         finally:
             self.editor_client._binary_parameters = None
 
-    def load_file(self, file_path, input_file_path=None):
+    def load_file(self, file_path: str, input_file_path: str=None):
         self.file_path = file_path
         self.input_file_path = input_file_path
         result = self.editor_state.load_file(self.editor_client)
-        if result is None or type(result) in types.StringTypes:
+        if result is None or type(result) is str:
             self.editor_state.reset_state(self.editor_client)
         return result
 
     def _get_address(self):
+        # type: () -> int
         return self.editor_state.get_address(self.editor_client)
 
     def _goto_address(self, address):

@@ -24,7 +24,7 @@ https://bitbucket.org/rmtew/archgen
 
 """
 
-import cPickle
+import pickle
 import logging
 import os
 import sys
@@ -162,7 +162,7 @@ class ArchM68k(ArchInterface):
         """ Get a printable representation of an instruction. """
         def _get_formatted_description(key, vars):
             description = key
-            for var_name, var_value in vars.iteritems():
+            for var_name, var_value in vars.items():
                 description = description.replace(var_name, str(var_value))
             return description
 
@@ -288,7 +288,7 @@ class ArchM68k(ArchInterface):
         id = self.dict_operand_label_to_index[key]
         mode_format = self.table_operand_types[id][EAMI_FORMAT]
         substitutions = self.function_get_operand_values(instruction, operand, lookup_symbol)
-        for key, (value, value_string) in substitutions.iteritems():
+        for key, (value, value_string) in substitutions.items():
             mode_format = mode_format.replace(key, value_string)
         return mode_format
 

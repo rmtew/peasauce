@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
     Peasauce - interactive disassembler
     Copyright (C) 2012-2017 Richard Tew
@@ -25,9 +27,9 @@ http://qt-project.org/wiki/Signals_and_Slots_in_PySide
 """
 
 import collections
-import cPickle
+import pickle
 import logging
-import new # type: ignore
+#import new # type: ignore
 import operator
 import os
 import sys
@@ -38,7 +40,7 @@ import types
 # mypy-lang support
 from typing import Any, List
 
-from PySide import QtCore, QtGui # type: ignore
+from Qt import QtCore, QtGui, QtWidgets # type: ignore
 
 import disassemblylib
 import editor_state
@@ -166,9 +168,9 @@ class CustomItemModel(BaseItemModel):
     """ The main reason for this subclass is to give custom column alignment. """
     def __init__(self, columns, parent):
         self._row_data = []
-        self._sort_column1 = 0
-        self._sort_column2 = 0
-        self._sort_order = QtCore.Qt.SortOrder.AscendingOrder
+        self._sort_column1 = 0 # type: int
+        self._sort_column2 = 0 # type: int
+        self._sort_order = QtCore.Qt.AscendingOrder
 
         super(CustomItemModel, self).__init__(columns, parent)
 
@@ -203,14 +205,13 @@ class CustomItemModel(BaseItemModel):
     def rowCount(self, parent=None):
         return len(self._row_data)
 
-    def _sort_list(self, l):
+    def _sort_list(self, l: List) -> None:
         ix1 = self._sort_column1
         ix2 = self._sort_column2
-        if self._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
-            f = lambda t1, t2: cmp((t1[ix1], t1[ix2]), (t2[ix1], t2[ix2]))
+        if self._sort_order == QtCore.Qt.AscendingOrder:
+            l.sort(key=lambda v: (v[ix1], v[ix2]))
         else:
-            f = lambda t1, t2: cmp((t2[ix1], t2[ix2]), (t1[ix1], t1[ix2]))
-        l.sort(f)
+            l.sort(key=lambda v: (v[ix1], v[ix2]), reverse=True)
 
     def sort(self, column, sort_order):
         if self._sort_column1 == column and self._sort_order == sort_order:
@@ -230,7 +231,8 @@ def create_table_model(parent, columns, _class=None):
         _class = CustomItemModel
     return _class(columns, parent)
 
-class CustomQTableView(QtGui.QTableView):
+
+class CustomQTableView(QtWidgets.QTableView):
     selection_change_signal = QtCore.Signal(tuple)
     _initial_line_idx = None # type: int
     _selected_indexes = [] # type: List[Any]
@@ -256,21 +258,21 @@ class CustomQTableView(QtGui.QTableView):
         self.selection_change_signal.emit((selected, deselected))
 
 
-class DisassemblyOperandDelegate(QtGui.QStyledItemDelegate):
+class DisassemblyOperandDelegate(QtWidgets.QStyledItemDelegate):
     def __init__(self, parent, window):
         self.window = window
         super(DisassemblyOperandDelegate, self).__init__(parent)
 
     def paint(self, painter, option, index):
         if index.column() == 4:
-            options = QtGui.QStyleOptionViewItemV4(option)
+            options = QtWidgets.QStyleOptionViewItem(option)
             self.initStyleOption(options, index)
 
-            style = QtGui.QApplication.style() if options.widget is None else options.widget.style()
+            style = QtWidgets.QApplication.style() if options.widget is None else options.widget.style()
             doc = QtGui.QTextDocument()
             doc.setDefaultFont(self.parent().font())
             text = options.text
-            if options.state & QtGui.QStyle.State_Selected:
+            if options.state & QtWidgets.QStyle.State_Selected:
                 bits = text.split(", ")
                 for i, operand_text in enumerate(bits):
                     if i == self.window.last_selected_operand:
@@ -285,14 +287,14 @@ class DisassemblyOperandDelegate(QtGui.QStyledItemDelegate):
             doc.setTextWidth(option.rect.width())
             doc.setDocumentMargin(0)
             options.text = ""
-            style.drawControl(QtGui.QStyle.CE_ItemViewItem, options, painter)
+            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, options, painter)
             ctx = QtGui.QAbstractTextDocumentLayout.PaintContext()
             # Ensures that the selection colours are correct.
-            if options.state & QtGui.QStyle.State_Selected:
+            if options.state & QtWidgets.QStyle.State_Selected:
                 ctx.palette.setColor(QtGui.QPalette.Text, options.palette.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
 
             # Errors on PySide 2.2.1, seems to do the same thing as the following attr access.
-            #textRect = style.subElementRect(QtGui.QStyle.SE_ItemViewItemText, options, options.widget)
+            #textRect = style.subElementRect(QtWidgets.QStyle.SE_ItemViewItemText, options, options.widget)
             textRect = options.rect
             painter.save()
             painter.translate(textRect.topLeft())
@@ -307,7 +309,7 @@ class DisassemblyOperandDelegate(QtGui.QStyledItemDelegate):
         I do not remember why I had this.  Maybe something to do with auto-sizing that did not work?
         columnNumber = index.column()
         if columnNumber == 4:
-            options = QtGui.QStyleOptionViewItemV4(option)
+            options = QtWidgets.QStyleOptionViewItemV4(option)
             self.initStyleOption(options, index)
             doc = QtGui.QTextDocument()
             doc.setHtml(options.text)
@@ -334,12 +336,12 @@ def create_table_widget(parent, model, multiselect=False):
     table.horizontalHeader().setStretchLastSection(True)
     #
     # table.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-    table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
+    table.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerItem)
     # No selection of individual cells, but rather line specific selection.
     if multiselect:
-        table.setSelectionMode(QtGui.QAbstractItemView.SelectionMode.MultiSelection)
-    table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-    table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+    table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     return table
 
 
@@ -371,8 +373,8 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def request_load_file(self):
         # Request the user select a file.
-        options = QtGui.QFileDialog.Options()
-        file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self.owner_ref(), "Select a file to disassemble", options=options)
+        options = QtWidgets.QFileDialog.Options()
+        file_path, open_filter = QtWidgets.QFileDialog.getOpenFileName(self.owner_ref(), "Select a file to disassemble", options=options)
         if not len(file_path):
             return
         # Cover the case of a command-line startup with a current directory file name.
@@ -383,40 +385,40 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
     def request_new_project_option_values(self, options):
         result = NewProjectDialog(options, self.file_path, self.owner_ref()).exec_()
-        if result != QtGui.QDialog.Accepted:
+        if result != QtWidgets.QDialog.Accepted:
             return ERRMSG_BAD_NEW_PROJECT_OPTIONS
         return options
 
     def request_load_project_option_values(self, load_options):
         result = LoadProjectDialog(load_options, self.file_path, self.owner_ref()).exec_()
-        # if result == QtGui.QDialog.Accepted:
+        # if result == QtWidgets.QDialog.Accepted:
         return load_options
 
     def request_save_project_option_values(self, save_options):
-        options = QtGui.QFileDialog.Options()
-        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner_ref(), caption="Save to...", filter=PROJECT_FILTER, options=options)
+        options = QtWidgets.QFileDialog.Options()
+        save_file_path, filter_text = QtWidgets.QFileDialog.getSaveFileName(self.owner_ref(), caption="Save to...", filter=PROJECT_FILTER, options=options)
         if not len(save_file_path):
             return
         result = SaveProjectDialog(save_options, save_file_path, self.owner_ref()).exec_()
-        if result != QtGui.QDialog.Accepted:
+        if result != QtWidgets.QDialog.Accepted:
             return
         save_options.save_file_path = save_file_path
         return save_options
 
     def request_code_save_file(self):
-        options = QtGui.QFileDialog.Options()
-        save_file_path, filter_text = QtGui.QFileDialog.getSaveFileName(self.owner_ref(), caption="Export source code to...", filter=SOURCE_CODE_FILTER, options=options)
+        options = QtWidgets.QFileDialog.Options()
+        save_file_path, filter_text = QtWidgets.QFileDialog.getSaveFileName(self.owner_ref(), caption="Export source code to...", filter=SOURCE_CODE_FILTER, options=options)
         if len(save_file_path):
             return open(save_file_path, "wb")
 
     def request_text(self, title_text, prompt_text, default_text=""):
-        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), title_text, prompt_text, QtGui.QLineEdit.Normal, default_text)
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), title_text, prompt_text, QtWidgets.QLineEdit.Normal, default_text)
         text = text.strip()
         if ok and text != '':
             return text
 
     def request_address(self, default_address):
-        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Which address?", "Address:", QtGui.QLineEdit.Normal, "0x%X" % default_address)
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Which address?", "Address:", QtWidgets.QLineEdit.Normal, "0x%X" % default_address)
         text = text.strip()
         if ok and text != '':
             return util.str_to_int(text)
@@ -432,13 +434,13 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
             return dialog.selection_key
 
     def request_label_name(self, default_label_name):
-        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Rename symbol", "New name:", QtGui.QLineEdit.Normal, default_label_name)
+        text, ok = QtGui.QInputDialog.getText(self.owner_ref(), "Rename symbol", "New name:", QtWidgets.QLineEdit.Normal, default_label_name)
         text = text.strip()
         if ok and text != default_label_name:
             return text
 
     def event_tick(self, active_client):
-        QtGui.qApp.processEvents()
+        QtWidgets.qApp.processEvents()
 
     ## Events related to the lifetime of an attempt to load a file.
     # It does not appear to be necessary to delegate these to the GUI thread.
@@ -492,13 +494,13 @@ class QTUIEditorClient(editor_state.ClientAPI, QtCore.QObject):
 
 
 
-class MainWindow(QtGui.QMainWindow):
+class MainWindow(QtWidgets.QMainWindow):
     _settings = None # type: dict
 
     loaded_signal = QtCore.Signal(int)
     log_signal = QtCore.Signal(tuple)
 
-    _progress_dialog = None # type: QtGui.QProgressDialog
+    _progress_dialog = None # type: QtWidgets.QProgressDialog
     _progress_dialog_steps = 0 # type: int
 
     def __init__(self, parent=None):
@@ -531,7 +533,7 @@ class MainWindow(QtGui.QMainWindow):
         self.list_table = create_table_widget(self, self.list_model)
         self.list_table.setColumnWidth(4, 200)
         self.list_table.setItemDelegateForColumn(4, DisassemblyOperandDelegate(self.list_table, self))
-        self.list_table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
+        self.list_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.list_table.selection_change_signal.connect(self.list_table_selection_change_event)
         self.setCentralWidget(self.list_table)
 
@@ -541,7 +543,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # Override the default behaviour of using the same font for the table header, that the table itself uses.
         # TODO: Maybe rethink this, as it looks a bit disparate to use different fonts for both.
-        default_header_font = QtGui.QApplication.font(self.list_table.horizontalHeader())
+        default_header_font = QtWidgets.QApplication.font(self.list_table.horizontalHeader())
         self.list_model._set_header_font(default_header_font)
 
         ## RESTORE SAVED SETTINGS
@@ -599,7 +601,7 @@ class MainWindow(QtGui.QMainWindow):
         self.set_selected_operand(0)
 
     def create_dock_windows(self):
-        dock = QtGui.QDockWidget("Log", self)
+        dock = QtWidgets.QDockWidget("Log", self)
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
         self.log_model = create_table_model(self, [ ("Time", str), ("Level", str), ("System", str), ("Description", str), ])
         self.tracked_models.append(self.log_model)
@@ -610,7 +612,7 @@ class MainWindow(QtGui.QMainWindow):
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-log") # State/geometry persistence requirement.
 
-        dock = QtGui.QDockWidget("Symbol List", self)
+        dock = QtWidgets.QDockWidget("Symbol List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.symbols_model = create_table_model(self, [ ("Address", hex), ("Symbol", str), ])
         self.tracked_models.append(self.symbols_model)
@@ -629,7 +631,7 @@ class MainWindow(QtGui.QMainWindow):
         self.symbols_table.doubleClicked.connect(symbols_doubleClicked)
 
         # The "Uncertain Code References" list is currently hidden by default.
-        dock = QtGui.QDockWidget("Uncertain Code References", self)
+        dock = QtWidgets.QDockWidget("Uncertain Code References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_code_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.tracked_models.append(self.uncertain_code_references_model)
@@ -648,15 +650,15 @@ class MainWindow(QtGui.QMainWindow):
             self.scroll_to_address(new_address)
         self.uncertain_code_references_table.doubleClicked.connect(uncertain_code_references_doubleClicked)
         def uncertain_code_references_customContextMenuRequested(pos):
-            relocate_action = QtGui.QAction("Create label", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_code_references_table, UNCERTAIN_ADDRESS_IDX))
-            menu = QtGui.QMenu(self)
+            relocate_action = QtWidgets.QAction("Create label", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_code_references_table, UNCERTAIN_ADDRESS_IDX))
+            menu = QtWidgets.QMenu(self)
             menu.addAction(relocate_action)
             menu.exec_(self.uncertain_code_references_table.mapToGlobal(pos))
         self.uncertain_code_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.uncertain_code_references_table.customContextMenuRequested.connect(uncertain_code_references_customContextMenuRequested)
 
         # The "Uncertain Data References" list is currently hidden by default.
-        dock = QtGui.QDockWidget("Uncertain Data References", self)
+        dock = QtWidgets.QDockWidget("Uncertain Data References", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.uncertain_data_references_model = create_table_model(self, [ ("Address", hex), ("Value", hex), ("Source Code", str), ])
         self.tracked_models.append(self.uncertain_data_references_model)
@@ -675,14 +677,14 @@ class MainWindow(QtGui.QMainWindow):
             self.scroll_to_address(new_address)
         self.uncertain_data_references_table.doubleClicked.connect(uncertain_data_references_doubleClicked)
         def uncertain_data_references_customContextMenuRequested(pos):
-            relocate_action = QtGui.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_data_references_table, UNCERTAIN_ADDRESS_IDX))
-            menu = QtGui.QMenu(self)
+            relocate_action = QtWidgets.QAction("Apply labelisation", self, statusTip="Specify selected rows should use labels in place of their absolute addresses", triggered=lambda:self._create_labels_for_selected_rows(self.uncertain_data_references_table, UNCERTAIN_ADDRESS_IDX))
+            menu = QtWidgets.QMenu(self)
             menu.addAction(relocate_action)
             menu.exec_(self.uncertain_data_references_table.mapToGlobal(pos))
         self.uncertain_data_references_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.uncertain_data_references_table.customContextMenuRequested.connect(uncertain_data_references_customContextMenuRequested)
 
-        dock = QtGui.QDockWidget("Segment List", self)
+        dock = QtWidgets.QDockWidget("Segment List", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         model = create_table_model(self, [ ("#", int), ("Type", str), ("Memory", int), ("Disk", int), ("Relocs", int), ("Symbols", int), ])
         self.tracked_models.append(model)
@@ -693,7 +695,7 @@ class MainWindow(QtGui.QMainWindow):
         self.viewMenu.addAction(dock.toggleViewAction())
         dock.setObjectName("dock-segments") # State/geometry persistence requirement.
 
-        dock = QtGui.QDockWidget("Orphaned Blocks", self)
+        dock = QtWidgets.QDockWidget("Orphaned Blocks", self)
         dock.setAllowedAreas(QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         model = create_table_model(self, [ ("Address", hex), ("Length", int), ("Source Code", str), ])
         self.tracked_models.append(model)
@@ -705,40 +707,40 @@ class MainWindow(QtGui.QMainWindow):
         dock.setObjectName("dock-orphaned-blocks") # State/geometry persistence requirement.
 
     def create_menus(self):
-        self.open_action = QtGui.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
-        self.save_project_action = QtGui.QAction("&Save project", self, statusTip="Save currently loaded project", triggered=self.interaction_request_save_project)
-        #self.save_project_as_action = QtGui.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
-        self.export_source_action = QtGui.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
-        self.quit_action = QtGui.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
+        self.open_action = QtWidgets.QAction("&Open file", self, shortcut="Ctrl+O", statusTip="Disassemble a new file", triggered=self.menu_file_open)
+        self.save_project_action = QtWidgets.QAction("&Save project", self, statusTip="Save currently loaded project", triggered=self.interaction_request_save_project)
+        #self.save_project_as_action = QtWidgets.QAction("Save project as..", self, statusTip="Save currently loaded project under a specified name", triggered=self.interaction_request_save_project_as)
+        self.export_source_action = QtWidgets.QAction("&Export source", self, statusTip="Export source code", triggered=self.interaction_request_export_source)
+        self.quit_action = QtWidgets.QAction("&Quit", self, shortcut="Ctrl+Q", statusTip="Quit the application", triggered=self.menu_file_quit)
         
-        self.edit_undo_action = QtGui.QAction("Undo", self, shortcut="Ctrl+Z", statusTip="Undo the last action", triggered=self.interaction_undo_last_action)
-        self.edit_redo_action = QtGui.QAction("Redo", self, shortcut="Ctrl+Y", statusTip="Redo the last action", triggered=self.interaction_redo_from_action_stack)
+        self.edit_undo_action = QtWidgets.QAction("Undo", self, shortcut="Ctrl+Z", statusTip="Undo the last action", triggered=self.interaction_undo_last_action)
+        self.edit_redo_action = QtWidgets.QAction("Redo", self, shortcut="Ctrl+Y", statusTip="Redo the last action", triggered=self.interaction_redo_from_action_stack)
 
-        self.edit_datatype_submenu_action = QtGui.QAction("Change address datatype", self, statusTip="Change data type at current address")
-        self.edit_set_datatype_code_action = QtGui.QAction("Code", self, shortcut="Alt+C", statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
-        self.edit_set_datatype_32bit_action = QtGui.QAction("32 bit", self, shortcut="Alt+3", statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
-        self.edit_set_datatype_16bit_action = QtGui.QAction("16 bit", self, shortcut="Alt+2", statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
-        self.edit_set_datatype_8bit_action = QtGui.QAction("8 bit", self, shortcut="Alt+1", statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
-        self.edit_set_datatype_ascii_action = QtGui.QAction("ASCII", self, shortcut="Alt+A", statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
+        self.edit_datatype_submenu_action = QtWidgets.QAction("Change address datatype", self, statusTip="Change data type at current address")
+        self.edit_set_datatype_code_action = QtWidgets.QAction("Code", self, shortcut="Alt+C", statusTip="Change data type to code", triggered=self.interaction_set_datatype_code)
+        self.edit_set_datatype_32bit_action = QtWidgets.QAction("32 bit", self, shortcut="Alt+3", statusTip="Change data type to 32 bit", triggered=self.interaction_set_datatype_32bit)
+        self.edit_set_datatype_16bit_action = QtWidgets.QAction("16 bit", self, shortcut="Alt+2", statusTip="Change data type to 16 bit", triggered=self.interaction_set_datatype_16bit)
+        self.edit_set_datatype_8bit_action = QtWidgets.QAction("8 bit", self, shortcut="Alt+1", statusTip="Change data type to 8 bit", triggered=self.interaction_set_datatype_8bit)
+        self.edit_set_datatype_ascii_action = QtWidgets.QAction("ASCII", self, shortcut="Alt+A", statusTip="Change data type to ascii", triggered=self.interaction_set_datatype_ascii)
 
-        self.edit_numericbase_submenu_action = QtGui.QAction("Operand numeric base", self, statusTip="Change numeric base of selected operand")
-        self.edit_set_numericbase_decimal_action = QtGui.QAction("Decimal", self, statusTip="Change numeric base to decimal", triggered=lambda: None)
-        self.edit_set_numericbase_hexadecimal_action = QtGui.QAction("Hexadecimal", self, statusTip="Change numeric base to hexadecimal", triggered=lambda: None)
-        self.edit_set_numericbase_binary_action = QtGui.QAction("Binary", self, statusTip="Change numeric base to binary", triggered=lambda: None)
+        self.edit_numericbase_submenu_action = QtWidgets.QAction("Operand numeric base", self, statusTip="Change numeric base of selected operand")
+        self.edit_set_numericbase_decimal_action = QtWidgets.QAction("Decimal", self, statusTip="Change numeric base to decimal", triggered=lambda: None)
+        self.edit_set_numericbase_hexadecimal_action = QtWidgets.QAction("Hexadecimal", self, statusTip="Change numeric base to hexadecimal", triggered=lambda: None)
+        self.edit_set_numericbase_binary_action = QtWidgets.QAction("Binary", self, statusTip="Change numeric base to binary", triggered=lambda: None)
 
-        self.search_find = QtGui.QAction("Find..", self, statusTip="Find some specific text", triggered=self.menu_search_find)
-        self.goto_address_action = QtGui.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
+        self.search_find = QtWidgets.QAction("Find..", self, statusTip="Find some specific text", triggered=self.menu_search_find)
+        self.goto_address_action = QtWidgets.QAction("Go to address", self, shortcut="Ctrl+G", statusTip="View a specific address", triggered=self.menu_search_goto_address)
         if True:
-            self.search_previous_submenu_action = QtGui.QAction("Previous", self, statusTip="Previous navigation options")
-            self.search_previous_code_block_action = QtGui.QAction("Go to previous code block", self, shortcut="Ctrl+Shift+C", statusTip="View previous code block", triggered=self.menu_search_goto_previous_code_block)
-            self.search_previous_data_block_action = QtGui.QAction("Go to previous data block", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
-            self.search_previous_text_match_action = QtGui.QAction("Go to previous text match", self, shortcut="Ctrl+Shift+F", statusTip="View previous text match", triggered=self.menu_search_goto_previous_text_match)
+            self.search_previous_submenu_action = QtWidgets.QAction("Previous", self, statusTip="Previous navigation options")
+            self.search_previous_code_block_action = QtWidgets.QAction("Go to previous code block", self, shortcut="Ctrl+Shift+C", statusTip="View previous code block", triggered=self.menu_search_goto_previous_code_block)
+            self.search_previous_data_block_action = QtWidgets.QAction("Go to previous data block", self, shortcut="Ctrl+Shift+D", statusTip="View previous data block", triggered=self.menu_search_goto_previous_data_block)
+            self.search_previous_text_match_action = QtWidgets.QAction("Go to previous text match", self, shortcut="Ctrl+Shift+F", statusTip="View previous text match", triggered=self.menu_search_goto_previous_text_match)
         if True:
-            self.search_next_submenu_action = QtGui.QAction("Next", self, statusTip="Next navigation options")
-            self.search_next_code_block_action = QtGui.QAction("Go to next code block", self, shortcut="Ctrl+C", statusTip="View next code block", triggered=self.menu_search_goto_next_code_block)
-            self.search_next_data_block_action = QtGui.QAction("Go to next data block", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
-            self.search_next_text_match_action = QtGui.QAction("Go to next text match", self, shortcut="Ctrl+F", statusTip="View next text match", triggered=self.menu_search_goto_next_text_match)
-        self.choose_font_action = QtGui.QAction("Select disassembly font", self, statusTip="Change the font used in the disassembly view", triggered=self.menu_settings_choose_font)
+            self.search_next_submenu_action = QtWidgets.QAction("Next", self, statusTip="Next navigation options")
+            self.search_next_code_block_action = QtWidgets.QAction("Go to next code block", self, shortcut="Ctrl+C", statusTip="View next code block", triggered=self.menu_search_goto_next_code_block)
+            self.search_next_data_block_action = QtWidgets.QAction("Go to next data block", self, shortcut="Ctrl+D", statusTip="View next data block", triggered=self.menu_search_goto_next_data_block)
+            self.search_next_text_match_action = QtWidgets.QAction("Go to next text match", self, shortcut="Ctrl+F", statusTip="View next text match", triggered=self.menu_search_goto_next_text_match)
+        self.choose_font_action = QtWidgets.QAction("Select disassembly font", self, statusTip="Change the font used in the disassembly view", triggered=self.menu_settings_choose_font)
 
         self.file_menu = self.menuBar().addMenu("&File")
         self.file_menu.addAction(self.open_action)
@@ -754,7 +756,7 @@ class MainWindow(QtGui.QMainWindow):
         self.edit_menu.addAction(self.edit_datatype_submenu_action)
         self.edit_menu.addAction(self.edit_numericbase_submenu_action)
         if True:
-            self.edit_datatype_submenu = QtGui.QMenu(self.edit_menu)
+            self.edit_datatype_submenu = QtWidgets.QMenu(self.edit_menu)
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_code_action)
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_32bit_action)
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_16bit_action)
@@ -762,7 +764,7 @@ class MainWindow(QtGui.QMainWindow):
             self.edit_datatype_submenu.addAction(self.edit_set_datatype_ascii_action)
             self.edit_datatype_submenu_action.setMenu(self.edit_datatype_submenu)
         if True:
-            self.edit_numericbase_submenu = QtGui.QMenu(self.edit_menu)
+            self.edit_numericbase_submenu = QtWidgets.QMenu(self.edit_menu)
             self.edit_numericbase_submenu.addAction(self.edit_set_numericbase_decimal_action)
             self.edit_set_numericbase_decimal_action.setEnabled(False)
             self.edit_numericbase_submenu.addAction(self.edit_set_numericbase_hexadecimal_action)
@@ -776,14 +778,14 @@ class MainWindow(QtGui.QMainWindow):
         self.search_menu.addAction(self.goto_address_action)
         self.search_menu.addAction(self.search_previous_submenu_action)
         if True:
-            self.search_previous_submenu = QtGui.QMenu(self.search_menu)
+            self.search_previous_submenu = QtWidgets.QMenu(self.search_menu)
             self.search_previous_submenu.addAction(self.search_previous_data_block_action)
             self.search_previous_submenu.addAction(self.search_previous_code_block_action)
             self.search_previous_submenu.addAction(self.search_previous_text_match_action)
             self.search_previous_submenu_action.setMenu(self.search_previous_submenu)
         self.search_menu.addAction(self.search_next_submenu_action)
         if True:
-            self.search_next_submenu = QtGui.QMenu(self.search_menu)
+            self.search_next_submenu = QtWidgets.QMenu(self.search_menu)
             self.search_next_submenu.addAction(self.search_next_data_block_action)
             self.search_next_submenu.addAction(self.search_next_code_block_action)
             self.search_next_submenu.addAction(self.search_next_text_match_action)
@@ -797,25 +799,25 @@ class MainWindow(QtGui.QMainWindow):
     def create_shortcuts(self):
         ## Main disassembly list table.
         # Place the current location on the browsing stack, and go to the address of the referenced symbol.
-        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Right")), self.list_table, self.interaction_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Go back in the browsing stack.
-        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Left")), self.list_table, self.interaction_view_pop_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(self.tr("Ctrl+Left")), self.list_table, self.interaction_view_pop_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # Display referring addresses.
-        QtGui.QShortcut(QtGui.QKeySequence(self.tr("Shift+Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(self.tr("Shift+Ctrl+Right")), self.list_table, self.interaction_view_referring_symbols).setContext(QtCore.Qt.WidgetShortcut)
         # Edit the name of a label.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.list_table, self.interaction_rename_symbol).setContext(QtCore.Qt.WidgetShortcut)
         # ...
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_1), self.list_table, self.interaction_select_operand_1).setContext(QtCore.Qt.WidgetShortcut)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_2), self.list_table, self.interaction_select_operand_2).setContext(QtCore.Qt.WidgetShortcut)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_3), self.list_table, self.interaction_select_operand_3).setContext(QtCore.Qt.WidgetShortcut)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_select_operand_previous).setContext(QtCore.Qt.WidgetShortcut)
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_select_operand_next).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_1), self.list_table, self.interaction_select_operand_1).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_2), self.list_table, self.interaction_select_operand_2).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_3), self.list_table, self.interaction_select_operand_3).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Left), self.list_table, self.interaction_select_operand_previous).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Right), self.list_table, self.interaction_select_operand_next).setContext(QtCore.Qt.WidgetShortcut)
 
         ## Uncertain code references list table.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_code_references_table, self.interaction_uncertain_code_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)
         ## Uncertain data references list table.
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)        
-        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Space), self.uncertain_data_references_table, self.interaction_show_row_contextmenu).setContext(QtCore.Qt.WidgetShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Return), self.uncertain_data_references_table, self.interaction_uncertain_data_references_view_push_symbol).setContext(QtCore.Qt.WidgetShortcut)        
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Space), self.uncertain_data_references_table, self.interaction_show_row_contextmenu).setContext(QtCore.Qt.WidgetShortcut)
 
     def reset_all(self):
         self.reset_ui()
@@ -831,8 +833,8 @@ class MainWindow(QtGui.QMainWindow):
 
     def menu_file_open(self):
         if self.editor_state.in_loaded_state(self.editor_client):
-            ret = QtGui.QMessageBox.question(self, "Abandon work?", "You have existing work loaded, do you wish to abandon it?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel)
-            if ret != QtGui.QMessageBox.Ok:
+            ret = QtWidgets.QMessageBox.question(self, "Abandon work?", "You have existing work loaded, do you wish to abandon it?", QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+            if ret != QtWidgets.QMessageBox.Ok:
                 return
             self.reset_all()
         elif not self.editor_state.in_initial_state(self.editor_client):
@@ -841,62 +843,62 @@ class MainWindow(QtGui.QMainWindow):
         self.attempt_open_file()
 
     def menu_file_quit(self):
-        if QtGui.QMessageBox.question(self, "Quit..", "Are you sure you wish to quit?", QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel):
+        if QtWidgets.QMessageBox.question(self, "Quit..", "Are you sure you wish to quit?", QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel):
             self.close()
 
     def menu_search_find(self):
         errmsg = self.editor_state.search_text(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_address(self):
         errmsg = self.editor_state.goto_address(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_previous_code_block(self):
         errmsg = self.editor_state.goto_previous_code_block(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_previous_data_block(self):
         errmsg = self.editor_state.goto_previous_data_block(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_previous_text_match(self):
         errmsg = self.editor_state.goto_previous_text_match(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_next_code_block(self):
         errmsg = self.editor_state.goto_next_code_block(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_next_data_block(self):
         errmsg = self.editor_state.goto_next_data_block(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
     def menu_search_goto_next_text_match(self):
         errmsg = self.editor_state.goto_next_text_match(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
         else:
             self.scroll_to_line(self.editor_state.get_line_number(self.editor_client))
 
@@ -913,18 +915,18 @@ class MainWindow(QtGui.QMainWindow):
 
     def interaction_request_save_project(self):
         errmsg = self.editor_state.save_project(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to save project", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to save project", errmsg)
 
     def interaction_request_export_source(self):
         errmsg = self.editor_state.export_source_code(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to export source", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to export source", errmsg)
 
     def interaction_rename_symbol(self):
         errmsg = self.editor_state.set_label_name(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
 
     def set_selected_operand(self, operand_index):
         line_index = self.editor_state.get_line_number(self.editor_client)
@@ -1003,7 +1005,7 @@ class MainWindow(QtGui.QMainWindow):
 
     def interaction_view_push_symbol(self):
         errmsg = self.editor_state.push_address(self.editor_client)
-        if type(errmsg) in types.StringTypes:
+        if type(errmsg) is str:
             # Fallback behaviour, select any uncertain data reference in the custom window.
             if errmsg == editor_state.ERRMSG_NO_IDENTIFIABLE_DESTINATION:
                 errmsg = self.editor_state.if_uncertain_data_reference_address(self.editor_client)
@@ -1013,22 +1015,22 @@ class MainWindow(QtGui.QMainWindow):
                     if new_line_idx > -1:
                         self.uncertain_data_references_table.selectRow(new_line_idx)
                         index = self.uncertain_data_references_model.index(new_line_idx, 2, QtCore.QModelIndex())
-                        self.uncertain_data_references_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+                        self.uncertain_data_references_table.scrollTo(index, QtWidgets.QAbstractItemView.PositionAtCenter)
                         dockWidget = self.uncertain_data_references_table.parentWidget()
                         if dockWidget.isHidden():
                             dockWidget.show()
-                        if isinstance(dockWidget, QtGui.QDockWidget):
+                        if isinstance(dockWidget, QtWidgets.QDockWidget):
                             dockWidget.setFocus()
                         return
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
             return
-        line_idx = self.editor_state.get_line_number(self.editor_client)
-        self.scroll_to_line(line_idx, True)
+        line_index = self.editor_state.get_line_number(self.editor_client)
+        self.scroll_to_line(line_index, True)
 
     def interaction_view_pop_symbol(self):
         errmsg = self.editor_state.pop_address(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
             return
         line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
@@ -1037,8 +1039,8 @@ class MainWindow(QtGui.QMainWindow):
         errmsg = self.editor_state.goto_referring_address(self.editor_client)
         if errmsg is False:
             return
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Error", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Error", errmsg)
             return
         line_idx = self.editor_state.get_line_number(self.editor_client)
         self.scroll_to_line(line_idx, True)
@@ -1054,28 +1056,28 @@ class MainWindow(QtGui.QMainWindow):
         #address = self.editor_state.get_address(self.editor_client)
         errmsg = self.editor_state.set_datatype_code(self.editor_client)
         #self.scroll_to_line(self.editor_state.get_line_number(self.editor_client), True)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_32bit(self):
         errmsg = self.editor_state.set_datatype_32bit(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_16bit(self):
         errmsg = self.editor_state.set_datatype_16bit(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_8bit(self):
         errmsg = self.editor_state.set_datatype_8bit(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     def interaction_set_datatype_ascii(self):
         errmsg = self.editor_state.set_datatype_ascii(self.editor_client)
-        if type(errmsg) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to change block datatype", errmsg)
+        if type(errmsg) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to change block datatype", errmsg)
 
     ## MISCELLANEIA
 
@@ -1089,7 +1091,7 @@ class MainWindow(QtGui.QMainWindow):
             logger.debug("scroll_to_line line=%d", new_line_idx)
         index = self.list_model.index(new_line_idx, 0, QtCore.QModelIndex())
         #self.list_table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.ClearAndSelect)
-        self.list_table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+        self.list_table.scrollTo(index, QtWidgets.QAbstractItemView.PositionAtCenter)
         self.list_table.setFocus()
         # NOTE(rmtew): The table is single row selection, but leaves rows selected resulting in multiple rows!
         self.list_table.clearSelection()
@@ -1117,14 +1119,14 @@ class MainWindow(QtGui.QMainWindow):
         # type: (str, Any) -> None
         self._settings[setting_name] = setting_value
         with open(SETTINGS_FILE, "wb") as f:
-            cPickle.dump(self._settings, f)
+            pickle.dump(self._settings, f)
 
     def _get_setting(self, setting_name, default_value=None):
         # type: (str, Any) -> Any
         if self._settings is None:
             if os.path.exists(SETTINGS_FILE):
                 with open(SETTINGS_FILE, "rb") as f:
-                    self._settings = cPickle.load(f)
+                    self._settings = pickle.load(f)
             else:
                 self._settings = {}
         return self._settings.get(setting_name, default_value)
@@ -1135,8 +1137,8 @@ class MainWindow(QtGui.QMainWindow):
         if result is None:
             return
         # Error message?
-        if type(result) in types.StringTypes:
-            QtGui.QMessageBox.information(self, "Unable to open file", result)
+        if type(result) is str:
+            QtWidgets.QMessageBox.information(self, "Unable to open file", result)
             return
 
         # This isn't really good enough, as long loading files may conflict with cancellation and subsequent load attempts.
@@ -1157,7 +1159,7 @@ class MainWindow(QtGui.QMainWindow):
 
         ## SYMBOLS
 
-        row_data = self.editor_state.get_symbols(self.editor_client)
+        row_data = list(self.editor_state.get_symbols(self.editor_client))
         self.symbols_model._sort_list(row_data)
         self.symbols_model._set_row_data(row_data, addition_rows=(0, len(row_data)-1))
         self.symbols_table.resizeColumnsToContents()
@@ -1261,7 +1263,7 @@ class MainWindow(QtGui.QMainWindow):
         # Sort the rows to be added in the same ordering as the model rows.
         to_model._sort_list(addition_rows)
 
-        if to_model._sort_order == QtCore.Qt.SortOrder.AscendingOrder:
+        if to_model._sort_order == QtCore.Qt.AscendingOrder:
             op = operator.le
         else:
             op = operator.ge
@@ -1290,7 +1292,7 @@ class MainWindow(QtGui.QMainWindow):
         title, description, can_cancel, step_count, abort_callback = args
 
         # Display a modal dialog.
-        d = self._progress_dialog = QtGui.QProgressDialog(self)
+        d = self._progress_dialog = QtWidgets.QProgressDialog(self)
         self._progress_dialog_steps = step_count
         if can_cancel:
             d.setCancelButtonText("&Cancel")
@@ -1348,7 +1350,7 @@ class MainWindow(QtGui.QMainWindow):
 
 ## Option dialogs.
 
-class ClickableLabel(QtGui.QLabel):
+class ClickableLabel(QtWidgets.QLabel):
     clicked = QtCore.Signal()
 
     def mousePressEvent(self, event):
@@ -1378,8 +1380,8 @@ def _make_inputdata_options(dialog, group_title, keep_input_data=True):
         dialog.inputdata_do_radio.setChecked(True)
     else:
         dialog.inputdata_dont_radio.setChecked(True)
-    inputdata_groupbox = QtGui.QGroupBox(group_title)
-    inputdata_layout = QtGui.QGridLayout()
+    inputdata_groupbox = QtWidgets.QGroupBox(group_title)
+    inputdata_layout = QtWidgets.QGridLayout()
     inputdata_layout.addWidget(dialog.inputdata_do_radio, 0, 0)
     inputdata_layout.addWidget(inputdata_do_short_label, 0, 1)
     inputdata_layout.addWidget(inputdata_do_long_label, 1, 1)
@@ -1392,11 +1394,11 @@ def _make_inputdata_options(dialog, group_title, keep_input_data=True):
 def _set_default_font(widget):
     font = QtGui.QFont()
     if not font.fromString("Arial,8,-1,5,50,0,0,0,0,0"):
-        font = QtGui.QApplication.font()
+        font = QtWidgets.QApplication.font()
     widget.setFont(font)
 
 
-class LoadProjectDialog(QtGui.QDialog):
+class LoadProjectDialog(QtWidgets.QDialog):
     """
     Dialog shown when the user loads an existing saved project.
     """
@@ -1410,12 +1412,12 @@ class LoadProjectDialog(QtGui.QDialog):
         self.setWindowModality(QtCore.Qt.WindowModal)
 
         ## Information layout.
-        problem_groupbox = QtGui.QGroupBox("Problem")
-        problem_label1 = QtGui.QLabel("This project does not include the original data.")
-        problem_label2 = QtGui.QLabel("Perhaps whomever created the project opted to exclude it.")
-        problem_label3 = QtGui.QLabel("Perhaps Peasource's cached copy was somehow deleted.")
-        problem_label4 = QtGui.QLabel("In any case, you need to locate and provide it.")
-        problem_layout = QtGui.QVBoxLayout()
+        problem_groupbox = QtWidgets.QGroupBox("Problem")
+        problem_label1 = QtWidgets.QLabel("This project does not include the original data.")
+        problem_label2 = QtWidgets.QLabel("Perhaps whomever created the project opted to exclude it.")
+        problem_label3 = QtWidgets.QLabel("Perhaps Peasource's cached copy was somehow deleted.")
+        problem_label4 = QtWidgets.QLabel("In any case, you need to locate and provide it.")
+        problem_layout = QtWidgets.QVBoxLayout()
         problem_layout.addWidget(problem_label1)
         problem_layout.addSpacing(10)
         problem_layout.addWidget(problem_label2)
@@ -1428,14 +1430,14 @@ class LoadProjectDialog(QtGui.QDialog):
         original_filename = load_options.input_file_filename
         original_checksum = load_options.input_file_checksum
 
-        filespec_groupbox = QtGui.QGroupBox("Original file")
-        filespec_layout = QtGui.QGridLayout()
-        filename_key_label = QtGui.QLabel("Name:")
-        filename_value_label = QtGui.QLabel(original_filename)
-        filesize_key_label = QtGui.QLabel("Size:")
-        filesize_value_label = QtGui.QLabel("%d bytes" % original_filesize)
-        filechecksum_key_label = QtGui.QLabel("Checksum:")
-        filechecksum_value_label = QtGui.QLabel("".join("%X" % ord(c) for c in original_checksum))
+        filespec_groupbox = QtWidgets.QGroupBox("Original file")
+        filespec_layout = QtWidgets.QGridLayout()
+        filename_key_label = QtWidgets.QLabel("Name:")
+        filename_value_label = QtWidgets.QLabel(original_filename)
+        filesize_key_label = QtWidgets.QLabel("Size:")
+        filesize_value_label = QtWidgets.QLabel("%d bytes" % original_filesize)
+        filechecksum_key_label = QtWidgets.QLabel("Checksum:")
+        filechecksum_value_label = QtWidgets.QLabel("".join("%X" % ord(c) for c in original_checksum))
         filespec_layout.addWidget(filename_key_label, 0, 0, 1, 1)
         filespec_layout.addWidget(filename_value_label, 0, 1, 1, 19)
         filespec_layout.addWidget(filesize_key_label, 1, 0, 1, 1)
@@ -1444,23 +1446,23 @@ class LoadProjectDialog(QtGui.QDialog):
         filespec_layout.addWidget(filechecksum_value_label, 2, 1, 1, 19)
         filespec_groupbox.setLayout(filespec_layout)
 
-        filelocation_groupbox = QtGui.QGroupBox("File location")
-        filelocation_layout = QtGui.QVBoxLayout()
-        path_layout = QtGui.QHBoxLayout()
-        path_lineedit = QtGui.QLineEdit()
+        filelocation_groupbox = QtWidgets.QGroupBox("File location")
+        filelocation_layout = QtWidgets.QVBoxLayout()
+        path_layout = QtWidgets.QHBoxLayout()
+        path_lineedit = QtWidgets.QLineEdit()
         path_button = QtGui.QToolButton(self) # A button that stays minimally sized.
         path_button.setText("...")
         path_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
         path_layout.addWidget(path_lineedit)
         path_layout.addWidget(path_button)
-        valid_size_checkbox = QtGui.QCheckBox("Size", self)
+        valid_size_checkbox = QtWidgets.QCheckBox("Size", self)
         valid_size_checkbox.setChecked(False)
         valid_size_checkbox.setEnabled(False)
-        valid_checksum_checkbox = QtGui.QCheckBox("Checksum", self)
+        valid_checksum_checkbox = QtWidgets.QCheckBox("Checksum", self)
         valid_checksum_checkbox.setChecked(False)
         valid_checksum_checkbox.setEnabled(False)
-        validity_layout = QtGui.QHBoxLayout()
-        validity_layout.addWidget(QtGui.QLabel("Validity:"))
+        validity_layout = QtWidgets.QHBoxLayout()
+        validity_layout.addWidget(QtWidgets.QLabel("Validity:"))
         validity_layout.addWidget(valid_size_checkbox, alignment=QtCore.Qt.AlignLeft)
         validity_layout.addWidget(valid_checksum_checkbox, alignment=QtCore.Qt.AlignLeft)
         filelocation_layout.addLayout(path_layout)
@@ -1515,26 +1517,26 @@ class LoadProjectDialog(QtGui.QDialog):
         path_lineedit.returnPressed.connect(on_path_lineedit_returnPressed)
 
         def on_path_button_clicked():
-            options = QtGui.QFileDialog.Options()
-            file_path, open_filter = QtGui.QFileDialog.getOpenFileName(self, "Locate original file..", options=options)
+            options = QtWidgets.QFileDialog.Options()
+            file_path, open_filter = QtWidgets.QFileDialog.getOpenFileName(self, "Locate original file..", options=options)
             if not len(file_path):
                 return
             path_lineedit.setText(file_path)
         path_button.clicked.connect(on_path_button_clicked)
 
         ## Buttons layout.
-        load_button = QtGui.QPushButton("Load")
+        load_button = QtWidgets.QPushButton("Load")
         load_button.setEnabled(False)
-        cancel_button = QtGui.QPushButton("Cancel")
+        cancel_button = QtWidgets.QPushButton("Cancel")
         self.connect(load_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
         self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
 
-        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout = QtWidgets.QHBoxLayout()
         buttons_layout.addWidget(load_button, QtCore.Qt.AlignRight)
         buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
 
         ## Outer layout.
-        information_layout = QtGui.QVBoxLayout()
+        information_layout = QtWidgets.QVBoxLayout()
         information_layout.addWidget(problem_groupbox)
         information_layout.addWidget(filespec_groupbox)
         information_layout.addWidget(filelocation_groupbox)
@@ -1545,7 +1547,7 @@ class LoadProjectDialog(QtGui.QDialog):
         self.load_options.loader_file_path = self.valid_file_path
         return super(LoadProjectDialog, self).accept()
 
-class SaveProjectDialog(QtGui.QDialog):
+class SaveProjectDialog(QtWidgets.QDialog):
     """
     Dialog shown when the user saves the currently loaded project.
     """
@@ -1562,17 +1564,17 @@ class SaveProjectDialog(QtGui.QDialog):
         inputdata_groupbox = _make_inputdata_options(self, "File Options", save_options.cache_input_file)
 
         ## Buttons layout.
-        save_button = QtGui.QPushButton("Save")
-        cancel_button = QtGui.QPushButton("Cancel")
+        save_button = QtWidgets.QPushButton("Save")
+        cancel_button = QtWidgets.QPushButton("Cancel")
         self.connect(save_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
         self.connect(cancel_button, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("reject()"))
 
-        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout = QtWidgets.QHBoxLayout()
         buttons_layout.addWidget(save_button, QtCore.Qt.AlignRight)
         buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
 
         ## Outer layout.
-        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout = QtWidgets.QVBoxLayout()
         outer_vertical_layout.addWidget(inputdata_groupbox)
         outer_vertical_layout.addLayout(buttons_layout)
         self.setLayout(outer_vertical_layout)
@@ -1582,7 +1584,7 @@ class SaveProjectDialog(QtGui.QDialog):
         return super(SaveProjectDialog, self).accept()
 
 
-class NewProjectDialog(QtGui.QDialog):
+class NewProjectDialog(QtWidgets.QDialog):
     """
     Dialog shown when the user loads a file for disassembling (not a saved project).
     """
@@ -1596,21 +1598,21 @@ class NewProjectDialog(QtGui.QDialog):
 
         ## Options / information layouts.
         # File groupbox.
-        file_name_key_label = QtGui.QLabel("Name:")
-        file_name_value_label = QtGui.QLabel(file_name)
-        file_size_key_label = QtGui.QLabel("Size:")
-        file_size_value_label = QtGui.QLabel("%d bytes" % os.path.getsize(file_path))
-        file_hline = QtGui.QFrame()
-        file_hline.setFrameShape(QtGui.QFrame.HLine)
-        file_hline.setFrameShadow(QtGui.QFrame.Sunken)
+        file_name_key_label = QtWidgets.QLabel("Name:")
+        file_name_value_label = QtWidgets.QLabel(file_name)
+        file_size_key_label = QtWidgets.QLabel("Size:")
+        file_size_value_label = QtWidgets.QLabel("%d bytes" % os.path.getsize(file_path))
+        file_hline = QtWidgets.QFrame()
+        file_hline.setFrameShape(QtWidgets.QFrame.HLine)
+        file_hline.setFrameShadow(QtWidgets.QFrame.Sunken)
         file_hline.setLineWidth(0)
         file_hline.setMidLineWidth(1)
 
-        file_type_key_label = QtGui.QLabel("Type:")
+        file_type_key_label = QtWidgets.QLabel("Type:")
         s = res.get_string_by_id(res.FILE_FORMAT_KEY, new_options.loader_filetype)
-        file_type_value_label = QtGui.QLabel(s)
-        file_arch_key_label = QtGui.QLabel("Architecture:")
-        self.file_arch_value_combobox = file_arch_value_combobox = QtGui.QComboBox(self)
+        file_type_value_label = QtWidgets.QLabel(s)
+        file_arch_key_label = QtWidgets.QLabel("Architecture:")
+        self.file_arch_value_combobox = file_arch_value_combobox = QtWidgets.QComboBox(self)
         if new_options.is_binary_file:
             # List all supported processor options, for user to choose.
             for processor_id in disassemblylib.get_processor_ids():
@@ -1623,8 +1625,8 @@ class NewProjectDialog(QtGui.QDialog):
             file_arch_value_combobox.addItem(s, new_options.loader_processor)
             file_arch_value_combobox.setEnabled(False)
 
-        information_groupbox = QtGui.QGroupBox("File Information")
-        information_layout = QtGui.QGridLayout()
+        information_groupbox = QtWidgets.QGroupBox("File Information")
+        information_layout = QtWidgets.QGridLayout()
         information_layout.addWidget(file_name_key_label, 0, 0)
         information_layout.addWidget(file_name_value_label, 0, 1)
         information_layout.addWidget(file_size_key_label, 1, 0)
@@ -1637,20 +1639,20 @@ class NewProjectDialog(QtGui.QDialog):
         information_groupbox.setLayout(information_layout)
 
         # Processing groupbox.
-        processing_loadaddress_key_label = QtGui.QLabel("Load address:")
-        self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtGui.QLineEdit("0x%X" % self.new_options.loader_load_address)
+        processing_loadaddress_key_label = QtWidgets.QLabel("Load address:")
+        self.processing_loadaddress_value_textedit = processing_loadaddress_value_textedit = QtWidgets.QLineEdit("0x%X" % self.new_options.loader_load_address)
         processing_loadaddress_value_textedit.setEnabled(new_options.is_binary_file)
-        processing_entryaddress_key_label = QtGui.QLabel("Entrypoint address:")
-        self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtGui.QLineEdit("0x%X" % self.new_options.loader_entrypoint_offset)
+        processing_entryaddress_key_label = QtWidgets.QLabel("Entrypoint address:")
+        self.processing_entryaddress_value_textedit = processing_entryaddress_value_textedit = QtWidgets.QLineEdit("0x%X" % self.new_options.loader_entrypoint_offset)
         processing_entryaddress_value_textedit.setEnabled(new_options.is_binary_file)
-        processing_hline1 = QtGui.QFrame()
-        processing_hline1.setFrameShape(QtGui.QFrame.HLine)
-        processing_hline1.setFrameShadow(QtGui.QFrame.Sunken)
+        processing_hline1 = QtWidgets.QFrame()
+        processing_hline1.setFrameShape(QtWidgets.QFrame.HLine)
+        processing_hline1.setFrameShadow(QtWidgets.QFrame.Sunken)
         processing_hline1.setLineWidth(0)
         processing_hline1.setMidLineWidth(0)
 
-        processing_groupbox = QtGui.QGroupBox("Processing")
-        processing_layout = QtGui.QGridLayout()
+        processing_groupbox = QtWidgets.QGroupBox("Processing")
+        processing_layout = QtWidgets.QGridLayout()
         processing_layout.addWidget(processing_loadaddress_key_label, 0, 0)
         processing_layout.addWidget(processing_loadaddress_value_textedit, 0, 1)
         processing_layout.addWidget(processing_entryaddress_key_label, 1, 0)
@@ -1660,22 +1662,22 @@ class NewProjectDialog(QtGui.QDialog):
         processing_groupbox.setLayout(processing_layout)
 
         # Gather together complete options layout.
-        options_layout = QtGui.QHBoxLayout()
+        options_layout = QtWidgets.QHBoxLayout()
         options_layout.addWidget(information_groupbox)
         options_layout.addWidget(processing_groupbox)
 
         ## Buttons layout.
-        create_button = QtGui.QPushButton("Create")
+        create_button = QtWidgets.QPushButton("Create")
         create_button.clicked.connect(self.accept)
-        cancel_button = QtGui.QPushButton("Cancel")
+        cancel_button = QtWidgets.QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
 
-        buttons_layout = QtGui.QHBoxLayout()
+        buttons_layout = QtWidgets.QHBoxLayout()
         buttons_layout.addWidget(create_button, QtCore.Qt.AlignRight)
         buttons_layout.addWidget(cancel_button, QtCore.Qt.AlignRight)
 
         ## Outer layout.
-        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout = QtWidgets.QVBoxLayout()
         outer_vertical_layout.addLayout(options_layout)
         outer_vertical_layout.addLayout(buttons_layout)
         self.setLayout(outer_vertical_layout)
@@ -1692,7 +1694,7 @@ class NewProjectDialog(QtGui.QDialog):
         return super(NewProjectDialog, self).accept()
 
 
-class RowSelectionDialog(QtGui.QDialog):
+class RowSelectionDialog(QtWidgets.QDialog):
     selection_key = None # type: int
 
     def __init__(self, parent, title_text, body_text, button_text, rows, row_keys):
@@ -1705,7 +1707,7 @@ class RowSelectionDialog(QtGui.QDialog):
         self.setWindowTitle(title_text)
         self.setWindowModality(QtCore.Qt.WindowModal)
 
-        label_widget = QtGui.QLabel(body_text, self)
+        label_widget = QtWidgets.QLabel(body_text, self)
 
         class Model(QtCore.QAbstractItemModel):
             def __init__(self, parent, rows):
@@ -1748,22 +1750,22 @@ class RowSelectionDialog(QtGui.QDialog):
         table.horizontalHeader().setStretchLastSection(True)
         table.setFont(self.parent().list_table.font())
         # No selection of individual cells, but rather line specific selection.
-        table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-        table.setVerticalScrollMode(QtGui.QAbstractItemView.ScrollPerItem)
-        table.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QtWidgets.SingleSelection)
+        table.setSelectionBehavior(QtWidgets.SelectRows)
+        table.setVerticalScrollMode(QtWidgets.ScrollPerItem)
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         # Adjust the row data display.
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
         # Ensure the first row is selected.
         index = self.table_model.index(0, 0, QtCore.QModelIndex())
-        table.scrollTo(index, QtGui.QAbstractItemView.PositionAtCenter)
+        table.scrollTo(index, QtWidgets.QAbstractItemView.PositionAtCenter)
         table.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.Select)
 
-        button_widget = QtGui.QPushButton(button_text, self)
+        button_widget = QtWidgets.QPushButton(button_text, self)
         self.connect(button_widget, QtCore.SIGNAL("clicked()"), self, QtCore.SLOT("accept()"))
 
-        outer_vertical_layout = QtGui.QVBoxLayout()
+        outer_vertical_layout = QtWidgets.QVBoxLayout()
         outer_vertical_layout.addWidget(label_widget)
         outer_vertical_layout.addWidget(self.table_widget)
         outer_vertical_layout.addWidget(button_widget)
@@ -1792,7 +1794,7 @@ def _initialise_logging(window):
         model.setData(model.index(row_index, 3, QtCore.QModelIndex()), message)
         #table.resizeColumnsToContents()
         #table.horizontalHeader().setStretchLastSection(True)
-        #table.scrollTo(model.index(row_index, 0, QtCore.QModelIndex()), QtGui.QAbstractItemView.PositionAtBottom)
+        #table.scrollTo(model.index(row_index, 0, QtCore.QModelIndex()), QtWidgets.QAbstractItemView.PositionAtBottom)
         table.scrollToBottom()
 
     window.log_signal.connect(_ui_thread_logging)
@@ -1801,7 +1803,7 @@ def _initialise_logging(window):
         def emit(self, record):
             msg = self.format(record)
             # These logging events may be happening in the worker thread, ensure they only get displayed in the UI thread.
-            print msg
+            print(msg)
             return
             window.log_signal.emit((record.created, record.levelname, record.name, msg))
 
@@ -1815,7 +1817,7 @@ def _initialise_logging(window):
 
 
 def run():
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
 
     window = MainWindow()
     # The window needs to be created so we can connect to its signal.
@@ -1866,13 +1868,13 @@ def run():
                     error_text = window.toolapiob.load_binary_file(file_name, processor_id, load_address, entrypoint_address-load_address, input_file_name)
                 else:
                     error_text = window.toolapiob.load_file(file_name, input_file_name)
-        if type(error_text) is types.StringType:
-            print "error:", error_text
-            print "%s: <executable file>" % sys.argv[0]
-            print "%s: <project file> <input file>" % sys.argv[0]
-            print "%s: <binary file> <arch name> <load address> <entry address>" % sys.argv[0]
-            print
-            print "Addresses should use a leading '$' or '0x' to indicate they are hex, or base 16."
+        if type(error_text) is str:
+            print("error:", error_text)
+            print("%s: <executable file>" % sys.argv[0])
+            print("%s: <project file> <input file>" % sys.argv[0])
+            print("%s: <binary file> <arch name> <load address> <entry address>" % sys.argv[0])
+            print()
+            print("Addresses should use a leading '$' or '0x' to indicate they are hex, or base 16.")
             return False
         return True
     if _arg_file_load():
@@ -1881,7 +1883,7 @@ def run():
         return
     # Close window and exit (if only it worked...).
     window.close()
-    QtGui.QApplication.quit()
+    QtWidgets.QApplication.quit()
 
 if __name__ == '__main__':
     run()

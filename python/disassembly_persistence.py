@@ -4,6 +4,7 @@
     Licensed using the MIT license.
 """
 
+import io
 import logging
 import os
 import struct
@@ -66,7 +67,7 @@ def read_SegmentBlock(f):
     if line_data_count > 0:
         if get_block_data_type(block) == DATA_TYPE_CODE:
             block.line_data = [ None ] * line_data_count
-            for i in xrange(line_data_count):
+            for i in range(line_data_count):
                 type_id = persistence.read_uint8(f)
                 if type_id == SLD_INSTRUCTION:
                     block_offset = persistence.read_uint16(f)
@@ -152,7 +153,7 @@ def check_is_project_file(f):
     return persistence.read_uint32(f) == SAVEFILE_ID
 
 def save_project(f, program_data, save_options):
-    # type: (file, ProgramData, SaveProjectOptions) -> None
+    # type: (io.IOBase, ProgramData, SaveProjectOptions) -> None
     f.seek(0, os.SEEK_SET)
 
     persistence.write_uint32(f, SAVEFILE_ID)
@@ -356,7 +357,7 @@ def convert_project_format_3_to_4(input_file):
         block_data_length = hunk_length - (input_file_offset - hunk_payload_offset)
         block_data_string = input_file.read(block_data_length)
         #blocks = [ None ] * num_blocks
-        #for i in xrange(num_blocks):
+        #for i in range(num_blocks):
         #    blocks[i] = read_SegmentBlock(input_file)
         ## 2. Write the generic hunk header, then the payload, then fill in the header.
 
@@ -590,7 +591,7 @@ def load_disassembly_hunk(f, program_data):
     # Reconstitute the segment block list.
     num_blocks = persistence.read_uint32(f)
     program_data.blocks = [ None ] * num_blocks
-    for i in xrange(num_blocks):
+    for i in range(num_blocks):
         program_data.blocks[i] = read_SegmentBlock(f)
 
     ## POST PROCESSING
@@ -598,7 +599,7 @@ def load_disassembly_hunk(f, program_data):
     program_data.block_addresses = [ 0 ] * num_blocks
     program_data.block_line0s_dirtyidx = 0
     program_data.block_line0s = program_data.block_addresses[:]
-    for i in xrange(num_blocks):
+    for i in range(num_blocks):
         program_data.block_addresses[i] = program_data.blocks[i].address
 
 def load_loader_hunk(f, program_data):
