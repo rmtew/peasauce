@@ -279,7 +279,7 @@ def get_line_number_for_address(program_data, address):
             block_line0 = block_lineN
             block_lineN += size_lines
             if address_block_offset >= block_offset0 and address_block_offset < block_offsetN:
-                return int((block_line0 + (address_block_offset - block_offset0)) / num_bytes)
+                return int((block_line0 + (address_block_offset - block_offset0) / num_bytes))
     elif data_type == disassembly_data.DATA_TYPE_ASCII:
         block_lineN = get_block_line_number(program_data, block_idx) + get_block_header_line_count(program_data, block)
         address_block_offset = address - block.address

@@ -11,7 +11,7 @@
     <OutputPath>.</OutputPath>
     <ProjectTypeGuids>{888888a0-9f3d-457c-b088-3a5042f75d52}</ProjectTypeGuids>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <InterpreterId>{9a7a9026-48c1-4688-9d5d-e5699d47d074}</InterpreterId>
+    <InterpreterId>{0c6db9e6-4c5c-43c4-811b-316ad255e378}</InterpreterId>
     <InterpreterVersion>3.5</InterpreterVersion>
     <Name>peasauce</Name>
   </PropertyGroup>
@@ -97,8 +97,8 @@
     <Folder Include="test-data" />
   </ItemGroup>
   <ItemGroup>
+    <InterpreterReference Include="{0c6db9e6-4c5c-43c4-811b-316ad255e378}\3.5" />
     <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />
-    <InterpreterReference Include="{9a7a9026-48c1-4688-9d5d-e5699d47d074}\3.5" />
   </ItemGroup>
   <Import Project="$(PtvsTargetsFile)" Condition="Exists($(PtvsTargetsFile))" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" Condition="!Exists($(PtvsTargetsFile))" />
