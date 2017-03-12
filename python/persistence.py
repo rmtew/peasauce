@@ -14,7 +14,7 @@ The purpose of this module is to implement backwards compatible persistence
 of the disassembly state, at some point.
 """
 
-from io import StringIO
+from io import BytesIO, StringIO
 import os, struct
 
 
@@ -43,14 +43,13 @@ def read_bytes(f, num_bytes):
     return f.read(num_bytes)
 
 def read_string(f):
-    s = ""
+    s = b""
     while 1:
-        v = read_bytes(f, 1)
-        if v == '\0':
+        v = f.read(1)
+        if v == b'\0':
             break
         s += v
-    return s
-
+    return s.decode("utf-8")
 
 def write_uint32(f, value):
     f.write(struct.pack("<I", value))
@@ -74,8 +73,8 @@ def write_bytes(f, value, num_bytes):
     f.write(value[:num_bytes])
 
 def write_string(f, value):
-    f.write(value)
-    f.write("\0")
+    f.write(bytearray(value, "utf-8"))
+    f.write(b"\0")
 
 
 def read_set_of_uint32s(f):
@@ -175,7 +174,7 @@ def read_dict_uint32_to_string(f):
     f.seek(4 * dict_entry_count, os.SEEK_CUR)
     strings_offset = f.tell()
     string_data = f.read(chunk_size - (strings_offset - chunk_size_offset))
-    string_file = StringIO(string_data)
+    string_file = BytesIO(string_data)
     f.seek(values_offset, os.SEEK_SET)
     d = {}
     while dict_entry_count:
@@ -217,7 +216,7 @@ if __name__ == "__main__":
         def test_dict_uint32_to_set_of_uint32s(self):
             dict_uint32_to_set_of_uint32s_value = { sys.maxint: set([ sys.maxint-1, 1, sys.maxint, 0 ]), 32: set([ 16, 8, 32, 64 ]), }
 
-            f = StringIO()
+            f = BytesIO()
             write_dict_uint32_to_set_of_uint32s(f, dict_uint32_to_set_of_uint32s_value)
             write_offset = f.tell()
 
@@ -231,7 +230,7 @@ if __name__ == "__main__":
         def test_dict_uint32_to_list_of_uint32s(self):
             test_value = { sys.maxint: [ sys.maxint-1, 1, sys.maxint, 0 ], 32: [ 16, 8, 32, 64 ], }
 
-            f = StringIO()
+            f = BytesIO()
             write_dict_uint32_to_list_of_uint32s(f, test_value)
             write_offset = f.tell()
 
@@ -249,7 +248,7 @@ if __name__ == "__main__":
                 v = "".join(chr(random.randint(ord('A'), ord('z')+1)) for i in range(10))
                 test_value[k] = v
 
-            f = StringIO()
+            f = BytesIO()
             write_dict_uint32_to_string(f, test_value)
             write_offset = f.tell()
 
@@ -263,7 +262,7 @@ if __name__ == "__main__":
         def test_set_of_uint32s(self):
             test_value = set(random.randint(0, sys.maxint) for v in range(random.randint(15, 30)))
 
-            f = StringIO()
+            f = BytesIO()
             write_set_of_uint32s(f, test_value)
             write_offset = f.tell()
 

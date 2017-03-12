@@ -86,7 +86,7 @@ class ArchMIPS(ArchInterface):
         return False
 
     def function_get_match_addresses(self, M):
-        ret = {}
+        ret = []
         for operand_idx, operand in enumerate(M.opcodes):
             operand_key = operand.specification.key
             for subst_name, subst_value in operand.vars.items():
@@ -94,7 +94,7 @@ class ArchMIPS(ArchInterface):
                 if operand_key in ("PCRegion", "PCRelative") and subst_name == "xxx":
                     if (M.table_flags & IFX_BRANCH) == IFX_BRANCH:
                         flags |= MAF_CODE
-                    ret[subst_value] = operand_idx, flags
+                    ret.append((subst_value, operand_idx, flags))
         return ret
 
     def function_get_instruction_string(self, instruction, vars):

@@ -164,6 +164,7 @@ class EditorState(object):
     def reset_state(self, acting_client):
         self.disassembly_state = None
         self.line_number = 0
+        self.last_selected_operand = None
         self.address_stack = []
         self.last_search_text = None
         self.last_search_direction = None
@@ -282,6 +283,39 @@ class EditorState(object):
             return ""
         return self.disassembly_state.get_file_line(row, column)
 
+    def set_selected_operand(self, acting_client, operand_index):
+        line_index = self.get_line_number(acting_client)
+        operand_count = self.get_operand_count(acting_client, line_index)
+        if operand_index >= 0 and operand_index < operand_count:
+            self.last_selected_operand = operand_index
+            return line_index
+        return None
+
+    def get_selected_operand(self, acting_client):
+        return self.last_selected_operand
+
+    def select_next_operand(self, acting_client):
+        line_index = self.get_line_number(acting_client)
+        operand_count = self.get_operand_count(acting_client, line_index)
+        if operand_count > 0:
+            if self.last_selected_operand is None:
+                self.last_selected_operand = 0
+            else:
+                self.last_selected_operand = (self.last_selected_operand - 1) % operand_count
+            return line_index
+        return None
+
+    def select_previous_operand(self, acting_client):
+        line_index = self.get_line_number(acting_client)
+        operand_count = self.get_operand_count(acting_client, line_index)
+        if operand_count > 0:
+            if self.last_selected_operand is None:
+                self.last_selected_operand = 0
+            else:
+                self.last_selected_operand = (self.last_selected_operand + 1) % operand_count
+            return line_index
+        return None
+
     def get_symbols(self, acting_client):
         return self.disassembly_state.get_symbols()
 
@@ -289,21 +323,22 @@ class EditorState(object):
         if self.state_id != EditorState.STATE_LOADED:
             return ERRMSG_TODO_BAD_STATE_FUNCTIONALITY
 
+        # The current focus address.
         current_address = self.get_address(acting_client)
         if current_address is None:
             return ERRMSG_BUG_UNKNOWN_ADDRESS
 
-        operand_addresses = self.disassembly_state.get_referenced_symbol_addresses_for_line_number(self.line_number)
-        if len(operand_addresses) == 1:
-            next_line_number = self.disassembly_state.get_line_number_for_address(operand_addresses[0])
-            if next_line_number is None:
-                return ERRMSG_NO_IDENTIFIABLE_DESTINATION
+        for (operand_idx, operand_address) in self.disassembly_state.get_referenced_symbol_addresses_for_line_number(self.line_number):
+            if operand_idx == self.last_selected_operand:
+                next_line_number = self.disassembly_state.get_line_number_for_address(operand_address)
+                if next_line_number is None:
+                    return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 
-            self.set_line_number(acting_client, next_line_number)
-            self.address_stack.append(current_address)
-            return
-        elif len(operand_addresses) == 2:
-            return ERRMSG_BUG_NO_OPERAND_SELECTION_MECHANISM
+                # Move to where we're going.
+                self.set_line_number(acting_client, next_line_number)
+                # Remember where we came from.
+                self.address_stack.append(current_address)
+                return
 
         return ERRMSG_NO_IDENTIFIABLE_DESTINATION
 

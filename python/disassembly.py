@@ -343,35 +343,6 @@ def get_address_for_line_number(program_data, line_number):
 
     return None
 
-def api_get_referenced_symbol_addresses_for_line_number(program_data, line_number):
-    # type: (disassembly_data.ProgramData, int) -> List[int]
-    with line_count_rlock:
-        return get_referenced_symbol_addresses_for_line_number(program_data, line_number)
-
-# NOTE(rmtew): Only used by API, and really needs line locking.
-def get_referenced_symbol_addresses_for_line_number(program_data, line_number):
-    # type: (disassembly_data.ProgramData, int) -> List[int]
-    result = get_code_block_info_for_line_number(program_data, line_number)
-    if result is not None:
-        address, match = result
-        return [
-			k
-			for (k, v) in program_data.dis_get_match_addresses_func(match).items()
-			if k in program_data.symbols_by_address
-		]
-
-    block, block_idx = lookup_block_by_line_count(program_data, line_number)
-    data_type = disassembly_data.get_block_data_type(block)
-    if data_type == disassembly_data.DATA_TYPE_DATA32:
-        address = get_address_for_line_number(program_data, line_number)
-        data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
-        value = program_data.loader_data_types.uint32_value(data, block.segment_offset + (address - block.address))
-        if value in program_data.symbols_by_address:
-            return [ value ]
-
-    return []
-
-
 """
 This may be of future use, but what it should return remains to be decided.
 
@@ -1109,7 +1080,8 @@ def _locate_uncertain_code_references(program_data, address, is_binary_file, blo
             address0 = addressN
             addressN += entry.num_bytes
             if addressN >= address:
-                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).items():
+                reduced_matches = { v[0]: v for v in program_data.dis_get_match_addresses_func(entry) }.values()
+                for (match_address, opcode_idx, flags) in reduced_matches:
                     do_match = False
                     if is_binary_file:
                         do_match = flags & (MAF_ABSOLUTE_ADDRESS | MAF_CONSTANT_VALUE)
@@ -1477,7 +1449,8 @@ def _process_address_as_code(program_data, address, pending_symbol_addresses, wo
             if type_id == disassembly_data.SLD_INSTRUCTION:
                 entry_address = entry.pc - program_data.dis_constant_pc_offset
                 xxx = entry.pc
-                for match_address, (opcode_idx, flags) in program_data.dis_get_match_addresses_func(entry).items():
+                reduced_matches = { v[0]: v for v in program_data.dis_get_match_addresses_func(entry) }.values()
+                for (match_address, opcode_idx, flags) in reduced_matches:
                     if flags & MAF_CODE:
                         disassembly_offsets.add(match_address)
                         insert_branch_address(program_data, match_address, entry_address, pending_symbol_addresses)
@@ -2157,7 +2130,7 @@ def get_string_at_address(program_data, block, address):
     data_idx = address - loaderlib.get_segment_address(program_data.loader_segments, block.segment_id)
     data = loaderlib.get_segment_data(program_data.loader_segments, block.segment_id)
     string_end_idx = data_idx
-    end_char = 0
+    end_char = 0 # type: Union[int, str]
     if type(data[0]) is str:
         end_char = '\0'
     while data[string_end_idx] != end_char and string_end_idx < len(data):
@@ -2292,9 +2265,27 @@ class DisassemblyApi(object):
         # type: (int) -> Union[int, None]
         return api_get_address_for_line_number(self._program_data, line_number)
 
-    def get_referenced_symbol_addresses_for_line_number(self, line_number):
-        # type: (int) -> List[int]
-        return api_get_referenced_symbol_addresses_for_line_number(self._program_data, line_number)
+    def get_referenced_symbol_addresses_for_line_number(self, line_number: int) -> List[Tuple[int, int]]:
+        with line_count_rlock:
+            result = get_code_block_info_for_line_number(self._program_data, line_number)
+            if result is not None:
+                discard_address, match = result
+                return [
+			        (operand_idx, address)
+			        for (address, operand_idx, flags) in self._program_data.dis_get_match_addresses_func(match)
+			        if address in self._program_data.symbols_by_address
+		        ]
+
+            block, block_idx = lookup_block_by_line_count(self._program_data, line_number)
+            data_type = disassembly_data.get_block_data_type(block)
+            if data_type == disassembly_data.DATA_TYPE_DATA32:
+                address = get_address_for_line_number(self._program_data, line_number)
+                data = loaderlib.get_segment_data(self._program_data.loader_segments, block.segment_id)
+                value = self._program_data.loader_data_types.uint32_value(data, block.segment_offset + (address - block.address))
+                if value in self._program_data.symbols_by_address:
+                    return [ (0, value) ]
+
+            return []
 
     def get_file_line_count(self):
         # type: () -> int
@@ -2447,7 +2438,7 @@ class DisassemblyApi(object):
     ## Project loading and saving.
 
     def load_project_file_finalise(self, f):
-        # type: (io.IOBase) -> None
+        # type: (io.RawIOBase) -> None
         segments = self._program_data.loader_segments
         for i in range(len(segments)):
             loaderlib.cache_segment_data(f, segments, i)

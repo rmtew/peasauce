@@ -4,8 +4,9 @@
     Licensed using the MIT license.
 """
 
-import os
+import io
 import logging
+import os
 import struct
 from typing import Any, IO, List
 
@@ -107,8 +108,7 @@ def is_segment_type_data(segments, segment_id):
 def is_segment_type_bss(segments, segment_id):
     return segments[segment_id][SI_TYPE] == SEGMENT_TYPE_BSS
 
-def cache_segment_data(input_file, segments, segment_id, base_file_offset=0):
-    # type: (IO[bytes], List[Any], int, int) -> None
+def cache_segment_data(input_file: io.RawIOBase, segments: List[Any], segment_id: int, base_file_offset: int=0) -> None:
     """
     base_file_offset: when the input file is located within a containing file.
     """

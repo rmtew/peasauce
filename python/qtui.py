@@ -274,8 +274,9 @@ class DisassemblyOperandDelegate(QtWidgets.QStyledItemDelegate):
             text = options.text
             if options.state & QtWidgets.QStyle.State_Selected:
                 bits = text.split(", ")
+                selected_operand_index = self.window.get_selected_operand()
                 for i, operand_text in enumerate(bits):
-                    if i == self.window.last_selected_operand:
+                    if i == selected_operand_index:
                         bits[i] = "<span style='background-color: #a6dafc; color: black;'>&nbsp;&nbsp;&nbsp;"+ operand_text +"&nbsp;&nbsp;&nbsp;</span>"
                     else:
                         bits[i] = "<span>"+ operand_text +"</span>"
@@ -572,7 +573,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # State related to having something loaded.
         self.view_address_stack = []
-        self.last_selected_operand = None
 
     def closeEvent(self, event):
         """ Intercept the window close event and anything which needs to happen first. """
@@ -929,13 +929,14 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Error", errmsg)
 
     def set_selected_operand(self, operand_index):
-        line_index = self.editor_state.get_line_number(self.editor_client)
-        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
-        if operand_index >= 0 and operand_index < operand_count:
-            self.last_selected_operand = operand_index
+        line_index = self.editor_state.set_selected_operand(self.editor_client, operand_index)
+        if line_index is not None:
             self.list_model._data_changed(0, line_index, 5, line_index)
             return True
         return False
+
+    def get_selected_operand(self):
+        return self.editor_state.get_selected_operand(self.editor_client)
 
     def interaction_select_operand_1(self):
         self.set_selected_operand(0)
@@ -947,23 +948,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_selected_operand(2)
 
     def interaction_select_operand_previous(self):
-        line_index = self.editor_state.get_line_number(self.editor_client)
-        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
-        if operand_count > 0:
-            if self.last_selected_operand is None:
-                self.last_selected_operand = 0
-            else:
-                self.last_selected_operand = (self.last_selected_operand - 1) % operand_count
+        line_index = self.editor_state.select_next_operand(self.editor_client)
+        if line_index is not None:
             self.list_model._data_changed(0, line_index, 5, line_index)
 
     def interaction_select_operand_next(self):
-        line_index = self.editor_state.get_line_number(self.editor_client)
-        operand_count = self.editor_state.get_operand_count(self.editor_client, line_index)
-        if operand_count > 0:
-            if self.last_selected_operand is None:
-                self.last_selected_operand = 0
-            else:
-                self.last_selected_operand = (self.last_selected_operand + 1) % operand_count
+        line_index = self.editor_state.select_previous_operand(self.editor_client)
+        if line_index is not None:
             self.list_model._data_changed(0, line_index, 5, line_index)
 
     def interaction_show_row_contextmenu(self):

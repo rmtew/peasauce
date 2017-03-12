@@ -324,7 +324,7 @@ class ArchInterface(object):
     """ Function: Identify if the given instruction alters the program counter. """
     function_is_final_instruction = _unimplemented_function
     """ Function: . """
-    function_get_match_addresses = _unimplemented_function
+    def function_get_match_addresses(self, match: Match) -> List[Tuple[int, int, int]]: _unimplemented_function()
     """ Function: . """
     function_get_instruction_string = _unimplemented_function
     """ Function: Generate the text representation of the operand and it's values. """

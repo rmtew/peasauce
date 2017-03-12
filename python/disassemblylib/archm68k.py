@@ -32,8 +32,9 @@ import struct
 
 from . import constants
 # typing does not understand __all__ if it is dynamically created, apparently.
-from .util import ArchInterface, _b2n, _n2b, IFX_BRANCH, IFX_ENDSEQ, EAMI_FORMAT, EAMI_LABEL, EAMI_MATCH_FIELDS, EAMI_DATA_FIELDS, EAMI_DESCRIPTION, II_MASK, II_NAME, MAF_ABSOLUTE_ADDRESS, MAF_CERTAIN, MAF_UNCERTAIN, MAF_CONSTANT_VALUE, MAF_CODE, signed_hex_string, get_masked_value_for_variable
+from .util import ArchInterface, _b2n, _n2b, IFX_BRANCH, IFX_ENDSEQ, EAMI_FORMAT, EAMI_LABEL, EAMI_MATCH_FIELDS, EAMI_DATA_FIELDS, EAMI_DESCRIPTION, II_MASK, II_NAME, MAF_ABSOLUTE_ADDRESS, MAF_CERTAIN, MAF_UNCERTAIN, MAF_CONSTANT_VALUE, MAF_CODE, signed_hex_string, get_masked_value_for_variable, Match
 
+from typing import List, Tuple
 
 logger = logging.getLogger("disassembler-m68k")
 
@@ -102,6 +103,7 @@ class ArchM68k(ArchInterface):
     jump_address_opcode_types = set(["PCid16","PCiId8","AbsL","AbsW"])
 
     def function_get_match_addresses(self, match):
+        # type: (Match) -> List[Tuple[int, int, int]]
         # Is it an instruction that exits (RTS, RTR)?
         # Is it an instruction that conditionally branches (Bcc, Dbcc)?
         # Is it an instruction that branches and returns (JSR, BSR)?
@@ -110,6 +112,7 @@ class ArchM68k(ArchInterface):
         # Given a branch/jump address, should it be queued?
         # Given a branch/jump address, should it be done next?
         address = None
+        operand_idx = None
         flags = 0
         instruction_key = match.specification.key
         if instruction_key in ("JSR", "JMP"):
@@ -117,14 +120,17 @@ class ArchM68k(ArchInterface):
             if operand.key in self.jump_address_opcode_types:
                 address = self.function_get_operand_value(match, operand.key, operand.vars)
                 flags = MAF_ABSOLUTE_ADDRESS if operand.key.startswith("Abs") else MAF_CERTAIN
+                operand_idx = 0
         elif instruction_key in ("BSR", "BRA", "Bcc"): # DISPLACEMENT
-            address = match.pc + match.opcodes[0].vars["xxx"]
+            operand_idx = 0
+            address = match.pc + match.opcodes[0].vars["xxx"] # type: ignore
         elif instruction_key == "DBcc":
-            address = match.pc + match.opcodes[1].vars["xxx"]
+            operand_idx = 1
+            address = match.pc + match.opcodes[1].vars["xxx"] # type: ignore
 
-        ret = {}
+        ret = []
         if address is not None:
-            ret[address] = (None, flags | MAF_CODE)
+            ret.append((address, operand_idx, flags | MAF_CODE))
             return ret
 
         # Locate any general addressing modes which infer labels.
@@ -133,26 +139,27 @@ class ArchM68k(ArchInterface):
             if opcode.key == "PCid16":
                 address = match.pc + self._signed_value(opcode.vars["D16"], 16)
                 if address not in ret:
-                    ret[address] = (i, MAF_CERTAIN)
+                    ret.append((address, i, MAF_CERTAIN))
             elif opcode.key == "PCiId8":
                 address = match.pc + self._signed_value(opcode.vars["D8"], 16)
                 if address not in ret:
-                    ret[address] = (i, MAF_CERTAIN)
+                    ret.append((address, i, MAF_CERTAIN))
             elif opcode.key in ("AbsL", "AbsW"):
                 address = opcode.vars["xxx"]
                 if address not in ret:
-                    ret[address] = (i, MAF_ABSOLUTE_ADDRESS)
+                    ret.append((address, i, MAF_ABSOLUTE_ADDRESS))
             elif opcode.key == "Imm" and i == 0:
                 # move.w #xxx, SR (no) / move.l #xxx, a0 (yes) / move.l #xxx, AR (yes)
                 # Is the destination an address register?
                 # Imm, AbsL; Imm, DR; Imm, AR
                 address = opcode.vars["xxx"]
-                opcode_idx, flags = ret.get(address, (i, 0))
+                existing_matches = [ t for t in ret if t[0] == address ]
+                address, opcode_idx, flags = existing_matches[0] if len(existing_matches) else (address, i, 0)
                 if flags & MAF_CODE != MAF_CODE:
-                    entry = (opcode_idx, flags | MAF_UNCERTAIN | MAF_CONSTANT_VALUE)
+                    entry = (address, opcode_idx, flags | MAF_UNCERTAIN | MAF_CONSTANT_VALUE)
                 else:
-                    entry = (opcode_idx, flags | MAF_CONSTANT_VALUE)
-                ret[address] = entry
+                    entry = (address, opcode_idx, flags | MAF_CONSTANT_VALUE)
+                ret.append(entry)
             elif opcode.key in ("PCiIdb", "PCiPost", "PrePCi"):
                 logger.error("Unhandled opcode EA mode (680x0?): %s", opcode.key)
 

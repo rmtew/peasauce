@@ -9,14 +9,13 @@ Unit testing.
 """
 
 import logging
-import new
 import os
 import random
 import sys
 import types
 import unittest
 
-from PySide import QtCore, QtGui
+from Qt import QtCore, QtGui, QtWidgets
 
 import disassembly
 import disassembly_data
@@ -157,12 +156,12 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
                 self._addition_rows = addition_rows
                 self._removal_rows = removal_rows
 
-            _sort_order = QtCore.Qt.SortOrder.AscendingOrder
+            _sort_order = QtCore.Qt.AscendingOrder
             _sort_column1 = 0
             _sort_column2 = 0
 
             def _sort_list(self, _row_data):
-                qtui.CustomItemModel._sort_list.im_func(self, _row_data)
+                qtui.CustomItemModel._sort_list(self, _row_data)
 
         class DisassemblyModule(object):
             pass
@@ -191,7 +190,7 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         self.editor_state = editor_state.EditorState()
         self.editor_state.disassembly_state = self.disassembly_state
         self.editor_state.register_client(self.editor_client)
-        self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = self.fake_disassembly_module
+        self.editor_state.get_uncertain_references_by_address.__globals__["disassembly"] = self.fake_disassembly_module
 
         self.uncertain_code_references_model = Model()
         self.uncertain_data_references_model = Model()
@@ -201,13 +200,13 @@ class QTUI_UncertainReferenceModification_TestCase(unittest.TestCase):
         self.data_rows = [ [3], [7], [8], [11] ]
         self.uncertain_data_references_model._row_data = self.data_rows[:]
 
-        self.on_uncertain_reference_modification = qtui.MainWindow.on_uncertain_reference_modification.im_func
-        self._remove_address_range_from_model = new.instancemethod(qtui.MainWindow._remove_address_range_from_model.im_func, self, self.__class__)
-        self._add_rows_to_model = new.instancemethod(qtui.MainWindow._add_rows_to_model.im_func, self, self.__class__)
-        # self._sort_list = new.instancemethod(qtui.MainWindow._sort_list.im_func, self, self.__class__)
+        self.on_uncertain_reference_modification = qtui.MainWindow.on_uncertain_reference_modification
+        self._remove_address_range_from_model = types.MethodType(qtui.MainWindow._remove_address_range_from_model, self)
+        self._add_rows_to_model = types.MethodType(qtui.MainWindow._add_rows_to_model, self)
+        # self._sort_list = new.instancemethod(qtui.MainWindow._sort_list.__func__, self, self.__class__)
 
     def tearDown(self):
-        self.editor_state.get_uncertain_references_by_address.func_globals["disassembly"] = disassembly
+        self.editor_state.get_uncertain_references_by_address.__globals__["disassembly"] = disassembly
         self.editor_state = None
         self.editor_client = None
 

@@ -84,12 +84,11 @@ class ToolAPI(object):
         editor_state_ob.register_client(self.editor_client)
         self.editor_state = editor_state_ob
 
-    def on_app_exit(self):
-        # type: () -> None
-        self.editor_state.on_app_exit()
+    def on_app_exit(self) -> None:
+        pass
+        #self.editor_state.on_app_exit()
 
-    def reset_state(self):
-        # type: () -> None
+    def reset_state(self) -> None:
         """ Called by the editor client. """
         if self.editor_state is None or self.editor_state.in_initial_state(self.editor_client):
             return
@@ -97,13 +96,11 @@ class ToolAPI(object):
         self.file_path = None
         self.input_file_path = None
 
-    def get_file_path(self):
-        # type: () -> str
+    def get_file_path(self) -> str:
         """ Called by the editor client. """
         return self.file_path
 
-    def get_input_file_path(self):
-        # type: () -> str
+    def get_input_file_path(self) -> str:
         """ Called by the editor client. """
         return self.input_file_path
 

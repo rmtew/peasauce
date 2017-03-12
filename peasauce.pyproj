@@ -98,7 +98,6 @@
   </ItemGroup>
   <ItemGroup>
     <InterpreterReference Include="{0c6db9e6-4c5c-43c4-811b-316ad255e378}\3.5" />
-    <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />
   </ItemGroup>
   <Import Project="$(PtvsTargetsFile)" Condition="Exists($(PtvsTargetsFile))" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" Condition="!Exists($(PtvsTargetsFile))" />
